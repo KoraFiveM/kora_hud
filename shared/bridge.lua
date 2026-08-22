@@ -26,3 +26,5 @@
 ---@class QBHudBridge
 ---@field getSnapshot fun(): QBHudBridgeSnapshot Synchronous and cheap -- called every Config.poll.bridgeInterval by client/hud.lua.
 ---@field onChange (fun(handler: fun(snapshot: QBHudBridgeSnapshot)): nil) | nil Optional. A real adapter MAY call `handler` proactively (e.g. on the framework's own job-change event) instead of relying purely on polling. The stub does not implement this -- its absence means client/hud.lua falls back to polling getSnapshot on Config.poll.bridgeInterval.
+---@field isLoggedIn (fun(): boolean) | nil Optional. Whether the HUD should currently be visible (a player is logged into a character). Absence means "always visible" -- a framework with no login/character-select concept (e.g. the stub) has nothing to gate on, so client/hud.lua treats a missing isLoggedIn as always-true.
+---@field onLoginChange (fun(handler: fun(loggedIn: boolean)): nil) | nil Optional. A real adapter calls `handler` when login state changes (framework login/logout events) so the HUD can show/hide immediately instead of waiting on a poll. Only meaningful alongside isLoggedIn.

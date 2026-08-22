@@ -16,6 +16,31 @@
 
 HudBridge = HudBridge or {}
 
+-- The mirror is only populated once a character is actually selected and
+-- loaded in -- nil/empty on a fresh connect and again after logout (character
+-- select). getPlayerData() ~= nil is therefore a cheap, always-correct proxy
+-- for "is a character currently loaded", with the login/unload events below
+-- pushing the transition immediately rather than waiting on the next poll.
+local loggedIn = exports.qbcore:getPlayerData() ~= nil
+
+---@return boolean
+function HudBridge.isLoggedIn()
+    return loggedIn
+end
+
+---@param handler fun(loggedIn: boolean)
+function HudBridge.onLoginChange(handler)
+    RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
+        loggedIn = true
+        handler(true)
+    end)
+
+    RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
+        loggedIn = false
+        handler(false)
+    end)
+end
+
 -- Seatbelt is still a placeholder: qbcore's default metadata has no seatbelt
 -- state (it's a vehicle-script mechanic), so this adapter owns the same keybind
 -- the stub did until a seatbelt system is wired into a vehicle resource.

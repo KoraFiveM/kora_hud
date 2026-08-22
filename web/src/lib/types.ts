@@ -28,6 +28,12 @@ export interface HudConfigPayload {
 // apply HSL-triplet strings. See qblib's modules/theme/docs.md.
 export type HudThemePayload = Record<string, string>
 
+// action: "qbhud:visibility" -- sent once on resource start (reflecting
+// whatever the bridge adapter's initial login state is) and again on every
+// login/logout transition. Absent an adapter with a login concept, this is
+// always true. See shared/bridge.lua's HudBridge.isLoggedIn/onLoginChange.
+export type HudVisibilityPayload = boolean
+
 export interface HudJob {
     name: string
     label: string

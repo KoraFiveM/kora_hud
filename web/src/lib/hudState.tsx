@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react"
 
-import type { HudConfigPayload, HudUpdatePayload } from "./types"
+import type { HudConfigPayload, HudUpdatePayload, HudVisibilityPayload } from "./types"
 import { useNuiEvent } from "./useNuiEvent"
 
 const DEFAULT_CONFIG: HudConfigPayload = {
@@ -33,19 +33,30 @@ const DEFAULT_UPDATE: HudUpdatePayload = {
 interface HudState {
     config: HudConfigPayload
     update: HudUpdatePayload
+    visible: boolean
 }
 
-const HudStateContext = createContext<HudState>({ config: DEFAULT_CONFIG, update: DEFAULT_UPDATE })
+// Hidden until Lua says otherwise: client/hud.lua sends "qbhud:visibility"
+// synchronously on resource start regardless of adapter (true immediately for
+// an adapter with no login concept, e.g. the stub), so this default only
+// matters for the brief window before that first message arrives -- and
+// hidden is the correct assumption for that window, not just a fallback,
+// since "only show once logged in" must hold even during it.
+const DEFAULT_VISIBLE = false
+
+const HudStateContext = createContext<HudState>({ config: DEFAULT_CONFIG, update: DEFAULT_UPDATE, visible: DEFAULT_VISIBLE })
 
 /**
- * Single subscription point for both "qbhud:config" and "qbhud:update" --
- * every HUD element reads its own slice from this context instead of each
- * independently subscribing to the wire messages, so client/hud.lua's one
- * consolidated payload per tick has exactly one consumer-side entry point.
+ * Single subscription point for "qbhud:config", "qbhud:update", and
+ * "qbhud:visibility" -- every HUD element reads its own slice from this
+ * context instead of each independently subscribing to the wire messages, so
+ * client/hud.lua's one consolidated payload per tick has exactly one
+ * consumer-side entry point.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
     const [update, setUpdate] = useState<HudUpdatePayload>(DEFAULT_UPDATE)
+    const [visible, setVisible] = useState<boolean>(DEFAULT_VISIBLE)
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (payload) setConfig(payload)
@@ -55,7 +66,11 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         if (payload) setUpdate(payload)
     })
 
-    return <HudStateContext.Provider value={{ config, update }}>{children}</HudStateContext.Provider>
+    useNuiEvent<HudVisibilityPayload>("qbhud:visibility", (payload) => {
+        if (typeof payload === "boolean") setVisible(payload)
+    })
+
+    return <HudStateContext.Provider value={{ config, update, visible }}>{children}</HudStateContext.Provider>
 }
 
 export function useHudState() {

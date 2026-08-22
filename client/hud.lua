@@ -6,6 +6,16 @@
 -- (web/src/lib/types.ts).
 local latestBridgeSnapshot = HudBridge.getSnapshot()
 
+-- An adapter with no login/character-select concept (the stub) has nothing
+-- to gate on, so a missing isLoggedIn means "always visible" -- unchanged
+-- behaviour for that adapter.
+local function currentlyLoggedIn()
+    if HudBridge.isLoggedIn then return HudBridge.isLoggedIn() end
+    return true
+end
+
+local visible = currentlyLoggedIn()
+
 local function buildVehiclePayload()
     local snapshot = Vehicle.getSnapshot()
     if not snapshot then return nil end
@@ -19,6 +29,8 @@ local function buildVehiclePayload()
 end
 
 local function pushUpdate()
+    if not visible then return end
+
     QB.nui.send("qbhud:update", {
         health = QB.cache.health(),
         armour = QB.cache.armour(),
@@ -45,9 +57,27 @@ QB.cache.onChange("armour", pushUpdate)
 QB.cache.onChange("vehicle", pushUpdate)
 Voice.onChange(pushUpdate)
 
+-- Show/hide immediately on a login transition rather than waiting for the
+-- next poll tick -- e.g. qbcore's adapter pushes this off QBCore:Client:On-
+-- PlayerLoaded/OnPlayerUnload. Adapters with no login concept (the stub)
+-- don't implement onLoginChange, so this is a no-op for them and the HUD
+-- stays visible per currentlyLoggedIn()'s default above.
+if HudBridge.onLoginChange then
+    HudBridge.onLoginChange(function(loggedIn)
+        visible = loggedIn
+        QB.nui.send("qbhud:visibility", visible)
+
+        if visible then
+            latestBridgeSnapshot = HudBridge.getSnapshot()
+            pushUpdate()
+        end
+    end)
+end
+
 CreateThread(function()
     QB.nui.send("qbhud:config", { elements = Config.hud.elements })
     QB.nui.send("qbhud:theme", QB.theme.tokens())
+    QB.nui.send("qbhud:visibility", visible)
 
     while true do
         latestBridgeSnapshot = HudBridge.getSnapshot()
