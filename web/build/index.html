@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>qb-hud-nui</title>
+    <style>
+      /* Belt-and-braces: keep the page transparent/click-through even before
+         globals.css loads -- this overlays live gameplay in the CEF browser
+         and must never flash an opaque background. Same convention as
+         qblib's own web/index.html. */
+      html,
+      body {
+        background: transparent;
+        margin: 0;
+        padding: 0;
+        pointer-events: none;
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-DHdVE6KC.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BL4f-dPY.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+-- Documents the adapter contract every client/bridge/<adapter>.lua must
+-- satisfy. This file defines no functions of its own -- it exists so the
+-- contract is written down in exactly one place, referenced by every adapter
+-- and by client/hud.lua, rather than only living implicitly in whichever
+-- adapter happens to be loaded.
+--
+-- Swapping the stub (client/bridge/stub.lua) for a real QBCore/ESX/ox_core
+-- adapter later means: write a new client/bridge/<name>.lua that assigns the
+-- same HudBridge.getSnapshot (and optionally .onChange), change
+-- Config.bridge.adapter, and change fxmanifest.lua's client_scripts to load
+-- that file instead of the stub. client/hud.lua calls only
+-- HudBridge.getSnapshot()/HudBridge.onChange -- it never reaches past this
+-- contract into framework internals, so none of its render/dispatch logic
+-- needs to change when the adapter does.
+
+---@class QBHudBridgeSnapshot
+---@field job { name: string, label: string, grade: integer, gradeLabel: string, onDuty: boolean }
+---@field gang { name: string, label: string, grade: integer, gradeLabel: string } | nil
+---@field cash number
+---@field bank number
+---@field hunger number Range 0-100.
+---@field thirst number Range 0-100.
+---@field stress number Range 0-100.
+---@field seatbelt boolean Stock FiveM has no seatbelt native/state at all -- this is a placeholder the stub owns via its own keybind until a real framework's seatbelt system is wired in. See client/vehicle.lua.
+
+---@class QBHudBridge
+---@field getSnapshot fun(): QBHudBridgeSnapshot Synchronous and cheap -- called every Config.poll.bridgeInterval by client/hud.lua.
+---@field onChange (fun(handler: fun(snapshot: QBHudBridgeSnapshot)): nil) | nil Optional. A real adapter MAY call `handler` proactively (e.g. on the framework's own job-change event) instead of relying purely on polling. The stub does not implement this -- its absence means client/hud.lua falls back to polling getSnapshot on Config.poll.bridgeInterval.

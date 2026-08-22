@@ -1,0 +1,64 @@
+-- Stub QBHudBridge implementation (see shared/bridge.lua for the contract).
+-- Returns normalized mock data since no framework (QBCore/ESX/ox_core) is
+-- installed to source real job/gang/money/needs data from yet. Swapping this
+-- for a real adapter later means writing a new client/bridge/<name>.lua that
+-- assigns the same HudBridge.getSnapshot -- client/hud.lua never changes.
+HudBridge = HudBridge or {}
+
+local state = {
+    job = { name = "unemployed", label = "Civilian", grade = 0, gradeLabel = "Civilian", onDuty = false },
+    gang = nil,
+    cash = 500,
+    bank = 5000,
+    hunger = 100,
+    thirst = 100,
+    stress = 0,
+    seatbelt = false,
+}
+
+-- Slowly drains hunger/thirst so the HUD visibly changes during manual
+-- testing -- purely a dev/demo convenience, not meant to be realistic.
+CreateThread(function()
+    while true do
+        Wait(60000)
+        state.hunger = math.max(0, state.hunger - 1)
+        state.thirst = math.max(0, state.thirst - 1.5)
+    end
+end)
+
+-- Stock FiveM has no seatbelt native/state at all -- that's a framework-added
+-- mechanic normally toggled by the framework's own vehicle script. Until a
+-- real adapter wires up that framework's actual seatbelt state, the stub
+-- owns a placeholder toggled by its own keybind.
+RegisterCommand("hud_toggleseatbelt", function()
+    state.seatbelt = not state.seatbelt
+end, false)
+RegisterKeyMapping("hud_toggleseatbelt", "Toggle seatbelt (qb-hud stub bridge)", "keyboard", "B")
+
+-- Manual-test commands, mirroring qblib-playground's command-driven style --
+-- dev convenience only.
+RegisterCommand("hudtest_cash", function(_, args)
+    state.cash = tonumber(args[1]) or state.cash
+end, false)
+
+RegisterCommand("hudtest_bank", function(_, args)
+    state.bank = tonumber(args[1]) or state.bank
+end, false)
+
+RegisterCommand("hudtest_stress", function(_, args)
+    state.stress = math.max(0, math.min(100, tonumber(args[1]) or state.stress))
+end, false)
+
+---@return QBHudBridgeSnapshot
+function HudBridge.getSnapshot()
+    return {
+        job = state.job,
+        gang = state.gang,
+        cash = state.cash,
+        bank = state.bank,
+        hunger = state.hunger,
+        thirst = state.thirst,
+        stress = state.stress,
+        seatbelt = state.seatbelt,
+    }
+end
