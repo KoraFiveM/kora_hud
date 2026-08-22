@@ -5,6 +5,14 @@
 -- assigns the same HudBridge.getSnapshot -- client/hud.lua never changes.
 HudBridge = HudBridge or {}
 
+-- Status effects enrich the standalone bridge when qblib provides them, but
+-- they must never make the HUD unavailable during a staggered qblib update.
+local function activeStatus()
+    local ok, status = pcall(function() return QB.status.getActive() end)
+    if ok and type(status) == 'table' then return status end
+    return {}
+end
+
 local state = {
     job = { name = "unemployed", label = "Civilian", grade = 0, gradeLabel = "Civilian", onDuty = false },
     gang = nil,
@@ -60,5 +68,6 @@ function HudBridge.getSnapshot()
         thirst = state.thirst,
         stress = state.stress,
         seatbelt = state.seatbelt,
+        status = activeStatus(),
     }
 end

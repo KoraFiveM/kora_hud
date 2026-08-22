@@ -24,6 +24,17 @@ local loggedIn = false
 local loginHandlers = {}
 local loginGeneration = 0
 
+-- Status effects are an optional qblib enhancement to the HUD, never a
+-- prerequisite for the base player HUD.  In particular, this lets qbhud
+-- start cleanly during a rolling update where qbhud has been updated before a
+-- server has restarted qblib with the status exports.  A missing export must
+-- not prevent the NUI-ready callback below in client/hud.lua from registering.
+local function activeStatus()
+    local ok, status = pcall(function() return QB.status.getActive() end)
+    if ok and type(status) == 'table' then return status end
+    return {}
+end
+
 local function notifyLoginChange(value)
     if loggedIn == value then return end
     loggedIn = value
@@ -117,6 +128,7 @@ local function snapshotFrom(data)
         thirst = meta.thirst or 100,
         stress = meta.stress or 0,
         seatbelt = seatbelt,
+        status = activeStatus(),
     }
 end
 

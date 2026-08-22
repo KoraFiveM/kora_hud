@@ -83,4 +83,12 @@ harness.test('a qbhud restart reconciles an already-present local login state', 
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'an already logged-in LocalPlayer should restore the HUD bridge')
 end)
 
+harness.test('a missing optional qblib status export cannot stop the core HUD bridge', function()
+    _G.QB = nil
+    local bridge = loadBridge(false, { money = {}, metadata = {} })
+    local snapshot = bridge.bridge.getSnapshot()
+    harness.assertEqual(type(snapshot.status), 'table', 'status should degrade to an empty array')
+    harness.assertEqual(#snapshot.status, 0, 'a missing status provider must not block HUD startup')
+end)
+
 harness.report('qbcore_bridge')
