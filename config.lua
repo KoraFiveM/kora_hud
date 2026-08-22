@@ -20,7 +20,7 @@ Config.bridge = {
     -- must satisfy). Swapping in a real framework later means writing a new
     -- client/bridge/<adapter>.lua and changing this value plus the
     -- fxmanifest.lua script list; client/hud.lua itself never changes.
-    adapter = "stub",
+    adapter = "qbcore",
 }
 
 Config.voice = {

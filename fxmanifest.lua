@@ -8,6 +8,9 @@ version '0.1.0'
 description 'Configurable HUD built on qblib (cache, theme, nui)'
 
 dependency 'qblib'
+-- The HUD now sources real player data from qbcore via client/bridge/qbcore.lua
+-- (Config.bridge.adapter = 'qbcore'). Revert to the stub by flipping both.
+dependency 'qbcore'
 
 -- Required to reach QB.cache/QB.theme/QB.nui -- see qblib's own AGENTS.md for
 -- why this is how a consumer resource pulls in the QB proxy (init.lua).
@@ -22,7 +25,7 @@ shared_scripts {
 -- HudBridge -- listed explicitly rather than globbed, same reasoning qblib's
 -- own fxmanifest.lua uses for local/**.
 client_scripts {
-    'client/bridge/stub.lua',
+    'client/bridge/qbcore.lua',
     'client/voice.lua',
     'client/vehicle.lua',
     'client/hud.lua'
