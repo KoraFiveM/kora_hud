@@ -16,12 +16,52 @@
 
 HudBridge = HudBridge or {}
 
--- The mirror is only populated once a character is actually selected and
--- loaded in -- nil/empty on a fresh connect and again after logout (character
--- select). getPlayerData() ~= nil is therefore a cheap, always-correct proxy
--- for "is a character currently loaded", with the login/unload events below
--- pushing the transition immediately rather than waiting on the next poll.
-local loggedIn = exports.qbcore:getPlayerData() ~= nil
+-- Character-session state is server-owned.  Do not use the legacy load/unload
+-- events here: they are compatibility signals, not the HUD's authority.  The
+-- state bag persists across qbhud restarts and is replicated to LocalPlayer.
+local LOGIN_STATE = 'qbcore:loggedIn'
+local loggedIn = false
+local loginHandlers = {}
+local loginGeneration = 0
+
+local function notifyLoginChange(value)
+    if loggedIn == value then return end
+    loggedIn = value
+    for _, handler in ipairs(loginHandlers) do handler(value) end
+end
+
+local function reconcileLogin(value)
+    loginGeneration = loginGeneration + 1
+    local generation = loginGeneration
+
+    if value ~= true then
+        notifyLoginChange(false)
+        return
+    end
+
+    -- State bags and net events are independently replicated.  qbcore writes
+    -- this key after sending its snapshot, but wait defensively until the
+    -- mirror is actually visible before letting the HUD render player data.
+    CreateThread(function()
+        while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
+            and exports.qbcore:getPlayerData() == nil do
+            Wait(0)
+        end
+        if generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
+            and exports.qbcore:getPlayerData() ~= nil then
+            notifyLoginChange(true)
+        end
+    end)
+end
+
+local localPlayerBag = ('player:%s'):format(GetPlayerServerId(PlayerId()))
+AddStateBagChangeHandler(LOGIN_STATE, localPlayerBag, function(_, _, value)
+    reconcileLogin(value == true)
+end)
+
+-- Reconcile immediately for `ensure qbhud` after a character is already
+-- loaded; a bag-change handler only observes future transitions.
+reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
 
 ---@return boolean
 function HudBridge.isLoggedIn()
@@ -30,15 +70,7 @@ end
 
 ---@param handler fun(loggedIn: boolean)
 function HudBridge.onLoginChange(handler)
-    RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
-        loggedIn = true
-        handler(true)
-    end)
-
-    RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
-        loggedIn = false
-        handler(false)
-    end)
+    loginHandlers[#loginHandlers + 1] = handler
 end
 
 -- Seatbelt is still a placeholder: qbcore's default metadata has no seatbelt
