@@ -56,8 +56,21 @@ export interface HudVehicleInfo {
     seatbelt: boolean
 }
 
+// One entry per active qblib QB.status effect (e.g. "bleeding", "limping",
+// "high_weed") -- see qblib's modules/status. `severity` is whatever the
+// effect definition's severityLevels scale means for that specific effect;
+// the HUD doesn't interpret it beyond passing it to a per-name icon/style
+// lookup the effect's own consumer resource owns.
+export interface HudStatusEffect {
+    name: string
+    severity: number | null
+}
+
 // action: "qbhud:update" -- sent on every cache/bridge refresh (see
-// client/hud.lua's pushUpdate). `vehicle` is undefined/null while on foot.
+// client/hud.lua's pushUpdate), on Config.poll.bridgeInterval regardless of
+// vehicle state. Vehicle telemetry is NOT included here -- see
+// HudVehiclePayload below -- so this payload doesn't have to go out at
+// vehicle telemetry's much faster cadence too.
 export interface HudUpdatePayload {
     health: number
     armour: number
@@ -70,5 +83,10 @@ export interface HudUpdatePayload {
     hunger: number
     thirst: number
     stress: number
-    vehicle: HudVehicleInfo | null
+    status: HudStatusEffect[]
 }
+
+// action: "qbhud:vehicle" -- sent independently of "qbhud:update" (see
+// client/hud.lua's pushVehicleUpdate), on the faster Config.poll.vehicleInterval
+// cadence while driving. `null` while on foot.
+export type HudVehiclePayload = HudVehicleInfo | null

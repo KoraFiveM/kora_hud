@@ -29,6 +29,6 @@ Config.voice = {
 }
 
 Config.poll = {
-    vehicleInterval = 100,  -- ms between vehicle HUD refreshes (speed/fuel/engine) while in a vehicle
-    bridgeInterval  = 2000, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
+    vehicleInterval = 20,  -- ms between vehicle HUD refreshes (speed/fuel/engine) while in a vehicle
+    bridgeInterval  = 500, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
 }

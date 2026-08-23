@@ -15,6 +15,11 @@ export function HudThemeSynchronizer() {
 
         const root = document.documentElement.style
         for (const [key, value] of Object.entries(tokens)) {
+            // A malformed theme payload could hand us a non-string value
+            // (e.g. a number or nested object from a bad adapter) --
+            // setProperty requires a string, so skip anything else rather
+            // than throwing or injecting unexpected CSS.
+            if (typeof value !== "string") continue
             root.setProperty(`--${key}`, value)
         }
     })

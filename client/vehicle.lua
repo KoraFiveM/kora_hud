@@ -9,15 +9,17 @@ Vehicle = Vehicle or {}
 local snapshot = false -- false when not in a vehicle, else { speed, fuel, engineOn }
 
 local function readSnapshot(vehicle)
-    -- GetVehicleFuelLevel isn't present on every FiveM build/patch; degrade
-    -- to nil (hidden in the NUI) rather than erroring the whole thread if
-    -- it's missing.
+    -- GetVehicleFuelLevel and IsVehicleEngineRunning aren't present on every
+    -- FiveM build/patch (or every server config -- some headless/CI runtimes
+    -- expose only a subset of natives); degrade to nil/false rather than
+    -- erroring the whole thread if either is missing.
     local fuelOk, fuel = pcall(GetVehicleFuelLevel, vehicle)
+    local engineOk, engineOn = pcall(IsVehicleEngineRunning, vehicle)
 
     return {
         speed = GetEntitySpeed(vehicle) * 3.6, -- m/s -> km/h
         fuel = fuelOk and fuel or nil,
-        engineOn = IsVehicleEngineRunning(vehicle) == true,
+        engineOn = engineOk and engineOn == true,
     }
 end
 

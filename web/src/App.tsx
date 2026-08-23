@@ -5,6 +5,7 @@ import { HungerThirst } from "@/components/hud/HungerThirst"
 import { JobGang } from "@/components/hud/JobGang"
 import { MicIndicator } from "@/components/hud/MicIndicator"
 import { Stamina } from "@/components/hud/Stamina"
+import { StatusEffects } from "@/components/hud/StatusEffects"
 import { Stress } from "@/components/hud/Stress"
 import { VehicleInfo } from "@/components/hud/VehicleInfo"
 import { HudStateProvider, useHudState } from "@/lib/hudState"
@@ -39,6 +40,9 @@ function HudContent() {
             </div>
             <div className="mt-2 flex justify-center">
                 <VehicleInfo />
+            </div>
+            <div className="pointer-events-none fixed right-4 top-4">
+                <StatusEffects />
             </div>
         </div>
     )

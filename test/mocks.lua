@@ -35,6 +35,11 @@ function M.install()
 
     _G.source = nil
 
+    -- Minimal qblib QB stand-in -- only what a bridge adapter touches
+    -- directly (client/bridge/stub.lua and client/bridge/qbcore.lua both call
+    -- QB.status.getActive() for the snapshot's `status` field).
+    _G.QB = { status = { getActive = function() return {} end } }
+
     function _G.RegisterNetEvent(name, cb)
         netHandlers[name] = netHandlers[name] or {}
         table.insert(netHandlers[name], cb)

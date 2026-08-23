@@ -20,9 +20,11 @@ HudBridge = HudBridge or {}
 -- events here: they are compatibility signals, not the HUD's authority.  The
 -- state bag persists across qbhud restarts and is replicated to LocalPlayer.
 local LOGIN_STATE = 'qbcore:loggedIn'
+local CASH_STATE = 'qbcore:money:cash'
 local loggedIn = false
 local loginHandlers = {}
 local loginGeneration = 0
+local dataHandlers = {}
 
 -- Status effects are an optional qblib enhancement to the HUD, never a
 -- prerequisite for the base player HUD.  In particular, this lets qbhud
@@ -53,10 +55,17 @@ local function reconcileLogin(value)
     -- State bags and net events are independently replicated.  qbcore writes
     -- this key after sending its snapshot, but wait defensively until the
     -- mirror is actually visible before letting the HUD render player data.
+    -- Capped at 200 frames rather than an unbounded Wait(0) spin, so a mirror
+    -- that never populates can't leave this thread running forever -- not
+    -- QB.loops.controlled, since this file must keep working even with QB
+    -- entirely absent (see the "missing optional qblib status export" test).
     CreateThread(function()
+        local attempts = 0
         while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
-            and exports.qbcore:getPlayerData() == nil do
+            and exports.qbcore:getPlayerData() == nil
+            and attempts < 200 do
             Wait(0)
+            attempts = attempts + 1
         end
         if generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
             and exports.qbcore:getPlayerData() ~= nil then
@@ -73,6 +82,11 @@ end)
 -- Reconcile immediately for `ensure qbhud` after a character is already
 -- loaded; a bag-change handler only observes future transitions.
 reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
+
+AddStateBagChangeHandler(CASH_STATE, localPlayerBag, function(_, _, value)
+    if type(value) ~= 'number' then return end
+    for _, handler in ipairs(dataHandlers) do handler(HudBridge.getSnapshot()) end
+end)
 
 ---@return boolean
 function HudBridge.isLoggedIn()
@@ -122,7 +136,7 @@ local function snapshotFrom(data)
     return {
         job = jobSnap,
         gang = gangSnap,
-        cash = money.cash or 0,
+        cash = tonumber(LocalPlayer.state[CASH_STATE]) or money.cash or 0,
         bank = money.bank or 0,
         hunger = meta.hunger or 100,
         thirst = meta.thirst or 100,
@@ -142,6 +156,7 @@ end
 -- uses this when present and falls back to polling getSnapshot otherwise.
 ---@param handler fun(snapshot: QBHudBridgeSnapshot)
 function HudBridge.onChange(handler)
+    dataHandlers[#dataHandlers + 1] = handler
     local function push()
         handler(HudBridge.getSnapshot())
     end
@@ -151,10 +166,14 @@ function HudBridge.onChange(handler)
         exports.qbcore:onPlayerDataChange({ root }, function() push() end)
     end
     -- Push once immediately so the HUD reflects current state without waiting
-    -- for the first change.
+    -- for the first change. Capped rather than an unbounded poll -- see the
+    -- reconcileLogin thread above for why this doesn't use QB.loops.controlled.
     CreateThread(function()
-        -- Wait until the mirror is populated (first snapshot has arrived).
-        while exports.qbcore:getPlayerData() == nil do Wait(100) end
+        local attempts = 0
+        while exports.qbcore:getPlayerData() == nil and attempts < 100 do
+            Wait(100)
+            attempts = attempts + 1
+        end
         push()
     end)
 end

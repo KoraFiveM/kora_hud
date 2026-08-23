@@ -43,7 +43,9 @@ local function loadBridge(initialState, initialData)
         setLoginState = function(value)
             LocalPlayer.state['qbcore:loggedIn'] = value
             for _, handler in ipairs(handlers) do
-                handler.callback('player:17', 'qbcore:loggedIn', value, nil, true)
+                if handler.key == 'qbcore:loggedIn' then
+                    handler.callback('player:17', 'qbcore:loggedIn', value, nil, true)
+                end
             end
         end,
         step = function()
@@ -60,7 +62,7 @@ harness.test('the bridge gates HUD login on the local replicated state bag and P
     bridge.bridge.onLoginChange(function(value) transitions[#transitions + 1] = value end)
 
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'HUD should start hidden before character login')
-    harness.assertEqual(#bridge.handlers, 1, 'the bridge should register one state-bag change handler')
+    harness.assertEqual(#bridge.handlers, 2, 'the bridge should register login and authoritative cash handlers')
     harness.assertEqual(bridge.handlers[1].key, 'qbcore:loggedIn', 'handler should watch qbcore login state')
     harness.assertEqual(bridge.handlers[1].bagName, 'player:17', 'handler should be scoped to LocalPlayer state')
 

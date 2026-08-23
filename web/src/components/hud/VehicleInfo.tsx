@@ -2,13 +2,15 @@ import { Fuel, Gauge, Power, PowerOff, ShieldAlert, ShieldCheck } from "lucide-r
 
 import { useHudState } from "@/lib/hudState"
 
-// Only rendered while update.vehicle is present (client/hud.lua sends null
-// on foot) and the vehicle element is enabled.
+// Only rendered while `vehicle` (from the separate "qbhud:vehicle" message,
+// sent faster than "qbhud:update" -- see client/hud.lua's pushVehicleUpdate)
+// is present -- client/hud.lua sends null on foot -- and the vehicle element
+// is enabled.
 export function VehicleInfo() {
-    const { config, update } = useHudState()
-    if (!config.elements.vehicle || !update.vehicle) return null
+    const { config, vehicle } = useHudState()
+    if (!config.elements.vehicle || !vehicle) return null
 
-    const { speed, fuel, engineOn, seatbelt } = update.vehicle
+    const { speed, fuel, engineOn, seatbelt } = vehicle
 
     return (
         <div className="hud-chip flex items-center gap-4 px-4 py-2 text-sm font-mono overlay-text">
