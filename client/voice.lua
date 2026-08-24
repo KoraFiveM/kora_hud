@@ -14,6 +14,8 @@ Voice = Voice or {}
 
 local talking = false
 local listeners = {}
+local active = false
+local sampling = false
 
 local function setTalking(value)
     if value == talking then return end
@@ -27,18 +29,33 @@ local function setTalking(value)
     end
 end
 
-CreateThread(function()
-    while true do
-        if Config.voice.enabled then
-            local ok, result = pcall(NetworkIsPlayerTalking, QB.cache.playerId())
-            setTalking(ok and result or false)
-        else
-            setTalking(false)
-        end
+local function sample()
+    local ok, result = pcall(NetworkIsPlayerTalking, QB.cache.playerId())
+    setTalking(ok and result or false)
+end
 
-        Wait(200)
+---Starts/stops the native voice sampler. HUD visibility owns this lifecycle so
+---the resource has no polling thread during character select, logout, or when
+---the mic element is disabled.
+---@param value boolean
+function Voice.setActive(value)
+    active = value == true and Config.voice.enabled == true
+
+    if not active then
+        setTalking(false)
+        return
     end
-end)
+    if sampling then return end
+
+    sampling = true
+    CreateThread(function()
+        while active do
+            sample()
+            Wait(200)
+        end
+        sampling = false
+    end)
+end
 
 ---@return boolean
 function Voice.isTalking()

@@ -69,6 +69,10 @@ end
 
 local visible = currentlyLoggedIn()
 
+local function syncVoiceSampling()
+    Voice.setActive(visible and Config.hud.elements.mic == true)
+end
+
 local function buildVehiclePayload()
     local snapshot = Vehicle.getSnapshot()
     if not snapshot then return nil end
@@ -86,6 +90,7 @@ local function pushUpdate()
 
     send("qbhud:update", {
         health = QB.cache.health(),
+        maxHealth = GetEntityMaxHealth(QB.cache.ped()),
         armour = QB.cache.armour(),
         stamina = QB.cache.stamina(),
         talking = Voice.isTalking(),
@@ -181,6 +186,7 @@ end)
 local function setVisible(newVisible)
     if newVisible == visible then return end
     visible = newVisible
+    syncVoiceSampling()
     send("qbhud:visibility", visible)
 
     if visible then
@@ -242,6 +248,7 @@ CreateThread(function()
     -- callback at the top of this file covers that). pcall'd so a failure here
     -- can't abort the thread before the vehicle tick below is armed.
     pcall(sendInitialState)
+    syncVoiceSampling()
 
     -- Arms the vehicle tick for a player who is ALREADY in a vehicle when this
     -- resource starts (`ensure qbhud` mid-drive): QB.cache.onChange only ever

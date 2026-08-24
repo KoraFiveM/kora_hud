@@ -19,34 +19,32 @@ import { HudStateProvider, useHudState } from "@/lib/hudState"
  * HudStateProvider's context available (a provider's own children can't read
  * the context it provides).
  *
- * Bottom row is a 3-column grid so the vehicle speedometer sits genuinely
- * centered between the vitals cluster and the job/cash column regardless of
- * how wide either side is, instead of being centered under the whole page
- * (which reads off-center once one side is wider than the other).
+ * The glanceable gauges live in a single bottom-centred row. Vehicle telemetry
+ * stacks immediately above them when present, while the wider identity/money
+ * panels remain independently pinned to the lower-right so neither can pull
+ * the gauges away from the true screen centre.
  */
 function HudContent() {
     const { visible } = useHudState()
     if (!visible) return null
 
     return (
-        <div className="pointer-events-none fixed inset-0 z-hud flex flex-col justify-end p-4">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-4">
-                <div className="flex items-center gap-3 justify-self-start">
+        <div className="pointer-events-none fixed inset-0 z-hud">
+            <div className="fixed bottom-4 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
+                <VehicleInfo />
+                <div className="flex items-center gap-2">
                     <HealthArmour />
                     <Stamina />
                     <HungerThirst />
                     <Stress />
                 </div>
-                <div className="justify-self-center">
-                    <VehicleInfo />
-                </div>
-                <div className="flex flex-col items-end gap-2 justify-self-end">
-                    <MicIndicator />
-                    <JobGang />
-                    <CashBank />
-                </div>
             </div>
-            <div className="pointer-events-none fixed right-4 top-4">
+            <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
+                <MicIndicator />
+                <JobGang />
+                <CashBank />
+            </div>
+            <div className="fixed right-4 top-4">
                 <StatusEffects />
             </div>
         </div>

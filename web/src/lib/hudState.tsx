@@ -18,6 +18,7 @@ const DEFAULT_CONFIG: HudConfigPayload = {
 
 const DEFAULT_UPDATE: HudUpdatePayload = {
     health: 200,
+    maxHealth: 200,
     armour: 0,
     stamina: 100,
     talking: false,

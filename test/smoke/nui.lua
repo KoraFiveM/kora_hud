@@ -35,6 +35,7 @@ local function loadHud(opts)
 
     _G.SendNUIMessage = function(message) sent[#sent + 1] = message end
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
+    _G.GetEntityMaxHealth = function() return opts.maxHealth or 200 end
     _G.GetPlayerStamina = function() return 100 end
     _G.CreateThread = function(callback)
         local thread = coroutine.create(callback)
@@ -70,7 +71,7 @@ local function loadHud(opts)
             return { speed = 60, fuel = 50, engineOn = true }
         end,
     }
-    _G.Voice = { isTalking = function() return false end, onChange = function() end }
+    _G.Voice = { isTalking = function() return false end, onChange = function() end, setActive = function() end }
 
     _G.QB = {
         nui = FORBIDDEN_NUI,
@@ -80,6 +81,7 @@ local function loadHud(opts)
                 table.insert(cacheHandlers[key], handler)
             end,
             health = function() return 200 end,
+            ped = function() return 42 end,
             armour = function() return 0 end,
             stamina = function() return 100 end,
             vehicle = function() return vehicle end,
@@ -200,6 +202,18 @@ harness.test('a failing QB.theme.tokens cannot stop the visibility push', functi
     harness.assertFalse(hud.contains('qbhud:theme'), 'a broken theme read should be skipped, not fatal')
     harness.assertTrue(hud.contains('qbhud:visibility'),
         'visibility must still be sent -- it is what makes the HUD render at all')
+end)
+
+harness.test('the HUD sends the ped-specific maximum health for percentage conversion', function()
+    local hud = loadHud({ maxHealth = 175 })
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:update' then latest = message.data end
+    end
+
+    harness.assertTrue(latest ~= nil, 'initial state should include a HUD update')
+    harness.assertEqual(latest.maxHealth, 175,
+        'female freemode peds use a 175 maximum rather than the male 200 maximum')
 end)
 
 -- --- event-driven updates (no constant polling) ---

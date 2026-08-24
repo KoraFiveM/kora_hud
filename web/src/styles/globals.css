@@ -35,6 +35,9 @@
     /* HUD surfaces sit over live gameplay: enough charcoal for reliable text,
        but deliberately translucent so they do not read as black UI blocks. */
     --hud: 0 0% 8% / 0.64;
+    /* Armour is deliberately blue: it represents protection, not the
+       good/bad health banding used by the other radial gauges. */
+    --armour: 210 100% 62%;
     --success: 142.1 70.6% 45.3%;
     --warning: 37.7 92.1% 50.2%;
     --info: 0 0% 83.1%;

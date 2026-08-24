@@ -8,17 +8,20 @@ import { RadialGauge } from "./RadialGauge"
 // docs.md) -- display health relative to that floor so an empty bar means
 // "close to death", not "at some arbitrary engine minimum".
 const HEALTH_FLOOR = 100
-const HEALTH_CEILING = 200
 
 // Baseline "usual player data" -- always rendered, not config-toggleable.
 export function HealthArmour() {
     const { update } = useHudState()
-    const healthPercent = ((update.health - HEALTH_FLOOR) / (HEALTH_CEILING - HEALTH_FLOOR)) * 100
+    // GTA reports a ped's health on a native scale where 100 is the death
+    // floor. Freemode male and female peds have different maximums (normally
+    // 200 and 175 respectively), so Lua sends the current ped's actual max.
+    const maxHealth = Math.max(HEALTH_FLOOR + 1, update.maxHealth)
+    const healthPercent = ((update.health - HEALTH_FLOOR) / (maxHealth - HEALTH_FLOOR)) * 100
 
     return (
         <div className="flex items-center gap-2">
             <RadialGauge icon={Heart} value={healthPercent} label="Health" color={statColor(healthPercent)} pulse />
-            <RadialGauge icon={Shield} value={update.armour} label="Armour" color={statColor(update.armour)} />
+            <RadialGauge icon={Shield} value={update.armour} label="Armour" color="hsl(var(--armour))" />
         </div>
     )
 }

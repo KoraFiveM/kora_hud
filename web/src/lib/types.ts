@@ -73,6 +73,7 @@ export interface HudStatusEffect {
 // vehicle telemetry's much faster cadence too.
 export interface HudUpdatePayload {
     health: number
+    maxHealth: number
     armour: number
     stamina: number
     talking: boolean

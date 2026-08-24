@@ -23,7 +23,7 @@ interface RadialGaugeProps {
 // every gauge regardless of `size` so a row of differently-sized gauges
 // (e.g. the 44px vitals next to the 36px vehicle fuel gauge) still reads as
 // one consistent badge shape rather than mismatched ring-to-panel ratios.
-const PANEL_PADDING = 8
+const PANEL_PADDING = 4
 
 /**
  * Shared glanceable meter every vital (health/armour/stamina/hunger/thirst/
