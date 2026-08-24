@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/cn"
+import { useHudState } from "@/lib/hudState"
 
 interface RadialGaugeProps {
     icon: LucideIcon
@@ -9,6 +10,8 @@ interface RadialGaugeProps {
     color: string
     size?: number
     stroke?: number
+    /** The neutral value hidden when Config.hud.dynamic is enabled. */
+    defaultValue: number
     /**
      * Pulses the ring once it's colored destructive. Keyed off `color`
      * rather than a raw value threshold since "critical" is direction-
@@ -32,10 +35,27 @@ const PANEL_PADDING = 4
  * uses (e.g. health's 100-200) before passing it in. Each gauge is its own
  * circular hud-panel badge -- not grouped inside a shared rectangle -- so a
  * row of them reads as separate glanceable dials, same idea as the mic
- * indicator's own circular badge.
+ * indicator's own circular badge. In dynamic mode, each caller's declared
+ * `defaultValue` is also the gauge's hidden state.
  */
-export function RadialGauge({ icon: Icon, value, label, color, size = 44, stroke = 3.5, pulse = false }: RadialGaugeProps) {
+export function RadialGauge({
+    icon: Icon,
+    value,
+    label,
+    color,
+    defaultValue,
+    size = 44,
+    stroke = 3.5,
+    pulse = false,
+}: RadialGaugeProps) {
+    const { config } = useHudState()
     const clamped = Math.max(0, Math.min(100, value))
+    const clampedDefault = Math.max(0, Math.min(100, defaultValue))
+
+    // Compare the clamped values so engine noise outside the documented
+    // 0-100 range (e.g. 100.0001 fuel) still counts as the neutral boundary.
+    if (config.dynamic && clamped === clampedDefault) return null
+
     const radius = size / 2 - stroke
     const circumference = radius * 2 * Math.PI
     const offset = circumference * (1 - clamped / 100)

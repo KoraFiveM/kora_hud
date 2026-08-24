@@ -8,5 +8,5 @@ export function Stamina() {
     const { config, update } = useHudState()
     if (!config.elements.stamina) return null
 
-    return <RadialGauge icon={Zap} value={update.stamina} label="Stamina" color={statColor(update.stamina)} />
+    return <RadialGauge icon={Zap} value={update.stamina} defaultValue={100} label="Stamina" color={statColor(update.stamina)} />
 }

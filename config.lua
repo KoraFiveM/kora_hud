@@ -1,16 +1,24 @@
 Config = {}
 
 -- Per-element toggles. Health, armour, and job/gang are NOT here -- they're
--- baseline "usual player data" and always render (see AGENTS.md).
+-- baseline "usual player data" rather than independently toggleable elements.
+-- Dynamic mode can still suppress health/armour while they are neutral.
 Config.hud = {
+    -- When enabled, radial gauges only appear while they differ from their
+    -- neutral value: full health/stamina/hunger/thirst/fuel and empty
+    -- armour/stress are hidden. Non-gauge HUD elements are unaffected.
+    -- Defaults to false so upgrading an existing server doesn't silently
+    -- start hiding gauges players are used to always seeing -- opt in per
+    -- server.
+    dynamic = false,
     elements = {
         mic          = true,
-        cash         = true,
+        cash         = false,
         bank         = true,
         hungerThirst = true,
         stamina      = true,
         stress       = true,
-        vehicle      = true, -- speed/fuel/engine/seatbelt, shown only while in a vehicle
+        vehicle      = true, -- speed/fuel/engine/headlights/seatbelt, shown only while in a vehicle
     },
 }
 
@@ -29,9 +37,8 @@ Config.voice = {
 }
 
 Config.poll = {
-    -- 10Hz is visually smooth for a HUD speedometer but avoids 50 Lua-to-NUI
-    -- messages per second while driving. The browser can interpolate values
-    -- between messages if a future skin wants a smoother needle.
-    vehicleInterval = 100, -- ms between vehicle HUD refreshes (speed/fuel/engine) while in a vehicle
+    -- Four updates per second keeps the numeric speedometer responsive without
+    -- making vehicle natives and Lua-to-NUI messages a hot 10Hz path.
+    vehicleInterval = 250, -- ms between speed/fuel/engine/headlight refreshes while in a vehicle
     bridgeInterval  = 500, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
 }

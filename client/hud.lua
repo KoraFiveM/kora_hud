@@ -57,7 +57,34 @@ RegisterNUICallback('qbhud:ready', function(_, cb)
     end
 end)
 
-local latestBridgeSnapshot = HudBridge.getSnapshot()
+-- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
+-- (or qblib, via the status export inside getSnapshot) is mid-restart right
+-- when this chunk loads, this would raise and abort the REST of this file's
+-- chunk -- meaning the qbhud:ready NUI callback registered above stays
+-- registered (that's why it's first), but `sendInitialState` below never gets
+-- assigned, so the ready-ping handler's existing nil-guard makes it silently
+-- no-op forever. pcall'd, falling back to the same shape snapshotFrom(nil)
+-- produces in the qbcore adapter, so downstream field reads below
+-- (latestBridgeSnapshot.job/gang/cash/... ) stay structurally valid.
+local DEFAULT_BRIDGE_SNAPSHOT = {
+    job = { name = 'unemployed', label = 'Civilian', grade = 0, gradeLabel = 'Civilian', onDuty = true },
+    gang = nil,
+    cash = 0,
+    bank = 0,
+    hunger = 100,
+    thirst = 100,
+    stress = 0,
+    seatbelt = false,
+    status = {},
+}
+
+local function safeGetBridgeSnapshot()
+    local ok, snapshot = pcall(function() return HudBridge.getSnapshot() end)
+    if ok and type(snapshot) == 'table' then return snapshot end
+    return DEFAULT_BRIDGE_SNAPSHOT
+end
+
+local latestBridgeSnapshot = safeGetBridgeSnapshot()
 
 -- An adapter with no login/character-select concept (the stub) has nothing
 -- to gate on, so a missing isLoggedIn means "always visible" -- unchanged
@@ -77,11 +104,22 @@ local function buildVehiclePayload()
     local snapshot = Vehicle.getSnapshot()
     if not snapshot then return nil end
 
+    -- Seatbelt is local adapter state. Prefer its cheap accessor so this hot
+    -- vehicle path never rebuilds the full player-data/status snapshot merely
+    -- to read one boolean; older adapters can fall back to their last snapshot.
+    local seatbelt
+    if HudBridge.getSeatbelt then
+        seatbelt = HudBridge.getSeatbelt() == true
+    else
+        seatbelt = latestBridgeSnapshot.seatbelt == true
+    end
+
     return {
         speed = snapshot.speed,
         fuel = snapshot.fuel,
         engineOn = snapshot.engineOn,
-        seatbelt = latestBridgeSnapshot.seatbelt,
+        headlights = snapshot.headlights,
+        seatbelt = seatbelt,
     }
 end
 
@@ -143,12 +181,6 @@ local function startVehicleTick()
 
     CreateThread(function()
         while QB.cache.vehicle() do
-            -- Refreshed here rather than on a standalone loop because seatbelt
-            -- is the one snapshot field no adapter can push: it's a local
-            -- keybind the adapter owns, not framework player data, so
-            -- HudBridge.onChange never fires for it. Driving is exactly when
-            -- it matters, and this thread only exists while driving.
-            latestBridgeSnapshot = HudBridge.getSnapshot()
             pushVehicleUpdate()
             Wait(Config.poll.vehicleInterval)
         end
@@ -204,7 +236,10 @@ end
 -- the forward declaration at the top of the file, silently leaving the
 -- qbhud:ready callback's upvalue nil.
 sendInitialState = function()
-    send("qbhud:config", { elements = Config.hud.elements })
+    send("qbhud:config", {
+        dynamic = Config.hud.dynamic == true,
+        elements = Config.hud.elements,
+    })
 
     -- QB.theme.tokens() is a cross-resource call into qblib; a qblib restart
     -- must not abort the visibility send that follows it (that used to be
@@ -255,4 +290,29 @@ CreateThread(function()
     -- observes future transitions, so nothing else would start it until the
     -- player got out and back in.
     if QB.cache.vehicle() then startVehicleTick() end
+end)
+
+-- The minimap's own scaleform draws its own health/armour/breath cluster
+-- straight from the engine's internal ped state -- it is not driven by
+-- QB.cache.health() and has its own smoothing/thresholds, so left alone it
+-- visibly disagrees with the radial gauges above (that's the "health isn't
+-- matching the default hud" symptom: two independent renderers of the same
+-- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
+-- the minimap draws; 3 draws neither, ceding the stat entirely to this
+-- resource's NUI. Requested once (not per-frame) since scaleform handles are
+-- movie instances, not frame-scoped state -- re-requesting every tick would
+-- leak a new instance each frame. Reissued every tick because the game
+-- re-applies its own default (0, both shown) each frame if not told
+-- otherwise, same reason the native is documented as a per-frame call.
+local minimapScaleform = RequestScaleformMovie("minimap")
+
+CreateThread(function()
+    while true do
+        Wait(0)
+        if visible then
+            BeginScaleformMovieMethod(minimapScaleform, "SETUP_HEALTH_ARMOUR")
+            ScaleformMovieMethodAddParamInt(3)
+            EndScaleformMovieMethod()
+        end
+    end
 end)

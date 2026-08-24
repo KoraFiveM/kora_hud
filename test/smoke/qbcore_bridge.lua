@@ -8,6 +8,11 @@ local harness = require('harness')
 local function loadBridge(initialState, initialData)
     local handlers, threads, registeredEvents = {}, {}, {}
     local playerData = initialData
+    local resyncCalls = 0
+    -- Default getPlayerData behaviour just returns the mutable `playerData`
+    -- local (see setPlayerData below). Tests that need to exercise the
+    -- retry-round / pcall paths swap this out via setPlayerDataImpl instead.
+    local getPlayerDataImpl = function() return playerData end
 
     _G.HudBridge = nil
     _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true } }
@@ -28,8 +33,9 @@ local function loadBridge(initialState, initialData)
     _G.Wait = function() coroutine.yield() end
     _G.exports = {
         qbcore = {
-            getPlayerData = function() return playerData end,
+            getPlayerData = function(...) return getPlayerDataImpl(...) end,
             onPlayerDataChange = function() end,
+            requestResync = function() resyncCalls = resyncCalls + 1 end,
         },
     }
 
@@ -40,6 +46,11 @@ local function loadBridge(initialState, initialData)
         handlers = handlers,
         events = registeredEvents,
         setPlayerData = function(value) playerData = value end,
+        -- Lets a test fully replace getPlayerData's behaviour, e.g. to return
+        -- nil for longer than one 200-frame round, or to raise for the first
+        -- N calls before succeeding (simulating qbcore mid-restart).
+        setPlayerDataImpl = function(fn) getPlayerDataImpl = fn end,
+        resyncCalls = function() return resyncCalls end,
         setLoginState = function(value)
             LocalPlayer.state['qbcore:loggedIn'] = value
             for _, handler in ipairs(handlers) do
@@ -91,6 +102,49 @@ harness.test('a missing optional qblib status export cannot stop the core HUD br
     local snapshot = bridge.bridge.getSnapshot()
     harness.assertEqual(type(snapshot.status), 'table', 'status should degrade to an empty array')
     harness.assertEqual(#snapshot.status, 0, 'a missing status provider must not block HUD startup')
+end)
+
+harness.test('a reconcile that times out its first 200-frame round retries via requestResync instead of giving up', function()
+    local bridge = loadBridge(false, nil)
+    local calls = 0
+    -- Returns nil for the first 210 calls (past the 200-frame cap of a single
+    -- round), then starts returning real data -- simulating qbcore itself
+    -- still being mid-restart when qbhud's reconcile thread starts.
+    bridge.setPlayerDataImpl(function()
+        calls = calls + 1
+        if calls <= 210 then return nil end
+        return { money = { cash = 5 }, metadata = {} }
+    end)
+
+    bridge.setLoginState(true)
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'still waiting on the mirror right after the state bag flips')
+
+    -- Drive well past a single 200-frame round (and comfortably within the
+    -- 3-round cap) so the retry path has to kick in.
+    for _ = 1, 500 do
+        bridge.step()
+        if bridge.bridge.isLoggedIn() then break end
+    end
+
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'a timed-out first round must retry rather than leave loggedIn stuck false')
+    harness.assertTrue(bridge.resyncCalls() > 0, 'a timed-out round should nudge qbcore via requestResync before retrying')
+end)
+
+harness.test('a pcall-guarded getPlayerData error does not kill the reconcile thread', function()
+    local bridge = loadBridge(false, nil)
+    local calls = 0
+    -- Errors on the very first call (as a raw cross-resource export call
+    -- would if qbcore's resource wasn't fully started yet), then succeeds.
+    bridge.setPlayerDataImpl(function()
+        calls = calls + 1
+        if calls == 1 then error('qbcore export not ready') end
+        return { money = { cash = 7 }, metadata = {} }
+    end)
+
+    bridge.setLoginState(true)
+    bridge.step()
+
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'an error on one export call must be swallowed and retried, not kill the thread')
 end)
 
 harness.report('qbcore_bridge')

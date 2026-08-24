@@ -61,6 +61,7 @@ harness.test("hud_toggleseatbelt flips the seatbelt placeholder", function()
     local before = HudBridge.getSnapshot().seatbelt
     commands["hud_toggleseatbelt"]()
     harness.assertEqual(HudBridge.getSnapshot().seatbelt, not before, "seatbelt should flip")
+    harness.assertEqual(HudBridge.getSeatbelt(), not before, "the cheap vehicle accessor should stay in sync")
 end)
 
 harness.report("bridge")

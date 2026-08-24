@@ -12,6 +12,7 @@ export interface NuiWireMessage<T = unknown> {
 
 // action: "qbhud:config" -- sent once on resource start.
 export interface HudConfigPayload {
+    dynamic: boolean
     elements: {
         mic: boolean
         cash: boolean
@@ -53,6 +54,7 @@ export interface HudVehicleInfo {
     speed: number
     fuel: number | null
     engineOn: boolean
+    headlights: "off" | "low" | "high"
     seatbelt: boolean
 }
 

@@ -1,4 +1,4 @@
--- Vehicle telemetry (speed/fuel/engine). qblib's modules/entities and
+-- Vehicle telemetry (speed/fuel/engine/headlights). qblib's modules/entities and
 -- modules/loops have no vehicle-telemetry helpers to build on, so this calls
 -- natives directly. Crucially, it never owns a polling thread: client/hud.lua
 -- is the single vehicle-only scheduler and calls getSnapshot only while
@@ -8,7 +8,7 @@
 -- it remains bridge state and is refreshed by that same HUD vehicle tick.
 Vehicle = Vehicle or {}
 
----@return { speed: number, fuel: number | nil, engineOn: boolean } | nil
+---@return { speed: number, fuel: number | nil, engineOn: boolean, headlights: 'off'|'low'|'high' } | nil
 function Vehicle.getSnapshot()
     -- The qblib cache is the single source of vehicle lifecycle truth. This
     -- avoids a second IsPedInAnyVehicle loop in qbhud and guarantees no vehicle
@@ -20,10 +20,21 @@ function Vehicle.getSnapshot()
     -- FiveM builds; degrade each optional value instead of losing the entire HUD.
     local fuelOk, fuel = pcall(GetVehicleFuelLevel, vehicle)
     local engineOk, engineOn = pcall(IsVehicleEngineRunning, vehicle)
+    local lightsOk, _, lightsOn, highbeamsOn = pcall(GetVehicleLightsState, vehicle)
+
+    local headlights = 'off'
+    if lightsOk then
+        if highbeamsOn == true then
+            headlights = 'high'
+        elseif lightsOn == true then
+            headlights = 'low'
+        end
+    end
 
     return {
         speed = GetEntitySpeed(vehicle) * 3.6, -- m/s -> km/h
         fuel = fuelOk and fuel or nil,
         engineOn = engineOk and engineOn == true,
+        headlights = headlights,
     }
 end

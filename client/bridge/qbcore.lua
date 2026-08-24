@@ -43,6 +43,22 @@ local function notifyLoginChange(value)
     for _, handler in ipairs(loginHandlers) do handler(value) end
 end
 
+local RECONCILE_WAIT_FRAMES = 200
+local RECONCILE_MAX_ROUNDS = 3
+
+-- pcall'd: qbcore may itself be mid-restart (its export table not yet
+-- published, or its own resource not fully started) at the exact moment this
+-- thread runs -- e.g. a supervisor restarting qbcore and qbhud together. An
+-- uncaught error from a cross-resource export call would otherwise silently
+-- kill this CreateThread body (standard Lua coroutine behaviour), leaving
+-- `loggedIn` stuck at whatever it last was. Treat a failed call the same as
+-- "no data yet" -- the retry loop below already handles that.
+local function tryGetPlayerData()
+    local ok, data = pcall(function() return exports.qbcore:getPlayerData() end)
+    if ok then return data end
+    return nil
+end
+
 local function reconcileLogin(value)
     loginGeneration = loginGeneration + 1
     local generation = loginGeneration
@@ -55,21 +71,42 @@ local function reconcileLogin(value)
     -- State bags and net events are independently replicated.  qbcore writes
     -- this key after sending its snapshot, but wait defensively until the
     -- mirror is actually visible before letting the HUD render player data.
-    -- Capped at 200 frames rather than an unbounded Wait(0) spin, so a mirror
-    -- that never populates can't leave this thread running forever -- not
-    -- QB.loops.controlled, since this file must keep working even with QB
+    -- Capped at 200 frames per round rather than an unbounded Wait(0) spin, so
+    -- a mirror that never populates can't leave this thread running forever --
+    -- not QB.loops.controlled, since this file must keep working even with QB
     -- entirely absent (see the "missing optional qblib status export" test).
+    --
+    -- A single 200-frame timeout used to be treated as permanent failure: if
+    -- qbcore was ALSO restarting/still booting at that moment, `loggedIn`
+    -- would stay false forever with nothing left to re-arm this thread (the
+    -- state bag only changes again on an actual login/logout). Instead, retry
+    -- up to RECONCILE_MAX_ROUNDS times, nudging qbcore for a fresh snapshot
+    -- via its resync export between rounds -- bounded, so this still can't
+    -- hang forever, but no longer gives up after one attempt.
     CreateThread(function()
-        local attempts = 0
-        while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
-            and exports.qbcore:getPlayerData() == nil
-            and attempts < 200 do
-            Wait(0)
-            attempts = attempts + 1
-        end
-        if generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
-            and exports.qbcore:getPlayerData() ~= nil then
-            notifyLoginChange(true)
+        for round = 1, RECONCILE_MAX_ROUNDS do
+            local attempts = 0
+            local data = tryGetPlayerData()
+            while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
+                and data == nil
+                and attempts < RECONCILE_WAIT_FRAMES do
+                Wait(0)
+                attempts = attempts + 1
+                data = tryGetPlayerData()
+            end
+
+            if generation ~= loginGeneration or LocalPlayer.state[LOGIN_STATE] ~= true then
+                return
+            end
+
+            if data ~= nil then
+                notifyLoginChange(true)
+                return
+            end
+
+            if round < RECONCILE_MAX_ROUNDS then
+                pcall(function() exports.qbcore:requestResync() end)
+            end
         end
     end)
 end
@@ -104,6 +141,13 @@ end
 local seatbelt = false
 RegisterCommand('hud_toggleseatbelt', function() seatbelt = not seatbelt end, false)
 RegisterKeyMapping('hud_toggleseatbelt', 'Toggle seatbelt (qbcore adapter)', 'keyboard', 'B')
+
+-- Cheap hot-path accessor for the vehicle sampler. Keeping this separate from
+-- getSnapshot avoids framework and status exports on every telemetry tick.
+---@return boolean
+function HudBridge.getSeatbelt()
+    return seatbelt
+end
 
 -- Map qbcore's PlayerData shape onto the HUD snapshot contract. Defensive about
 -- nils: the mirror may be empty for a moment right after join, before the first

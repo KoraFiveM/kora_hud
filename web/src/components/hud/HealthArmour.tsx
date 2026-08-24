@@ -9,7 +9,8 @@ import { RadialGauge } from "./RadialGauge"
 // "close to death", not "at some arbitrary engine minimum".
 const HEALTH_FLOOR = 100
 
-// Baseline "usual player data" -- always rendered, not config-toggleable.
+// Baseline "usual player data" -- not independently toggleable. Dynamic mode
+// can still hide either gauge while it is at its neutral value.
 export function HealthArmour() {
     const { update } = useHudState()
     // GTA reports a ped's health on a native scale where 100 is the death
@@ -20,8 +21,8 @@ export function HealthArmour() {
 
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Heart} value={healthPercent} label="Health" color={statColor(healthPercent)} pulse />
-            <RadialGauge icon={Shield} value={update.armour} label="Armour" color="hsl(var(--armour))" />
+            <RadialGauge icon={Heart} value={healthPercent} defaultValue={100} label="Health" color={statColor(healthPercent)} pulse />
+            <RadialGauge icon={Shield} value={update.armour} defaultValue={0} label="Armour" color="hsl(var(--armour))" />
         </div>
     )
 }

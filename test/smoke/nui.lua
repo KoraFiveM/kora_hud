@@ -25,7 +25,7 @@ local FORBIDDEN_NUI = setmetatable({}, {
     end,
 })
 
----@param opts table|nil  -- { snapshotError, bridgePush, inVehicle }
+---@param opts table|nil  -- { snapshotError, bridgePush, inVehicle, dynamicHud, maxHealth }
 local function loadHud(opts)
     opts = opts or {}
     local sent, callbacks, threads = {}, {}, {}
@@ -46,8 +46,8 @@ local function loadHud(opts)
     _G.Wait = function() coroutine.yield() end
 
     _G.Config = {
-        hud = { elements = { mic = true, cash = true, vehicle = true } },
-        poll = { bridgeInterval = 500, vehicleInterval = 100 },
+        hud = { dynamic = opts.dynamicHud == true, elements = { mic = true, cash = true, vehicle = true } },
+        poll = { bridgeInterval = 500, vehicleInterval = 250 },
     }
 
     _G.HudBridge = {
@@ -59,6 +59,7 @@ local function loadHud(opts)
             return { job = {}, gang = nil, cash = 0, bank = 0, hunger = 100, thirst = 100, stress = 0,
                      seatbelt = seatbelt, status = {} }
         end,
+        getSeatbelt = function() return seatbelt end,
     }
     -- Only the adapters that can push implement this (the stub does not).
     if opts.bridgePush then
@@ -68,7 +69,7 @@ local function loadHud(opts)
     _G.Vehicle = {
         getSnapshot = function()
             if not vehicle then return nil end
-            return { speed = 60, fuel = 50, engineOn = true }
+            return { speed = 60, fuel = 50, engineOn = true, headlights = 'low' }
         end,
     }
     _G.Voice = { isTalking = function() return false end, onChange = function() end, setActive = function() end }
@@ -193,6 +194,17 @@ harness.test('the ready callback is idempotent and re-pushes the full initial st
     harness.assertEqual(replies, 2, 'every ping gets exactly one reply')
 end)
 
+harness.test('the HUD forwards the dynamic gauge option to the NUI', function()
+    local hud = loadHud({ dynamicHud = true })
+    local config
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:config' then config = message.data end
+    end
+
+    harness.assertTrue(config ~= nil, 'initial state should include the HUD config')
+    harness.assertTrue(config.dynamic, 'Config.hud.dynamic should reach the gauge components')
+end)
+
 harness.test('a failing QB.theme.tokens cannot stop the visibility push', function()
     local hud = loadHud()
     QB.theme.tokens = function() error('qblib restarting', 0) end
@@ -281,6 +293,7 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
     hud.setSeatbelt(true)
     hud.reset()
 
+    local before = hud.snapshots()
     hud.tick()
     local latest
     for _, message in ipairs(hud.sent) do
@@ -288,6 +301,9 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
     end
     harness.assertTrue(latest ~= nil, 'the vehicle tick should be running')
     harness.assertTrue(latest.seatbelt, 'a seatbelt toggle must reach the NUI while driving')
+    harness.assertEqual(latest.headlights, 'low', 'headlight status must reach the NUI while driving')
+    harness.assertEqual(hud.snapshots(), before,
+        'the vehicle tick must not rebuild the full bridge snapshot just to read seatbelt state')
 end)
 
 harness.test('a player already in a vehicle at resource start gets telemetry', function()

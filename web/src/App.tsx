@@ -13,8 +13,8 @@ import { HudStateProvider, useHudState } from "@/lib/hudState"
 /**
  * The actual HUD layout, gated on login state. Each element is otherwise
  * self-contained -- it reads its own slice of HudStateProvider's context and
- * hides itself per Config.hud.elements -- so mounting all of them
- * unconditionally here (once visible) *is* the layout, same pattern as
+ * applies its configured element/dynamic visibility -- so mounting all of
+ * them unconditionally here (once visible) *is* the layout, same pattern as
  * qblib's own web/src/App.tsx. Split out from App so the visibility check has
  * HudStateProvider's context available (a provider's own children can't read
  * the context it provides).

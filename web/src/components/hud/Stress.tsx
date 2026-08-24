@@ -10,5 +10,5 @@ export function Stress() {
     const { config, update } = useHudState()
     if (!config.elements.stress) return null
 
-    return <RadialGauge icon={Brain} value={update.stress} label="Stress" color={statColor(update.stress, true)} pulse />
+    return <RadialGauge icon={Brain} value={update.stress} defaultValue={0} label="Stress" color={statColor(update.stress, true)} pulse />
 }

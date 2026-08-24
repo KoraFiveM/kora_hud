@@ -14,7 +14,8 @@ import { useHudState } from "@/lib/hudState"
  *
  * Always rendered when effects are active -- unlike mic/cash/bank/etc, this
  * isn't behind a Config.hud.elements toggle, matching health/armour/job/gang
- * staying ungated (see config.lua's own comment on why).
+ * staying ungated (dynamic mode only suppresses neutral gauges; see
+ * config.lua's own comment).
  */
 function humanize(name: string): string {
     return name

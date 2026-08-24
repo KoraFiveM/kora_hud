@@ -10,8 +10,8 @@ export function HungerThirst() {
 
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Utensils} value={update.hunger} label="Hunger" color={statColor(update.hunger)} />
-            <RadialGauge icon={Droplets} value={update.thirst} label="Thirst" color={statColor(update.thirst)} />
+            <RadialGauge icon={Utensils} value={update.hunger} defaultValue={100} label="Hunger" color={statColor(update.hunger)} />
+            <RadialGauge icon={Droplets} value={update.thirst} defaultValue={100} label="Thirst" color={statColor(update.thirst)} />
         </div>
     )
 }

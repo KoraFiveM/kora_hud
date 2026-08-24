@@ -5,6 +5,7 @@ import type { HudConfigPayload, HudUpdatePayload, HudVehiclePayload, HudVisibili
 import { useNuiEvent } from "./useNuiEvent"
 
 const DEFAULT_CONFIG: HudConfigPayload = {
+    dynamic: false,
     elements: {
         mic: true,
         cash: true,

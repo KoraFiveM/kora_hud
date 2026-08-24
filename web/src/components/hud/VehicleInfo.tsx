@@ -1,4 +1,4 @@
-import { Fuel, Gauge, Power, PowerOff, ShieldAlert, ShieldCheck } from "lucide-react"
+import { Fuel, Gauge, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
 import { useHudState } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
@@ -12,15 +12,17 @@ export function VehicleInfo() {
     const { config, vehicle } = useHudState()
     if (!config.elements.vehicle || !vehicle) return null
 
-    const { speed, fuel, engineOn, seatbelt } = vehicle
+    const { speed, fuel, engineOn, headlights, seatbelt } = vehicle
 
     return (
         <div className="flex items-center gap-3">
-            {fuel !== null && <RadialGauge icon={Fuel} value={fuel} label="Fuel" color={statColor(fuel)} size={36} stroke={3} />}
+            {fuel !== null && (
+                <RadialGauge icon={Fuel} value={fuel} defaultValue={100} label="Fuel" color={statColor(fuel)} size={36} stroke={3} />
+            )}
             <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
                 <div className="flex items-baseline gap-1.5 text-foreground">
                     <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="text-2xl font-bold leading-none tabular-nums">{Math.round(speed)}</span>
+                    <span className="w-[4ch] text-right text-2xl font-bold leading-none tabular-nums">{Math.round(speed)}</span>
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">km/h</span>
                 </div>
                 <div className="h-8 w-px bg-border" />
@@ -29,6 +31,13 @@ export function VehicleInfo() {
                         <Power className="h-4 w-4 shrink-0 text-success" aria-label="Engine on" />
                     ) : (
                         <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Engine off" />
+                    )}
+                    {headlights === "high" ? (
+                        <Sun className="h-4 w-4 shrink-0 text-info" aria-label="High beams on" />
+                    ) : headlights === "low" ? (
+                        <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-label="Headlights on" />
+                    ) : (
+                        <LightbulbOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Headlights off" />
                     )}
                     {seatbelt ? (
                         <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label="Seatbelt on" />

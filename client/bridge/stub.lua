@@ -43,6 +43,11 @@ RegisterCommand("hud_toggleseatbelt", function()
 end, false)
 RegisterKeyMapping("hud_toggleseatbelt", "Toggle seatbelt (qb-hud stub bridge)", "keyboard", "B")
 
+---@return boolean
+function HudBridge.getSeatbelt()
+    return state.seatbelt
+end
+
 -- Manual-test commands, mirroring qblib-playground's command-driven style --
 -- dev convenience only.
 RegisterCommand("hudtest_cash", function(_, args)
