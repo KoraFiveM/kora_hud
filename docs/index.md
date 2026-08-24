@@ -1,0 +1,188 @@
+---
+layout: default
+title: qbhud
+---
+
+Configurable HUD for FiveM, built on qblib's cache/theme/nui primitives. All
+player data (job, gang, cash, bank, hunger/thirst, stress, seatbelt) comes
+through a single adapter interface (`HudBridge`, documented in
+`shared/bridge.lua`) rather than framework calls scattered through the render
+code — `client/hud.lua` only ever calls `HudBridge.getSnapshot()` /
+`HudBridge.onChange()` / `HudBridge.isLoggedIn()`, so swapping the adapter
+never touches HUD logic. Two adapters ship today: `client/bridge/qbcore.lua`
+sources live data from qbcore's replicated player mirror (delta-pushed, not
+polled), and `client/bridge/stub.lua` fabricates normalized mock data with no
+framework installed at all, for standalone use or UI development. Which one
+loads is a `fxmanifest.lua` `client_scripts` choice, documented by
+`Config.bridge.adapter`.
+
+## Requirements
+
+- [qblib](https://qbcore2.github.io/qblib/)
+- qbcore — **optional**. Only needed if you keep the shipped `qbcore` bridge
+  adapter (`client/bridge/qbcore.lua`) loaded. Swap `fxmanifest.lua`'s
+  `client_scripts` to `client/bridge/stub.lua` instead and qbhud runs
+  standalone with mock player data, no framework required.
+
+## Installation
+
+`server.cfg`, in this order:
+```
+ensure qblib
+ensure qbcore
+ensure qbhud
+```
+(Drop `ensure qbcore` if you're running the stub adapter instead — see below.)
+
+By default `fxmanifest.lua` lists `client/bridge/qbcore.lua` in
+`client_scripts`, and `config.lua`'s `Config.bridge.adapter` is set to
+`"qbcore"` to match. To run without qbcore, edit `fxmanifest.lua` to load
+`client/bridge/stub.lua` in its place and set `Config.bridge.adapter =
+"stub"` for consistency — `Config.bridge.adapter` itself is a documentation
+field (every adapter file's header comment references it), the actual load
+is driven by which file `client_scripts` lists. `client/hud.lua` needs no
+changes either way.
+
+## Usage examples
+
+### Switch the bridge adapter (qbcore -> standalone stub)
+```lua
+-- fxmanifest.lua
+client_scripts {
+    'client/bridge/stub.lua',   -- was 'client/bridge/qbcore.lua'
+    'client/voice.lua',
+    'client/vehicle.lua',
+    'client/hud.lua'
+}
+```
+```lua
+-- config.lua
+Config.bridge = {
+    adapter = "stub",   -- was "qbcore"
+}
+```
+The stub seeds `cash = 500`, `bank = 5000`, full hunger/thirst, and slowly
+drains hunger/thirst every minute so the HUD visibly updates with nothing
+else installed.
+
+### Toggle which HUD elements render
+```lua
+-- config.lua
+Config.hud = {
+    dynamic = true,   -- hide gauges (health/stamina/hunger/thirst/fuel/armour/stress)
+                       -- while they're at their neutral value
+    elements = {
+        mic          = true,
+        cash         = true,
+        bank         = true,
+        hungerThirst = true,
+        stamina      = true,
+        stress       = false,  -- e.g. disable the stress gauge entirely
+        vehicle      = true,   -- speed/fuel/engine/headlights/seatbelt, in-vehicle only
+    },
+}
+```
+`elements.mic` also gates the voice-talking sampler thread in
+`client/voice.lua` (`Voice.setActive`) — disabling it stops
+`NetworkIsPlayerTalking` polling entirely, not just the on-screen icon.
+
+### Drive HUD values manually for testing (stub adapter only)
+```
+/hudtest_cash 1500
+/hudtest_bank 25000
+/hudtest_stress 40
+```
+These commands are registered by `client/bridge/stub.lua` only — they don't
+exist when the qbcore adapter is loaded, since job/cash/etc. there come from
+qbcore itself (`exports.qbcore:addMoney`, `exports.qbcore:setJob`, ...).
+
+### Toggle the seatbelt placeholder
+```
+/hud_toggleseatbelt
+```
+Bound to `B` by default via `RegisterKeyMapping`. Stock FiveM has no seatbelt
+native at all, so both adapters own this as local placeholder state until a
+real seatbelt system is wired into a vehicle resource.
+
+### Point the mic indicator at a different voice resource
+```lua
+-- config.lua
+Config.voice = {
+    enabled  = true,
+    resource = "pma-voice",
+}
+```
+`client/voice.lua` reads FiveM's own `NetworkIsPlayerTalking` native, which
+reflects whichever Mumble-backed voice resource is running (pma-voice,
+saltychat, mumble-voip all work without extra integration) — `Config.voice.resource`
+just documents which one is expected to be installed; `enabled = false` is a
+master kill switch for the mic element and its sampling thread.
+
+## API reference
+
+qbhud exposes **no exports and no client/server net events** — it's a
+self-contained NUI renderer, not an integration surface for other resources.
+Its only externally-triggerable actions are the `RegisterCommand`s listed in
+Usage examples above (`hud_toggleseatbelt` always; `hudtest_cash`/
+`hudtest_bank`/`hudtest_stress` on the stub adapter only), plus one internal
+NUI callback (`qbhud:ready`, used by the web page's own mount handshake).
+
+### Bridge adapter interface (`shared/bridge.lua`)
+
+Every `client/bridge/<name>.lua` assigns a global `HudBridge` table satisfying
+this contract; `client/hud.lua` never reaches past it into framework
+internals:
+
+```lua
+---@class QBHudBridge
+---@field getSnapshot fun(): QBHudBridgeSnapshot                        -- required
+---@field getSeatbelt (fun(): boolean) | nil                            -- optional, cheap accessor
+---@field onChange (fun(handler: fun(snapshot: QBHudBridgeSnapshot)): nil) | nil  -- optional, else polled
+---@field isLoggedIn (fun(): boolean) | nil                             -- optional, else always visible
+---@field onLoginChange (fun(handler: fun(loggedIn: boolean)): nil) | nil -- optional
+
+---@class QBHudBridgeSnapshot
+---@field job { name, label, grade, gradeLabel, onDuty }
+---@field gang { name, label, grade, gradeLabel } | nil
+---@field cash number
+---@field bank number
+---@field hunger number     -- 0-100
+---@field thirst number     -- 0-100
+---@field stress number     -- 0-100
+---@field seatbelt boolean
+---@field status { name, severity }[] | nil   -- qblib QB.status.getActive(), adapter-independent
+```
+Writing a new adapter (ESX, ox_core, ...) means implementing this table in a
+new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
+`client_scripts` in place of the current adapter, and updating
+`Config.bridge.adapter` to match — `client/hud.lua`, `client/vehicle.lua`, and
+`client/voice.lua` need no changes.
+
+## Config highlights (`config.lua`)
+
+- `Config.hud.dynamic` — hide gauge elements while at their neutral value
+  (full health/stamina/hunger/thirst/fuel, empty armour/stress).
+- `Config.hud.elements.*` — per-element on/off (`mic`, `cash`, `bank`,
+  `hungerThirst`, `stamina`, `stress`, `vehicle`). Health/armour/job/gang are
+  always shown — they aren't independently toggleable.
+- `Config.bridge.adapter` — documents which adapter is loaded (`"qbcore"` by
+  default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
+- `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and
+  the expected Mumble-backed voice resource.
+- `Config.poll.vehicleInterval` (250ms) — speed/fuel/engine/headlight refresh
+  while in a vehicle.
+- `Config.poll.bridgeInterval` (500ms) — fallback poll cadence for adapters
+  with no `onChange` push path (the qbcore adapter pushes instead and never
+  uses this).
+
+## Related resources
+
+Part of the [qbcore2](https://github.com/qbcore2) resource set:
+
+- [qblib](https://qbcore2.github.io/qblib/) — shared helper library
+- [qbsql](https://qbcore2.github.io/qbsql/) — database driver
+- [qbcore](https://qbcore2.github.io/qbcore/) — framework core
+- [qbinventory](https://qbcore2.github.io/qbinventory/) — headless inventory
+- [qbtarget](https://qbcore2.github.io/qbtarget/) — targeting/interaction
+- [qbclothing](https://qbcore2.github.io/qbclothing/) — clothing/wardrobe
+- [full resource list ↗](https://github.com/orgs/qbcore2/repositories)

@@ -1,0 +1,4 @@
+theme: jekyll-theme-cayman
+title: qbhud
+description: "Configurable HUD built on qblib"
+show_downloads: false
