@@ -8,9 +8,14 @@ export function MicIndicator() {
     if (!config.elements.mic) return null
 
     return (
-        <div className={cn("hud-chip flex items-center justify-center p-2 transition-colors duration-fast", update.talking && "hud-chip-accent")}>
+        <div
+            className={cn(
+                "hud-panel flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-fast",
+                update.talking && "hud-panel-accent-success",
+            )}
+        >
             {update.talking ? (
-                <Mic className="h-4 w-4 text-primary" aria-label="Talking" />
+                <Mic className="h-4 w-4 animate-pulse text-success" aria-label="Talking" />
             ) : (
                 <MicOff className="h-4 w-4 text-muted-foreground" aria-label="Not talking" />
             )}

@@ -27,13 +27,19 @@ export function StatusEffects() {
     if (!update.status || update.status.length === 0) return null
 
     return (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col items-end gap-1.5">
             {update.status.map((effect) => (
-                <div key={effect.name} className="hud-chip flex items-center gap-2 px-3 py-1.5" title={humanize(effect.name)}>
-                    <AlertTriangle className="size-4 text-destructive" />
-                    <span className="text-sm">
+                <div
+                    key={effect.name}
+                    className="hud-panel flex items-center gap-2 rounded-full py-1.5 pl-2 pr-3.5 overlay-text"
+                    title={humanize(effect.name)}
+                >
+                    <span className="icon-badge icon-badge-destructive">
+                        <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <span className="text-xs font-medium">
                         {humanize(effect.name)}
-                        {effect.severity != null ? ` (${effect.severity})` : ""}
+                        {effect.severity != null ? ` · ${effect.severity}` : ""}
                     </span>
                 </div>
             ))}

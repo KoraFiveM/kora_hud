@@ -1,6 +1,8 @@
 import { Fuel, Gauge, Power, PowerOff, ShieldAlert, ShieldCheck } from "lucide-react"
 
 import { useHudState } from "@/lib/hudState"
+import { statColor } from "@/lib/statColor"
+import { RadialGauge } from "./RadialGauge"
 
 // Only rendered while `vehicle` (from the separate "qbhud:vehicle" message,
 // sent faster than "qbhud:update" -- see client/hud.lua's pushVehicleUpdate)
@@ -13,30 +15,27 @@ export function VehicleInfo() {
     const { speed, fuel, engineOn, seatbelt } = vehicle
 
     return (
-        <div className="hud-chip flex items-center gap-4 px-4 py-2 text-sm font-mono overlay-text">
-            <div className="flex items-center gap-2 text-foreground">
-                <Gauge className="h-4 w-4 shrink-0" aria-hidden />
-                <span>{Math.round(speed)} km/h</span>
-            </div>
-            {fuel !== null && (
-                <div className="flex items-center gap-2 text-foreground">
-                    <Fuel className="h-4 w-4 shrink-0" aria-hidden />
-                    <span>{Math.round(fuel)}%</span>
+        <div className="flex items-center gap-3">
+            {fuel !== null && <RadialGauge icon={Fuel} value={fuel} label="Fuel" color={statColor(fuel)} size={36} stroke={3} />}
+            <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
+                <div className="flex items-baseline gap-1.5 text-foreground">
+                    <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="text-2xl font-bold leading-none tabular-nums">{Math.round(speed)}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">km/h</span>
                 </div>
-            )}
-            <div title={engineOn ? "Engine on" : "Engine off"}>
-                {engineOn ? (
-                    <Power className="h-4 w-4 shrink-0 text-success" aria-label="Engine on" />
-                ) : (
-                    <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Engine off" />
-                )}
-            </div>
-            <div title={seatbelt ? "Seatbelt on" : "Seatbelt off"}>
-                {seatbelt ? (
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label="Seatbelt on" />
-                ) : (
-                    <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-label="Seatbelt off" />
-                )}
+                <div className="h-8 w-px bg-border" />
+                <div className="flex items-center gap-2.5">
+                    {engineOn ? (
+                        <Power className="h-4 w-4 shrink-0 text-success" aria-label="Engine on" />
+                    ) : (
+                        <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Engine off" />
+                    )}
+                    {seatbelt ? (
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label="Seatbelt on" />
+                    ) : (
+                        <ShieldAlert className="h-4 w-4 shrink-0 animate-pulse text-warning" aria-label="Seatbelt off" />
+                    )}
+                </div>
             </div>
         </div>
     )

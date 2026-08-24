@@ -7,17 +7,19 @@ export function JobGang() {
     const { update } = useHudState()
 
     return (
-        <div className="hud-chip flex flex-col gap-1 px-3 py-2 text-sm overlay-text">
-            <div className="flex items-center gap-2 text-foreground">
-                <Briefcase className="h-4 w-4 shrink-0" aria-hidden />
-                <span>
-                    {update.job.label}
-                    {update.job.onDuty ? " (on duty)" : ""}
+        <div className="hud-panel flex flex-col gap-1.5 rounded-2xl px-3.5 py-2.5 text-sm overlay-text">
+            <div className="flex items-center gap-2.5 text-foreground">
+                <span className="icon-badge icon-badge-primary">
+                    <Briefcase className="h-3.5 w-3.5" aria-hidden />
                 </span>
+                <span className="font-medium">{update.job.label}</span>
+                {update.job.onDuty && <span className="text-[10px] font-semibold uppercase tracking-wide text-success">on duty</span>}
             </div>
             {update.gang && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                    <Users className="h-4 w-4 shrink-0" aria-hidden />
+                <div className="flex items-center gap-2.5 text-muted-foreground">
+                    <span className="icon-badge icon-badge-muted">
+                        <Users className="h-3.5 w-3.5" aria-hidden />
+                    </span>
                     <span>{update.gang.label}</span>
                 </div>
             )}

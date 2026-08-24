@@ -32,7 +32,9 @@
     --brand-pressed: 347.9 82.8% 36.5%;
     --brand-soft: 348 83.3% 47.1% / 0.14;
     --brand-border: 348 83.3% 47.1% / 0.45;
-    --hud: 0 0% 9% / 0.92;
+    /* HUD surfaces sit over live gameplay: enough charcoal for reliable text,
+       but deliberately translucent so they do not read as black UI blocks. */
+    --hud: 0 0% 8% / 0.64;
     --success: 142.1 70.6% 45.3%;
     --warning: 37.7 92.1% 50.2%;
     --info: 0 0% 83.1%;
@@ -52,17 +54,53 @@
     text-shadow: 0 1px 2px rgb(0 0 0 / 90%);
   }
 
-  .hud-chip {
-    border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
+  /*
+   * Shared panel surface every HUD cluster renders through. Deliberately no
+   * border-radius here -- callers add rounded-2xl/rounded-full themselves so
+   * a single declaration here can't fight a utility class over specificity.
+   *
+   * No backdrop-filter: FiveM's NUI layer is a transparent overlay composited
+   * directly over the game world, not a normal browser page with content
+   * behind it -- CEF has nothing real to sample for the blur, so it renders
+   * as a solid black box instead of a blurred game view. A single translucent
+   * charcoal surface keeps the game visible without leaning on blur or a
+   * decorative gradient.
+   */
+  .hud-panel {
+    position: relative;
+    border: 1px solid hsl(var(--border) / 0.72);
     background: hsl(var(--hud));
-    box-shadow: 0 4px 12px rgb(0 0 0 / 35%);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 32%), inset 0 1px 0 hsl(0 0% 100% / 4%);
   }
 
-  .hud-chip-accent {
-    border-color: hsl(var(--brand-border));
-    background: hsl(var(--brand-soft));
+  /*
+   * Declared after .hud-panel so this wins the border-color tie-break --
+   * relying on a Tailwind border-* utility here instead would fight
+   * .hud-panel's own `border` shorthand for the same property, and their
+   * relative order inside Tailwind's utilities layer isn't something this
+   * file controls.
+   */
+  .hud-panel-accent-success {
+    border-color: hsl(var(--success));
   }
+
+  /* Small round icon badges used inside hud-panel rows (job/gang/cash/status). */
+  .icon-badge {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+  }
+
+  .icon-badge-primary { background: hsl(var(--primary) / 14%); color: hsl(var(--primary)); }
+  .icon-badge-success { background: hsl(var(--success) / 14%); color: hsl(var(--success)); }
+  .icon-badge-warning { background: hsl(var(--warning) / 14%); color: hsl(var(--warning)); }
+  .icon-badge-destructive { background: hsl(var(--destructive) / 14%); color: hsl(var(--destructive)); }
+  .icon-badge-info { background: hsl(var(--info) / 14%); color: hsl(var(--info)); }
+  .icon-badge-muted { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
 }
 
 /*

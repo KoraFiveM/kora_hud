@@ -1,7 +1,8 @@
 import { Heart, Shield } from "lucide-react"
 
 import { useHudState } from "@/lib/hudState"
-import { StatBar } from "./StatBar"
+import { statColor } from "@/lib/statColor"
+import { RadialGauge } from "./RadialGauge"
 
 // GTA's death floor is commonly 100, not 0 (see qblib's modules/cache
 // docs.md) -- display health relative to that floor so an empty bar means
@@ -15,9 +16,9 @@ export function HealthArmour() {
     const healthPercent = ((update.health - HEALTH_FLOOR) / (HEALTH_CEILING - HEALTH_FLOOR)) * 100
 
     return (
-        <div className="hud-chip flex flex-col gap-1.5 px-3 py-2">
-            <StatBar icon={Heart} value={healthPercent} colorClassName="bg-destructive" label="Health" />
-            <StatBar icon={Shield} value={update.armour} colorClassName="bg-info" label="Armour" />
+        <div className="flex items-center gap-2">
+            <RadialGauge icon={Heart} value={healthPercent} label="Health" color={statColor(healthPercent)} pulse />
+            <RadialGauge icon={Shield} value={update.armour} label="Armour" color={statColor(update.armour)} />
         </div>
     )
 }

@@ -18,6 +18,11 @@ import { HudStateProvider, useHudState } from "@/lib/hudState"
  * qblib's own web/src/App.tsx. Split out from App so the visibility check has
  * HudStateProvider's context available (a provider's own children can't read
  * the context it provides).
+ *
+ * Bottom row is a 3-column grid so the vehicle speedometer sits genuinely
+ * centered between the vitals cluster and the job/cash column regardless of
+ * how wide either side is, instead of being centered under the whole page
+ * (which reads off-center once one side is wider than the other).
  */
 function HudContent() {
     const { visible } = useHudState()
@@ -25,21 +30,21 @@ function HudContent() {
 
     return (
         <div className="pointer-events-none fixed inset-0 z-hud flex flex-col justify-end p-4">
-            <div className="flex items-end justify-between gap-4">
-                <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-4">
+                <div className="flex items-center gap-3 justify-self-start">
                     <HealthArmour />
                     <Stamina />
                     <HungerThirst />
                     <Stress />
                 </div>
-                <div className="flex flex-col items-end gap-2">
+                <div className="justify-self-center">
+                    <VehicleInfo />
+                </div>
+                <div className="flex flex-col items-end gap-2 justify-self-end">
+                    <MicIndicator />
                     <JobGang />
                     <CashBank />
-                    <MicIndicator />
                 </div>
-            </div>
-            <div className="mt-2 flex justify-center">
-                <VehicleInfo />
             </div>
             <div className="pointer-events-none fixed right-4 top-4">
                 <StatusEffects />

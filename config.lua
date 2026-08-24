@@ -29,6 +29,9 @@ Config.voice = {
 }
 
 Config.poll = {
-    vehicleInterval = 20,  -- ms between vehicle HUD refreshes (speed/fuel/engine) while in a vehicle
+    -- 10Hz is visually smooth for a HUD speedometer but avoids 50 Lua-to-NUI
+    -- messages per second while driving. The browser can interpolate values
+    -- between messages if a future skin wants a smoother needle.
+    vehicleInterval = 100, -- ms between vehicle HUD refreshes (speed/fuel/engine) while in a vehicle
     bridgeInterval  = 500, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
 }
