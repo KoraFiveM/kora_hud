@@ -37,6 +37,16 @@ local function loadHud(opts)
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
     _G.GetEntityMaxHealth = function() return opts.maxHealth or 200 end
     _G.GetPlayerStamina = function() return 100 end
+
+    -- client/hud.lua requests the minimap scaleform at load time (to suppress
+    -- the engine's own health/armour cluster via SETUP_HEALTH_ARMOUR) and then
+    -- reissues the method every tick. Unmocked, the load-time
+    -- RequestScaleformMovie aborts the whole chunk, which fails every
+    -- assertion in this file rather than just the scaleform behaviour.
+    _G.RequestScaleformMovie = function(movie) return 'scaleform:' .. tostring(movie) end
+    _G.BeginScaleformMovieMethod = function() end
+    _G.ScaleformMovieMethodAddParamInt = function() end
+    _G.EndScaleformMovieMethod = function() end
     _G.CreateThread = function(callback)
         local thread = coroutine.create(callback)
         threads[#threads + 1] = thread
