@@ -17,6 +17,15 @@ _G.RegisterCommand = function(name, handler)
     commands[name] = handler
 end
 _G.RegisterKeyMapping = function() end
+_G.QB = {
+    status = { getActive = function() return {} end },
+    keybind = {
+        add = function(options)
+            commands[options.name] = options.onPressed
+            return { remove = function() return true end }
+        end,
+    },
+}
 
 dofile(repoRoot .. "client/bridge/stub.lua")
 

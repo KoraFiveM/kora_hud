@@ -139,8 +139,15 @@ end
 -- state (it's a vehicle-script mechanic), so this adapter owns the same keybind
 -- the stub did until a seatbelt system is wired into a vehicle resource.
 local seatbelt = false
-RegisterCommand('hud_toggleseatbelt', function() seatbelt = not seatbelt end, false)
-RegisterKeyMapping('hud_toggleseatbelt', 'Toggle seatbelt (qbcore adapter)', 'keyboard', 'B')
+local function toggleSeatbelt() seatbelt = not seatbelt end
+RegisterCommand('hud_toggleseatbelt', toggleSeatbelt, false)
+QB.keybind.add({
+    name = 'hud_toggleseatbelt',
+    description = 'Toggle seatbelt (qbcore adapter)',
+    defaultMapper = 'keyboard',
+    defaultKey = 'B',
+    onPressed = toggleSeatbelt,
+})
 
 -- Cheap hot-path accessor for the vehicle sampler. Keeping this separate from
 -- getSnapshot avoids framework and status exports on every telemetry tick.

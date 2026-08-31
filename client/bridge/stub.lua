@@ -38,10 +38,20 @@ end)
 -- mechanic normally toggled by the framework's own vehicle script. Until a
 -- real adapter wires up that framework's actual seatbelt state, the stub
 -- owns a placeholder toggled by its own keybind.
-RegisterCommand("hud_toggleseatbelt", function()
+local function toggleSeatbelt()
     state.seatbelt = not state.seatbelt
-end, false)
-RegisterKeyMapping("hud_toggleseatbelt", "Toggle seatbelt (qb-hud stub bridge)", "keyboard", "B")
+end
+
+-- Retain the documented console command while QB.keybind owns the actual
+-- settings mapping and lifecycle.
+RegisterCommand('hud_toggleseatbelt', toggleSeatbelt, false)
+QB.keybind.add({
+    name = 'hud_toggleseatbelt',
+    description = 'Toggle seatbelt (qb-hud stub bridge)',
+    defaultMapper = 'keyboard',
+    defaultKey = 'B',
+    onPressed = toggleSeatbelt,
+})
 
 ---@return boolean
 function HudBridge.getSeatbelt()

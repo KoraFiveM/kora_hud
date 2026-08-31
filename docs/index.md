@@ -100,7 +100,7 @@ qbcore itself (`exports.qbcore:addMoney`, `exports.qbcore:setJob`, ...).
 ```
 /hud_toggleseatbelt
 ```
-Bound to `B` by default via `RegisterKeyMapping`. Stock FiveM has no seatbelt
+Bound to `B` by default via `QB.keybind`. Stock FiveM has no seatbelt
 native at all, so both adapters own this as local placeholder state until a
 real seatbelt system is wired into a vehicle resource.
 
