@@ -111,7 +111,7 @@ local function reconcileLogin(value)
     end)
 end
 
-local localPlayerBag = ('player:%s'):format(GetPlayerServerId(PlayerId()))
+local localPlayerBag = ('player:%s'):format(QB.cache.serverId())
 AddStateBagChangeHandler(LOGIN_STATE, localPlayerBag, function(_, _, value)
     reconcileLogin(value == true)
 end)

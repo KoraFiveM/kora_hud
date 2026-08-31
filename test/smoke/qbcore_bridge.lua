@@ -18,6 +18,7 @@ local function loadBridge(initialState, initialData)
     _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true } }
     _G.PlayerId = function() return 3 end
     _G.GetPlayerServerId = function() return 17 end
+    _G.QB = { cache = { serverId = function() return 17 end } }
     _G.RegisterCommand = function() end
     _G.RegisterKeyMapping = function() end
     _G.RegisterNetEvent = function(name) registeredEvents[name] = true end
