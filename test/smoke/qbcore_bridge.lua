@@ -5,8 +5,12 @@ package.path = testDir .. '?.lua;' .. package.path
 
 local harness = require('harness')
 
-local function loadBridge(initialState, initialData, initialMode)
+local function loadBridge(initialState, initialData, initialMode, sessionStarted)
     local handlers, threads, registeredEvents = {}, {}, {}
+    -- Defaults to an already-live session: every test but the deferred-
+    -- registration ones below is about what happens once the bag handlers are
+    -- actually armed.
+    local sessionLive = sessionStarted ~= false
     local playerData = initialData
     local resyncCalls = 0
     -- Default getPlayerData behaviour just returns the mutable `playerData`
@@ -17,9 +21,12 @@ local function loadBridge(initialState, initialData, initialMode)
     _G.HudBridge = nil
     _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true, ['qbmultichar:mode'] = initialMode } }
     _G.PlayerId = function() return 3 end
-    _G.GetPlayerServerId = function() return 17 end
+    -- The real native returns -1 until the session is live, which is the whole
+    -- reason the bridge defers its state bag registration.
+    _G.GetPlayerServerId = function() return sessionLive and 17 or -1 end
+    _G.NetworkIsSessionStarted = function() return sessionLive end
     _G.QB = {
-        cache = { serverId = function() return 17 end },
+        cache = { serverId = function() return sessionLive and 17 or -1 end },
         keybind = { add = function() return { remove = function() return true end } end },
     }
     _G.RegisterCommand = function() end
@@ -55,21 +62,28 @@ local function loadBridge(initialState, initialData, initialMode)
         -- N calls before succeeding (simulating qbcore mid-restart).
         setPlayerDataImpl = function(fn) getPlayerDataImpl = fn end,
         resyncCalls = function() return resyncCalls end,
+        startSession = function() sessionLive = true end,
+        -- REAL CFX ORDERING: a state bag change handler fires BEFORE the new
+        -- value is committed to the local store -- LocalPlayer.state still
+        -- returns the OLD value inside the handler. These setters fire first
+        -- and commit after, so a bridge that reads the store synchronously
+        -- from a handler decides on stale state and fails here, exactly as it
+        -- did live ("HUD never shows" #2). Do not "fix" the order.
         setLoginState = function(value)
-            LocalPlayer.state['qbcore:loggedIn'] = value
             for _, handler in ipairs(handlers) do
                 if handler.key == 'qbcore:loggedIn' then
                     handler.callback('player:17', 'qbcore:loggedIn', value, nil, true)
                 end
             end
+            LocalPlayer.state['qbcore:loggedIn'] = value
         end,
         setCinematicMode = function(value)
-            LocalPlayer.state['qbmultichar:mode'] = value
             for _, handler in ipairs(handlers) do
                 if handler.key == 'qbmultichar:mode' then
                     handler.callback('player:17', 'qbmultichar:mode', value, nil, true)
                 end
             end
+            LocalPlayer.state['qbmultichar:mode'] = value
         end,
         step = function()
             for _, thread in ipairs(threads) do
@@ -108,10 +122,85 @@ harness.test('the cinematic mode state keeps the HUD hidden until spawn cleanup 
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'logged-in characters remain hidden during spawn selection')
 
     bridge.setCinematicMode(nil)
+    bridge.step() -- the release reconcile waits a frame for the bag commit
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'clearing the server-owned mode restores the HUD')
 
     bridge.setCinematicMode('creator')
-    harness.assertFalse(bridge.bridge.isLoggedIn(), 'the scene studio hides the HUD too')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'the scene studio hides the HUD too, and instantly')
+end)
+
+-- qbmultichar publishes its cleared mode as `false` rather than deleting the
+-- key: a state bag DELETION does not replicate to the owning client, so a nil
+-- clear never reaches this bridge and the HUD stays hidden for the rest of the
+-- session. Both spellings of "cleared" must release the gate -- `false` from a
+-- current qbmultichar, nil on a server that never ran one.
+harness.test('an explicitly cleared cinematic mode (false, not a nil deletion) releases the HUD', function()
+    local bridge = loadBridge(true, { money = {}, metadata = {} }, 'spawn')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'the spawn carousel hides the HUD')
+
+    bridge.setCinematicMode(false)
+    bridge.step()
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'a false cinematic mode means cleanup finished')
+end)
+
+-- The exact live login sequence, with the harness's fire-before-commit
+-- ordering: qbcore flips the login bag true while qbmultichar's mode is still
+-- truthy, and the LAST transition of the whole sequence is the mode clearing.
+-- A reconcile that reads the store synchronously from that final handler sees
+-- the stale mode, decides "still cinematic", and nothing ever fires again --
+-- the HUD is hidden for the rest of the session while every bag reads correct.
+harness.test('the full login sequence (login during spawn mode, then the mode clear) opens the gate', function()
+    local bridge = loadBridge(false, { money = {}, metadata = {} }, 'selection')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'hidden at character select')
+
+    bridge.setLoginState(true)
+    bridge.step()
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'login during a cinematic mode stays hidden')
+
+    bridge.setCinematicMode('spawn')
+    bridge.step()
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'hidden through the spawn carousel')
+
+    bridge.setCinematicMode(false)
+    bridge.step()
+    harness.assertTrue(bridge.bridge.isLoggedIn(),
+        'the final mode clear must open the gate despite firing before the bag commit')
+end)
+
+harness.test('a false cinematic mode present at chunk load does not gate the reconcile', function()
+    local bridge = loadBridge(true, { money = {}, metadata = {} }, false)
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'a cleared mode already in the bag must not hide the HUD on restart')
+end)
+
+-- Client scripts load during the join/loading screen, BEFORE the session is
+-- live -- GetPlayerServerId(PlayerId()) is -1 there. A state bag handler binds
+-- to the bag name it is given at registration time, so registering at chunk
+-- load subscribes to 'player:-1' forever: no login, cinematic-mode or cash
+-- change ever reaches the bridge and the HUD stays hidden for the entire
+-- session. qbmultichar/client.lua defers its own login handler for this reason.
+harness.test('state bag handlers are not registered against the pre-session -1 server id', function()
+    local bridge = loadBridge(true, { money = {}, metadata = {} }, nil, false)
+    harness.assertEqual(#bridge.handlers, 0, 'nothing may be registered before the session is live')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'the HUD stays hidden while the session is still starting')
+
+    bridge.startSession()
+    bridge.step()
+
+    harness.assertEqual(#bridge.handlers, 3, 'login, cinematic mode and cash handlers arm once the session is live')
+    for _, handler in ipairs(bridge.handlers) do
+        harness.assertEqual(handler.bagName, 'player:17', 'every handler must bind the real local player bag')
+    end
+end)
+
+harness.test('a login that lands only after the session starts still shows the HUD', function()
+    local bridge = loadBridge(true, { money = {}, metadata = {} }, nil, false)
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'hidden while the session is still starting')
+
+    bridge.startSession()
+    bridge.step() -- arms the handlers and runs the catch-up reconcile
+    bridge.step() -- lets the reconcile thread observe the populated mirror
+
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'the deferred reconcile must still open the HUD gate')
 end)
 
 harness.test('a qbhud restart reconciles an already-present local login state', function()
@@ -165,7 +254,8 @@ harness.test('a pcall-guarded getPlayerData error does not kill the reconcile th
     end)
 
     bridge.setLoginState(true)
-    bridge.step()
+    bridge.step() -- runs the frame-deferred reconcile; its first read errors
+    bridge.step() -- the retry succeeds
 
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'an error on one export call must be swallowed and retried, not kill the thread')
 end)

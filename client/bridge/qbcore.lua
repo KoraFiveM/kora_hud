@@ -21,6 +21,15 @@ HudBridge = HudBridge or {}
 -- state bag persists across qbhud restarts and is replicated to LocalPlayer.
 local LOGIN_STATE = 'qbcore:loggedIn'
 local CINEMATIC_MODE_STATE = 'qbmultichar:mode'
+
+-- qbmultichar publishes a MODE STRING while a cinematic session is open and a
+-- falsy value once cleanup has finished (`false` on a current qbmultichar, nil
+-- on a server that never ran one -- see qbmultichar/server.lua's writeMode for
+-- why the clear cannot be a nil deletion). Gate on truthiness so both spellings
+-- of "no cinematic mode" release the HUD.
+local function inCinematicMode()
+    return LocalPlayer.state[CINEMATIC_MODE_STATE] and true or false
+end
 local CASH_STATE = 'qbcore:money:cash'
 local loggedIn = false
 local loginHandlers = {}
@@ -64,7 +73,7 @@ local function reconcileLogin(value)
     loginGeneration = loginGeneration + 1
     local generation = loginGeneration
 
-    if value ~= true or LocalPlayer.state[CINEMATIC_MODE_STATE] ~= nil then
+    if value ~= true or inCinematicMode() then
         notifyLoginChange(false)
         return
     end
@@ -89,7 +98,7 @@ local function reconcileLogin(value)
             local attempts = 0
             local data = tryGetPlayerData()
             while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
-                and LocalPlayer.state[CINEMATIC_MODE_STATE] == nil
+                and not inCinematicMode()
                 and data == nil
                 and attempts < RECONCILE_WAIT_FRAMES do
                 Wait(0)
@@ -98,7 +107,7 @@ local function reconcileLogin(value)
             end
 
             if generation ~= loginGeneration or LocalPlayer.state[LOGIN_STATE] ~= true
-                or LocalPlayer.state[CINEMATIC_MODE_STATE] ~= nil then
+                or inCinematicMode() then
                 return
             end
 
@@ -114,30 +123,87 @@ local function reconcileLogin(value)
     end)
 end
 
-local localPlayerBag = ('player:%s'):format(QB.cache.serverId())
-AddStateBagChangeHandler(LOGIN_STATE, localPlayerBag, function(_, _, value)
-    reconcileLogin(value == true)
-end)
+-- Deferred until the session is live, NOT run at chunk load: a state bag
+-- handler is bound to a bag NAME resolved once, at registration, and the local
+-- player's server id does not exist yet while this chunk loads. Client scripts
+-- start during the join/loading screen, where GetPlayerServerId(PlayerId())
+-- (and therefore QB.cache.serverId(), which just mirrors it) is -1 -- so
+-- registering here would permanently subscribe to `player:-1`, a bag nothing
+-- ever writes. Every login, cinematic-mode and cash change would then be
+-- invisible to this adapter: `loggedIn` stays false for the whole session and
+-- the HUD never appears at all. qbmultichar/client.lua defers its own
+-- `qbcore:loggedIn` handler for exactly this reason.
+--
+-- Waiting on the server id itself as well as the session flag: QB.cache
+-- re-reads the native on qblib's shared tick (Config.cache.tickInterval), so
+-- it can still be reporting the pre-session -1 for one tick after
+-- NetworkIsSessionStarted() flips.
+CreateThread(function()
+    while not NetworkIsSessionStarted() do Wait(0) end
 
--- qbcore marks the character logged in before the mandatory spawn carousel
--- ends. qbmultichar's replicated mode is the authoritative cinematic gate, so
--- the HUD stays hidden through selection, spawning, and scene-studio previews.
-AddStateBagChangeHandler(CINEMATIC_MODE_STATE, localPlayerBag, function(_, _, value)
-    if value ~= nil then
-        loginGeneration = loginGeneration + 1
-        notifyLoginChange(false)
-    else
-        reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
+    local serverId = QB.cache.serverId()
+    while type(serverId) ~= 'number' or serverId <= 0 do
+        Wait(0)
+        serverId = QB.cache.serverId()
     end
-end)
 
--- Reconcile immediately for `ensure qbhud` after a character is already
--- loaded; a bag-change handler only observes future transitions.
-reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
+    local localPlayerBag = ('player:%s'):format(serverId)
 
-AddStateBagChangeHandler(CASH_STATE, localPlayerBag, function(_, _, value)
-    if type(value) ~= 'number' then return end
-    for _, handler in ipairs(dataHandlers) do handler(HudBridge.getSnapshot()) end
+    -- CFX fires a state bag change handler BEFORE the new value is committed
+    -- to the local bag store -- reading LocalPlayer.state inside the handler
+    -- still returns the PREVIOUS value (the docs' own guidance is to Wait(0)
+    -- first). reconcileLogin's show path re-reads BOTH keys from the store,
+    -- so any handler-triggered reconcile that could SHOW the HUD must wait a
+    -- frame or it decides on stale state. This was the second "HUD never
+    -- shows" bug: the login sequence ends with qbmultichar:mode flipping
+    -- 'spawn' -> false, and the release-side reconcile re-read the store
+    -- synchronously, still saw 'spawn', and concluded "still cinematic" --
+    -- permanently, since that clear is a login's final transition. Hide paths
+    -- stay synchronous: they act on the handler's own authoritative argument
+    -- and never read the store, so logout/cutscene-start hide instantly.
+    local function reconcileNextFrame()
+        CreateThread(function()
+            Wait(0) -- let the notifying change (and any batched with it) commit
+            reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
+        end)
+    end
+
+    AddStateBagChangeHandler(LOGIN_STATE, localPlayerBag, function(_, _, value)
+        if value ~= true then
+            reconcileLogin(false) -- pure hide: short-circuits before any store read
+        else
+            reconcileNextFrame()
+        end
+    end)
+
+    -- qbcore marks the character logged in before the mandatory spawn carousel
+    -- ends. qbmultichar's replicated mode is the authoritative cinematic gate,
+    -- so the HUD stays hidden through selection, spawning, and scene-studio
+    -- previews.
+    AddStateBagChangeHandler(CINEMATIC_MODE_STATE, localPlayerBag, function(_, _, value)
+        if value then
+            loginGeneration = loginGeneration + 1
+            notifyLoginChange(false)
+        else
+            reconcileNextFrame()
+        end
+    end)
+
+    AddStateBagChangeHandler(CASH_STATE, localPlayerBag, function(_, _, value)
+        if type(value) ~= 'number' then return end
+        -- Same pre-commit quirk: snapshotFrom reads CASH_STATE back out of the
+        -- bag, so pushing synchronously would hand consumers the OLD balance.
+        CreateThread(function()
+            Wait(0)
+            for _, handler in ipairs(dataHandlers) do handler(HudBridge.getSnapshot()) end
+        end)
+    end)
+
+    -- Reconcile immediately for `ensure qbhud` after a character is already
+    -- loaded; a bag-change handler only observes future transitions. Runs after
+    -- the handlers are armed so a transition landing mid-reconcile is still
+    -- observed rather than dropped.
+    reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
 end)
 
 ---@return boolean
