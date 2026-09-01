@@ -29,12 +29,17 @@ local FORBIDDEN_NUI = setmetatable({}, {
 local function loadHud(opts)
     opts = opts or {}
     local sent, callbacks, threads = {}, {}, {}
-    local cacheHandlers, bridgeHandlers = {}, {}
+    local cacheHandlers, bridgeHandlers, loginHandlers = {}, {}, {}
     local snapshots, vehicle = 0, opts.inVehicle and 42 or nil
     local seatbelt = false
+    local loggedIn = opts.loggedIn ~= false
+    local exported = {}
 
     _G.SendNUIMessage = function(message) sent[#sent + 1] = message end
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
+    -- The runtime `exports('name', fn)` registrar (callable, unlike the
+    -- `exports.<resource>` consumer side) -- hud.lua registers show/hide here.
+    _G.exports = setmetatable({}, { __call = function(_, name, fn) exported[name] = fn end })
     _G.GetEntityMaxHealth = function() return opts.maxHealth or 200 end
     _G.GetPlayerStamina = function() return 100 end
 
@@ -61,8 +66,8 @@ local function loadHud(opts)
     }
 
     _G.HudBridge = {
-        isLoggedIn = function() return true end,
-        onLoginChange = function() end,
+        isLoggedIn = function() return loggedIn end,
+        onLoginChange = function(handler) loginHandlers[#loginHandlers + 1] = handler end,
         getSnapshot = function()
             if opts.snapshotError then error('qbcore export not resolvable', 0) end
             snapshots = snapshots + 1
@@ -143,6 +148,18 @@ local function loadHud(opts)
             for _, handler in ipairs(cacheHandlers.vehicle or {}) do handler(value) end
         end,
         setSeatbelt = function(value) seatbelt = value end,
+        exported = exported,
+        setLoggedIn = function(value)
+            loggedIn = value
+            for _, handler in ipairs(loginHandlers) do handler(value) end
+        end,
+        -- The most recent qbhud:visibility payload, or nil if none was sent.
+        lastVisibility = function()
+            for i = #sent, 1, -1 do
+                if sent[i].action == 'qbhud:visibility' then return sent[i].data end
+            end
+            return nil
+        end,
         pushBridge = function(snapshot)
             for _, handler in ipairs(bridgeHandlers) do handler(snapshot) end
         end,
@@ -169,12 +186,14 @@ harness.test('qbhud never routes NUI through QB.nui (which targets qblib\'s fram
     harness.assertTrue(hud.contains('qbhud:config'), 'initial state should reach the frame via SendNUIMessage')
 end)
 
-harness.test('the ready callback is registered even when the bridge throws at load', function()
-    -- The callback must be the FIRST statement in the chunk: if it were
-    -- registered after HudBridge.getSnapshot(), a mid-restart qbcore would
-    -- abort the chunk and the page would 404 forever with nothing to retry it.
+harness.test('a bridge that throws at load cannot take the HUD down with it', function()
+    -- Every bridge read in the chunk (initial snapshot, the polling fallback)
+    -- is pcall-guarded, so a mid-restart qbcore degrades to default data
+    -- instead of aborting the chunk -- and the qbhud:ready callback (kept
+    -- FIRST in the chunk as a last line of defence) still answers, so the
+    -- page can never 404 forever on its ready ping.
     local hud = loadHud({ snapshotError = true })
-    harness.assertFalse(hud.loaded, 'this case is meant to abort the chunk partway')
+    harness.assertTrue(hud.loaded, 'a throwing bridge must not abort the chunk: ' .. tostring(hud.loadError))
     harness.assertEqual(type(hud.callbacks['qbhud:ready']), 'function',
         'qbhud:ready must be registered before anything that can throw')
 
@@ -182,6 +201,8 @@ harness.test('the ready callback is registered even when the bridge throws at lo
     hud.callbacks['qbhud:ready']({}, function() replies = replies + 1 end)
     harness.assertEqual(replies, 1,
         'the handler must always answer exactly once, or the page fetch hangs forever')
+    harness.assertTrue(hud.contains('qbhud:visibility'),
+        'the ready ping must still deliver the visibility push on default data')
 end)
 
 harness.test('the ready callback is idempotent and re-pushes the full initial state', function()
@@ -325,6 +346,62 @@ harness.test('a player already in a vehicle at resource start gets telemetry', f
     hud.tick()
     harness.assertTrue(hud.countAction('qbhud:vehicle') > 0,
         'restarting mid-drive must not leave the vehicle panel dead until the player gets out')
+end)
+
+-- --- visibility: login transitions and the show/hide exports ---
+
+harness.test('a login shows the HUD and a logout hides it', function()
+    local hud = loadHud({ loggedIn = false })
+    harness.assertEqual(hud.lastVisibility(), false, 'logged out at start means the HUD starts hidden')
+    hud.reset()
+
+    hud.setLoggedIn(true)
+    harness.assertEqual(hud.lastVisibility(), true, 'a login transition must push visibility true')
+    harness.assertTrue(hud.countAction('qbhud:update') > 0,
+        'showing must also push a fresh data snapshot, not leave stale defaults on screen')
+
+    hud.reset()
+    hud.setLoggedIn(false)
+    harness.assertEqual(hud.lastVisibility(), false, 'a logout transition must push visibility false')
+end)
+
+harness.test('the hide export force-hides the HUD and show restores it', function()
+    local hud = loadHud()
+    harness.assertEqual(type(hud.exported.hide), 'function', 'exports.qbhud:hide must be registered')
+    harness.assertEqual(type(hud.exported.show), 'function', 'exports.qbhud:show must be registered')
+    hud.reset()
+
+    hud.exported.hide()
+    harness.assertEqual(hud.lastVisibility(), false, 'hide() must push visibility false while logged in')
+    harness.assertEqual(hud.exported.isVisible(), false, 'isVisible() reflects the forced hide')
+
+    hud.reset()
+    hud.exported.show()
+    harness.assertEqual(hud.lastVisibility(), true, 'show() must clear the override and re-show')
+    harness.assertEqual(hud.exported.isVisible(), true, 'isVisible() reflects the restore')
+end)
+
+harness.test('a login cannot undo another resource\'s forced hide', function()
+    local hud = loadHud({ loggedIn = false })
+    hud.exported.hide()
+    hud.reset()
+
+    hud.setLoggedIn(true)
+    harness.assertEqual(hud.lastVisibility(), nil,
+        'logging in while force-hidden must not push visibility true')
+    harness.assertEqual(hud.exported.isVisible(), false, 'still hidden until show() clears the override')
+
+    hud.exported.show()
+    harness.assertEqual(hud.lastVisibility(), true, 'show() after login reveals the HUD')
+end)
+
+harness.test('show cannot reveal the HUD while logged out', function()
+    local hud = loadHud({ loggedIn = false })
+    hud.reset()
+
+    hud.exported.show()
+    harness.assertEqual(hud.lastVisibility(), nil, 'show() clears the override but login still gates')
+    harness.assertEqual(hud.exported.isVisible(), false, 'the HUD stays hidden during character select')
 end)
 
 harness.report('nui')

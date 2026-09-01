@@ -124,9 +124,20 @@ master kill switch for the mic element and its sampling thread.
 
 ## API reference
 
-qbhud exposes **no exports and no client/server net events** — it's a
-self-contained NUI renderer, not an integration surface for other resources.
-Its only externally-triggerable actions are the `RegisterCommand`s listed in
+qbhud exposes three client exports for other resources that need to take the
+HUD off screen (cutscenes, cameras, custom pause menus):
+
+```lua
+exports.qbhud:hide()      -- force-hide the HUD regardless of login state
+exports.qbhud:show()      -- clear the forced hide; login state still gates
+exports.qbhud:isVisible() -- boolean: what the NUI is currently showing
+```
+
+`hide()` is an override, not a toggle of the login gate: logging in while
+force-hidden keeps the HUD hidden until `show()` clears the override, and
+`show()` during character select is a safe no-op (the HUD only ever renders
+while a character is logged in). It exposes **no client/server net events**.
+The other externally-triggerable actions are the `RegisterCommand`s listed in
 Usage examples above (`hud_toggleseatbelt` always; `hudtest_cash`/
 `hudtest_bank`/`hudtest_stress` on the stub adapter only), plus one internal
 NUI callback (`qbhud:ready`, used by the web page's own mount handshake).

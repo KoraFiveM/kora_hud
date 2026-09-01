@@ -94,7 +94,15 @@ local function currentlyLoggedIn()
     return true
 end
 
-local visible = currentlyLoggedIn()
+-- Two independent inputs decide visibility: the adapter's login state and a
+-- forced-hide override other resources control via the show/hide exports
+-- below (cutscenes, phone camera, pause screens). The HUD renders only when
+-- logged in AND not force-hidden, so an export consumer can never reveal the
+-- HUD during character select, and a login can never undo another resource's
+-- deliberate hide.
+local loggedIn = currentlyLoggedIn()
+local forcedHidden = false
+local visible = loggedIn and not forcedHidden
 
 local function syncVoiceSampling()
     Voice.setActive(visible and Config.hud.elements.mic == true)
@@ -210,27 +218,53 @@ pcall(function()
     end)
 end)
 
--- Show/hide immediately on a login transition rather than waiting for the
--- next poll tick -- e.g. qbcore's adapter pushes this off QBCore:Client:On-
--- PlayerLoaded/OnPlayerUnload. Adapters with no login concept (the stub)
--- don't implement onLoginChange, so this is a no-op for them and the HUD
--- stays visible per currentlyLoggedIn()'s default above.
-local function setVisible(newVisible)
+-- Recomputes `visible` from the two inputs and pushes the change to the NUI.
+-- Show/hide happen immediately on a login transition rather than waiting for
+-- the next poll tick -- e.g. qbcore's adapter pushes this off its replicated
+-- login state bag. Adapters with no login concept (the stub) don't implement
+-- onLoginChange, so for them only the exports below ever change visibility.
+local function refreshVisibility()
+    local newVisible = loggedIn and not forcedHidden
     if newVisible == visible then return end
     visible = newVisible
     syncVoiceSampling()
     send("qbhud:visibility", visible)
 
     if visible then
-        latestBridgeSnapshot = HudBridge.getSnapshot()
+        -- pcall'd (via safeGetBridgeSnapshot): this runs inside the adapter's
+        -- login-notify loop, and a mid-restart qbcore export must not abort
+        -- it after the visibility send already went out.
+        latestBridgeSnapshot = safeGetBridgeSnapshot()
         pushUpdate()
         pushVehicleUpdate()
     end
 end
 
 if HudBridge.onLoginChange then
-    HudBridge.onLoginChange(function(loggedIn) setVisible(loggedIn) end)
+    HudBridge.onLoginChange(function(value)
+        loggedIn = value == true
+        refreshVisibility()
+    end)
 end
+
+-- Cross-resource control surface: exports.qbhud:hide() force-hides the HUD
+-- regardless of login state (cutscenes, cameras, custom pause menus);
+-- exports.qbhud:show() clears that override -- it does NOT force the HUD on,
+-- login state still gates, so calling show() during character select stays a
+-- safe no-op. isVisible() reports the composed result the NUI currently has.
+exports('hide', function()
+    forcedHidden = true
+    refreshVisibility()
+end)
+
+exports('show', function()
+    forcedHidden = false
+    refreshVisibility()
+end)
+
+exports('isVisible', function()
+    return visible
+end)
 
 -- Assignment, NOT `local function`: that would declare a fresh local shadowing
 -- the forward declaration at the top of the file, silently leaving the
@@ -271,8 +305,15 @@ if HudBridge.onChange then
 else
     CreateThread(function()
         while true do
-            latestBridgeSnapshot = HudBridge.getSnapshot()
-            pushUpdate()
+            -- Unlike safeGetBridgeSnapshot, a failed poll keeps the LAST good
+            -- snapshot rather than reverting to defaults -- a framework
+            -- restart mid-session must not flash placeholder data, and an
+            -- uncaught error here would kill this thread for good.
+            local ok, snapshot = pcall(function() return HudBridge.getSnapshot() end)
+            if ok and type(snapshot) == 'table' then
+                latestBridgeSnapshot = snapshot
+                pushUpdate()
+            end
             Wait(Config.poll.bridgeInterval)
         end
     end)
