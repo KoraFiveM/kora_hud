@@ -5,7 +5,7 @@ package.path = testDir .. '?.lua;' .. package.path
 
 local harness = require('harness')
 
-local function loadBridge(initialState, initialData)
+local function loadBridge(initialState, initialData, initialMode)
     local handlers, threads, registeredEvents = {}, {}, {}
     local playerData = initialData
     local resyncCalls = 0
@@ -15,7 +15,7 @@ local function loadBridge(initialState, initialData)
     local getPlayerDataImpl = function() return playerData end
 
     _G.HudBridge = nil
-    _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true } }
+    _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true, ['qbmultichar:mode'] = initialMode } }
     _G.PlayerId = function() return 3 end
     _G.GetPlayerServerId = function() return 17 end
     _G.QB = {
@@ -63,6 +63,14 @@ local function loadBridge(initialState, initialData)
                 end
             end
         end,
+        setCinematicMode = function(value)
+            LocalPlayer.state['qbmultichar:mode'] = value
+            for _, handler in ipairs(handlers) do
+                if handler.key == 'qbmultichar:mode' then
+                    handler.callback('player:17', 'qbmultichar:mode', value, nil, true)
+                end
+            end
+        end,
         step = function()
             for _, thread in ipairs(threads) do
                 if coroutine.status(thread) == 'suspended' then assert(coroutine.resume(thread)) end
@@ -77,7 +85,7 @@ harness.test('the bridge gates HUD login on the local replicated state bag and P
     bridge.bridge.onLoginChange(function(value) transitions[#transitions + 1] = value end)
 
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'HUD should start hidden before character login')
-    harness.assertEqual(#bridge.handlers, 2, 'the bridge should register login and authoritative cash handlers')
+    harness.assertEqual(#bridge.handlers, 3, 'the bridge should register login, cinematic mode, and authoritative cash handlers')
     harness.assertEqual(bridge.handlers[1].key, 'qbcore:loggedIn', 'handler should watch qbcore login state')
     harness.assertEqual(bridge.handlers[1].bagName, 'player:17', 'handler should be scoped to LocalPlayer state')
 
@@ -93,6 +101,17 @@ harness.test('the bridge gates HUD login on the local replicated state bag and P
     harness.assertEqual(transitions[2], false, 'logout change should be emitted immediately')
     harness.assertFalse(bridge.events['QBCore:Client:OnPlayerLoaded'], 'qbhud must not register the legacy loaded event')
     harness.assertFalse(bridge.events['QBCore:Client:OnPlayerUnload'], 'qbhud must not register the legacy unload event')
+end)
+
+harness.test('the cinematic mode state keeps the HUD hidden until spawn cleanup completes', function()
+    local bridge = loadBridge(true, { money = {}, metadata = {} }, 'spawn')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'logged-in characters remain hidden during spawn selection')
+
+    bridge.setCinematicMode(nil)
+    harness.assertTrue(bridge.bridge.isLoggedIn(), 'clearing the server-owned mode restores the HUD')
+
+    bridge.setCinematicMode('creator')
+    harness.assertFalse(bridge.bridge.isLoggedIn(), 'the scene studio hides the HUD too')
 end)
 
 harness.test('a qbhud restart reconciles an already-present local login state', function()

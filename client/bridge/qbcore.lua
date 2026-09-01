@@ -20,6 +20,7 @@ HudBridge = HudBridge or {}
 -- events here: they are compatibility signals, not the HUD's authority.  The
 -- state bag persists across qbhud restarts and is replicated to LocalPlayer.
 local LOGIN_STATE = 'qbcore:loggedIn'
+local CINEMATIC_MODE_STATE = 'qbmultichar:mode'
 local CASH_STATE = 'qbcore:money:cash'
 local loggedIn = false
 local loginHandlers = {}
@@ -63,7 +64,7 @@ local function reconcileLogin(value)
     loginGeneration = loginGeneration + 1
     local generation = loginGeneration
 
-    if value ~= true then
+    if value ~= true or LocalPlayer.state[CINEMATIC_MODE_STATE] ~= nil then
         notifyLoginChange(false)
         return
     end
@@ -88,6 +89,7 @@ local function reconcileLogin(value)
             local attempts = 0
             local data = tryGetPlayerData()
             while generation == loginGeneration and LocalPlayer.state[LOGIN_STATE] == true
+                and LocalPlayer.state[CINEMATIC_MODE_STATE] == nil
                 and data == nil
                 and attempts < RECONCILE_WAIT_FRAMES do
                 Wait(0)
@@ -95,7 +97,8 @@ local function reconcileLogin(value)
                 data = tryGetPlayerData()
             end
 
-            if generation ~= loginGeneration or LocalPlayer.state[LOGIN_STATE] ~= true then
+            if generation ~= loginGeneration or LocalPlayer.state[LOGIN_STATE] ~= true
+                or LocalPlayer.state[CINEMATIC_MODE_STATE] ~= nil then
                 return
             end
 
@@ -114,6 +117,18 @@ end
 local localPlayerBag = ('player:%s'):format(QB.cache.serverId())
 AddStateBagChangeHandler(LOGIN_STATE, localPlayerBag, function(_, _, value)
     reconcileLogin(value == true)
+end)
+
+-- qbcore marks the character logged in before the mandatory spawn carousel
+-- ends. qbmultichar's replicated mode is the authoritative cinematic gate, so
+-- the HUD stays hidden through selection, spawning, and scene-studio previews.
+AddStateBagChangeHandler(CINEMATIC_MODE_STATE, localPlayerBag, function(_, _, value)
+    if value ~= nil then
+        loginGeneration = loginGeneration + 1
+        notifyLoginChange(false)
+    else
+        reconcileLogin(LocalPlayer.state[LOGIN_STATE] == true)
+    end
 end)
 
 -- Reconcile immediately for `ensure qbhud` after a character is already

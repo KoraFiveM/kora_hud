@@ -9,7 +9,11 @@ through a single adapter interface (`HudBridge`, documented in
 `shared/bridge.lua`) rather than framework calls scattered through the render
 code — `client/hud.lua` only ever calls `HudBridge.getSnapshot()` /
 `HudBridge.onChange()` / `HudBridge.isLoggedIn()`, so swapping the adapter
-never touches HUD logic. Two adapters ship today: `client/bridge/qbcore.lua`
+never touches HUD logic. The qbcore adapter also observes the server-owned
+`LocalPlayer.state['qbmultichar:mode']` key: selection, mandatory spawning,
+and the scene studio remain hidden even after `qbcore:loggedIn` becomes true,
+until that cinematic mode clears. Two adapters ship today:
+`client/bridge/qbcore.lua`
 sources live data from qbcore's replicated player mirror (delta-pushed, not
 polled), and `client/bridge/stub.lua` fabricates normalized mock data with no
 framework installed at all, for standalone use or UI development. Which one
