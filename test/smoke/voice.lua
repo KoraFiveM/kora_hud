@@ -19,41 +19,58 @@ _G.NetworkIsPlayerTalking = function()
     calls = calls + 1
     return false
 end
+-- Recorded, not implemented: any CreateThread at all is the regression this
+-- file exists to catch. Mic sampling runs on client/hud.lua's single shared
+-- scheduler thread -- FiveM walks every live coroutine each frame, so a second
+-- loop here would be a permanent per-frame cost for one boolean.
 _G.CreateThread = function(fn)
-    local thread = coroutine.create(fn)
-    threads[#threads + 1] = thread
-    assert(coroutine.resume(thread))
+    threads[#threads + 1] = fn
 end
 _G.Wait = function() coroutine.yield() end
 _G.Voice = nil
 
 dofile(repoRoot .. 'client/voice.lua')
 
-harness.test('voice sampling is dormant until the HUD activates it', function()
-    harness.assertEqual(#threads, 0, 'voice.lua must not create an always-running sampler at load')
-    harness.assertEqual(calls, 0, 'voice.lua must not call the voice native while inactive')
+harness.test('voice.lua owns no thread at all', function()
+    harness.assertEqual(#threads, 0, 'voice.lua must not create a thread at load')
+    Voice.setActive(true)
+    harness.assertEqual(#threads, 0, 'activating must not create a sampler thread either')
+    harness.assertEqual(calls, 0, 'activation alone must not call the voice native')
 end)
 
-harness.test('voice sampling starts once and stops immediately when inactive', function()
-    Voice.setActive(true)
-    harness.assertEqual(#threads, 1, 'activating voice should create one sampler')
-    harness.assertEqual(calls, 1, 'activation should sample immediately')
-
-    Voice.setActive(true)
-    harness.assertEqual(#threads, 1, 're-activation must not create a duplicate sampler')
-
+harness.test('sampling is inert until the HUD activates it, and again once it stops', function()
     Voice.setActive(false)
-    assert(coroutine.resume(threads[1]))
-    harness.assertEqual(calls, 1, 'a stopped sampler must not make another native call')
+    harness.assertFalse(Voice.isActive(), 'the HUD gates sampling through setActive')
+
+    Voice.sample()
+    harness.assertEqual(calls, 0, 'a sample while inactive must not reach the native')
+
+    Voice.setActive(true)
+    harness.assertTrue(Voice.isActive(), 'the scheduler drives its voice task off this')
+    Voice.sample()
+    harness.assertEqual(calls, 1, 'an active sample reads the native exactly once')
 end)
 
 harness.test('the player index is resolved once, not on every sample', function()
     local before = playerIdReads
-    Voice.setActive(true)
-    for _ = 1, 5 do assert(coroutine.resume(threads[#threads])) end
-    Voice.setActive(false)
+    for _ = 1, 5 do Voice.sample() end
 
+    harness.assertEqual(calls, 6, 'sanity: every sample reached the native')
     harness.assertEqual(playerIdReads, before, 'a session constant must not be re-read per sample')
+end)
+
+harness.test('deactivating clears the talking state so the icon cannot stick on', function()
+    local seen = {}
+    Voice.onChange(function(value) seen[#seen + 1] = value end)
+
+    _G.NetworkIsPlayerTalking = function() calls = calls + 1; return true end
+    Voice.sample()
+    harness.assertTrue(Voice.isTalking(), 'a talking sample flips the state')
+    harness.assertEqual(seen[1], true, 'and notifies listeners')
+
+    Voice.setActive(false)
+    harness.assertFalse(Voice.isTalking(), 'deactivating must not leave the mic indicator lit')
+    harness.assertEqual(seen[2], false, 'listeners see the clear too')
 end)
 
 harness.report('voice')

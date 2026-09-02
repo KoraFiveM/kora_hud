@@ -37,6 +37,8 @@ local function loadHud(opts)
     -- Every ms value any thread has ever passed to Wait, so a reintroduced
     -- per-frame loop is a test failure rather than a resmon surprise.
     local waits = {}
+    -- Mock game clock in ms, advanced explicitly by tick().
+    local clock = 0
     -- Every QB.cache.<fn>() read, by key. Each one is a cross-resource export
     -- call, so "how many of these happen per update" IS this resource's cost
     -- while the player is moving -- pinned below.
@@ -74,9 +76,19 @@ local function loadHud(opts)
         waits[#waits + 1] = ms
         coroutine.yield()
     end
+    -- The scheduler decides what is due from the game clock, so the clock is
+    -- what a test advances (see `tick` below) -- not the number of resumes.
+    _G.GetGameTimer = function() return clock end
 
     _G.Config = {
-        hud = { dynamic = opts.dynamicHud == true, elements = { mic = true, cash = true, vehicle = true } },
+        hud = {
+            dynamic = opts.dynamicHud == true,
+            elements = opts.elements or {
+                mic = true, cash = true, bank = true, hungerThirst = true,
+                stamina = true, stress = true, vehicle = true,
+            },
+        },
+        voice = { enabled = true, interval = 200 },
         poll = {
             vitalsInterval = 100,
             playerInterval = 100,
@@ -114,7 +126,17 @@ local function loadHud(opts)
             return { speed = speed, fuel = 50, engineOn = true, headlights = 'low' }
         end,
     }
-    _G.Voice = { isTalking = function() return false end, onChange = function() end, setActive = function() end }
+    -- client/voice.lua owns no thread: the HUD's scheduler calls Voice.sample()
+    -- while Voice.isActive(). The mock mirrors that contract so the voice task
+    -- participates in scheduling exactly as it does live.
+    local voiceActive, voiceSamples = false, 0
+    _G.Voice = {
+        isTalking = function() return false end,
+        onChange = function() end,
+        setActive = function(value) voiceActive = value == true end,
+        isActive = function() return voiceActive end,
+        sample = function() voiceSamples = voiceSamples + 1 end,
+    }
 
     _G.QB = {
         nui = FORBIDDEN_NUI,
@@ -164,12 +186,25 @@ local function loadHud(opts)
         snapshots = function() return snapshots end,
         threadCount = function() return #threads end,
         reset = function() for i = #sent, 1, -1 do sent[i] = nil end end,
-        -- Drives every suspended sampling thread one more iteration.
-        tick = function()
+        -- Advances the mock clock past every default interval, then resumes
+        -- whatever is still suspended -- i.e. one more scheduler pass.
+        tick = function(advanceMs)
+            clock = clock + (advanceMs or 300)
             for _, thread in ipairs(threads) do
                 if coroutine.status(thread) == 'suspended' then assert(coroutine.resume(thread)) end
             end
         end,
+        -- Threads still parked on a Wait, i.e. what FiveM's scheduler would be
+        -- walking every frame. Distinct from threadCount(), which counts every
+        -- thread ever created including the one-shot start-up one.
+        liveThreads = function()
+            local live = 0
+            for _, thread in ipairs(threads) do
+                if coroutine.status(thread) == 'suspended' then live = live + 1 end
+            end
+            return live
+        end,
+        voiceSamples = function() return voiceSamples end,
         setVehicle = function(value)
             vehicle = value
             for _, handler in ipairs(cacheHandlers.vehicle or {}) do handler(value) end
@@ -440,6 +475,72 @@ harness.test('show cannot reveal the HUD while logged out', function()
 end)
 
 -- --- cost: nothing per frame, nothing re-read across the export boundary ---
+
+harness.test('every periodic job shares ONE thread', function()
+    -- FiveM's scheduler walks every live coroutine each frame to decide what
+    -- to resume, so "a loop per job" is a permanent per-frame cost that scales
+    -- with the number of jobs. Vitals, player data, vehicle telemetry, the mic
+    -- sample and the minimap re-assert all run on one thread.
+    local hud = loadHud({ bridgePush = true, inVehicle = true })
+    hud.tick()
+    hud.pushCache('stamina', 50)
+    hud.pushBridge({ job = {}, cash = 1, hunger = 100, thirst = 100, stress = 0, seatbelt = false, status = {} })
+    hud.tick()
+
+    harness.assertEqual(hud.liveThreads(), 1,
+        'driving, talking, sprinting and receiving deltas at once is still one parked thread')
+end)
+
+harness.test('a hidden HUD parks no thread at all', function()
+    local hud = loadHud({ bridgePush = true, loggedIn = false })
+    harness.assertEqual(hud.liveThreads(), 0, 'nothing periodic may run during character select')
+
+    hud.setLoggedIn(true)
+    harness.assertEqual(hud.liveThreads(), 1, 'showing the HUD starts the one scheduler thread')
+
+    hud.exported.hide()
+    hud.tick()
+    harness.assertEqual(hud.liveThreads(), 0,
+        'hiding lets the scheduler exit rather than leaving it spinning on nothing')
+
+    hud.exported.show()
+    harness.assertEqual(hud.liveThreads(), 1, 'and showing again brings it back')
+end)
+
+harness.test('the mic is sampled on the shared scheduler, and only while visible', function()
+    local hud = loadHud({ bridgePush = true })
+    local before = hud.voiceSamples()
+    hud.tick()
+    harness.assertTrue(hud.voiceSamples() > before, 'the scheduler drives Voice.sample()')
+
+    hud.exported.hide()
+    local hidden = hud.voiceSamples()
+    hud.tick()
+    hud.tick()
+    harness.assertEqual(hud.voiceSamples(), hidden, 'a hidden HUD must not sample the voice native')
+end)
+
+harness.test('a disabled element is never subscribed to, not merely never drawn', function()
+    -- Stamina is the highest-frequency notification the HUD receives and each
+    -- one is a cross-resource funcref invocation, so a server that does not
+    -- render the ring should not be paying to receive and discard it. Same
+    -- reasoning for the vehicle sampler.
+    local hud = loadHud({
+        bridgePush = true,
+        inVehicle = true,
+        elements = { mic = false, cash = true, bank = true, hungerThirst = true,
+                     stamina = false, stress = true, vehicle = false },
+    })
+
+    harness.assertEqual(table.concat(hud.cacheKeys(), ','), 'armour,health,ped',
+        'stamina and vehicle must not be subscribed when nothing renders them')
+
+    hud.reset()
+    hud.tick()
+    hud.tick()
+    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0, 'no vehicle telemetry is sampled or sent')
+    harness.assertEqual(hud.voiceSamples(), 0, 'no mic sampling with the indicator switched off')
+end)
 
 harness.test('no HUD thread runs on a per-frame Wait(0)', function()
     -- The whole resource is written against a per-frame budget: every loop it

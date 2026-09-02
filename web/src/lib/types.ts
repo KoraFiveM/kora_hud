@@ -30,6 +30,14 @@ export interface HudConfigPayload {
         stress: boolean
         vehicle: boolean
     }
+    /**
+     * Config.poll.vitalsInterval, in ms -- how often Lua can send a
+     * "qbhud:vitals" message at most. The gauges animate over exactly this
+     * long so each ring interpolates from one sample to the next instead of
+     * stepping, which is what lets a server raise the interval to cut message
+     * rate without the HUD looking any less smooth.
+     */
+    vitalsInterval: number
 }
 
 // action: "qbhud:theme" -- QB.theme.tokens() from qblib, forwarded verbatim.

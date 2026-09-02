@@ -9,19 +9,30 @@
 -- The three channels are split by CADENCE, not by topic: stamina alone moves
 -- on every 100ms cache tick for the whole length of a sprint, and it has no
 -- business dragging the job label, the gang table and the status list through
--- msgpack (and through a React re-render of every panel) ten times a second
--- with it. Each channel is independently throttled -- see `throttle` below.
+-- msgpack (and through a React re-render of every panel) with it.
 --
 -- COST MODEL (this file is the HUD's whole per-frame budget, so it is written
--- against one): nothing here runs per frame, nothing here polls a value that
--- something else can announce, and every value read on a hot path is mirrored
--- into a plain local first. That last one matters more than it looks: every
--- QB.<module>.<fn> access is a cross-resource export call (see qblib/init.lua's
--- proxy metatable), i.e. a full boundary crossing with argument marshalling --
--- not a table lookup. Reading four of them (health/ped/armour/stamina) inside a
--- 10Hz push was most of this resource's cost while sprinting. They are now read
--- exactly once at load and kept current from the onChange handlers' own
--- arguments.
+-- against one). Three rules, in the order they matter:
+--
+--  1. NOTHING RUNS PER FRAME, and everything periodic shares ONE thread -- see
+--     the scheduler below. FiveM walks every live coroutine each frame to
+--     decide what to resume, so a sleeping thread is a cost paid every frame
+--     whether or not it had any work to do.
+--  2. NOTHING POLLS A VALUE SOMETHING ELSE CAN ANNOUNCE. Health, armour,
+--     stamina, ped and vehicle lifecycle all arrive as qblib cache
+--     notifications; job/money/needs arrive on the adapter's push path. Only
+--     vehicle telemetry and mic state are genuinely sampled, because nothing
+--     in the stack can announce them.
+--  3. NO HOT PATH READS BACK ACROSS THE EXPORT BOUNDARY. Every
+--     QB.<module>.<fn> access is a cross-resource export call (see
+--     qblib/init.lua's proxy metatable) -- a full boundary crossing with
+--     argument marshalling, not a table lookup. Values are mirrored into
+--     plain locals once and kept current from the change handlers' own
+--     arguments.
+--
+-- And the whole thing is gated on visibility: while the HUD is hidden
+-- (character select, a cutscene, a logout) this resource owns no thread and
+-- does no work at all.
 --
 -- NOTE: this resource owns its own NUI frame (ui_page in fxmanifest.lua), so
 -- every NUI native below is called RAW rather than through QB.nui.*. Because
@@ -48,9 +59,9 @@ local sendInitialState
 -- NUI page hasn't finished mounting (and attaching its "message" listener)
 -- yet, a send is lost, not queued. That's silent AND permanent for a player
 -- who's already logged in when this resource (re)starts -- e.g. every
--- `ensure qbhud` while testing -- because setVisible() below only resends
--- qbhud:visibility on a change from *Lua's* perspective, and Lua already
--- believes it sent `visible` once. The NUI is left stuck on its
+-- `ensure qbhud` while testing -- because refreshVisibility() below only
+-- resends qbhud:visibility on a change from *Lua's* perspective, and Lua
+-- already believes it sent `visible` once. The NUI is left stuck on its
 -- DEFAULT_VISIBLE=false forever, with nothing left to nudge it. This callback
 -- is the reliable half: web/src/lib/hudState.tsx pings it once mounted,
 -- guaranteeing a fresh push arrives after the listener is live, regardless of
@@ -73,46 +84,22 @@ RegisterNUICallback('qbhud:ready', function(_, cb)
 end)
 
 -- Hoisted to locals with defaults rather than read from the Config table on
--- every loop iteration: these are read inside the hot paths, and a missing key
--- would otherwise reach Wait(nil), which raises in FiveM.
+-- every scheduler pass: a missing key would otherwise reach Wait(nil), which
+-- raises in FiveM.
 local POLL = (type(Config) == 'table' and Config.poll) or {}
-local VITALS_INTERVAL = POLL.vitalsInterval or 100
+local VITALS_INTERVAL = POLL.vitalsInterval or 150
 local PLAYER_INTERVAL = POLL.playerInterval or 100
 local VEHICLE_INTERVAL = POLL.vehicleInterval or 250
 local BRIDGE_INTERVAL = POLL.bridgeInterval or 500
 local MINIMAP_INTERVAL = POLL.minimapInterval or 250
+local VOICE_INTERVAL = (Config.voice and Config.voice.interval) or 200
 
--- Leading-edge throttle. `request()` fires `fn` IMMEDIATELY when nothing is
--- in flight, then collapses every further request arriving inside `interval`
--- into a single trailing call. That ordering is the point: a one-off change
--- (job label, a login, a status effect applying) reaches the NUI on the same
--- frame it happened -- no interval of added latency -- while a continuous
--- stream (stamina draining, four adapter subscriptions all firing off one
--- resync) is capped at one message per interval.
---
--- The worker thread exists only while requests keep arriving and returns to
--- nothing once they stop, the same lazy-thread shape the vehicle sampler and
--- qblib's own modules/zones use. `running`/`pending` need no locking: Lua
--- threads here are cooperative, and neither is read across a Wait boundary
--- without being re-checked after it.
-local function throttle(interval, fn)
-    local pending, running = false, false
-
-    return function()
-        pending = true
-        if running then return end
-        running = true
-
-        CreateThread(function()
-            while pending do
-                pending = false
-                fn()
-                Wait(interval)
-            end
-            running = false
-        end)
-    end
-end
+-- Element toggles decide what this resource SUBSCRIBES TO and SAMPLES, not
+-- merely what the NUI paints. A server with the stamina ring switched off has
+-- no reason to receive the highest-frequency notification in the whole HUD,
+-- and one with the vehicle panel off has no reason to sample vehicle natives
+-- four times a second. See the guarded registrations further down.
+local ELEMENTS = Config.hud.elements or {}
 
 -- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
 -- (or qblib, via the status export inside getSnapshot) is mid-restart right
@@ -161,20 +148,127 @@ local loggedIn = currentlyLoggedIn()
 local forcedHidden = false
 local visible = loggedIn and not forcedHidden
 
-local function syncVoiceSampling()
-    Voice.setActive(visible and Config.hud.elements.mic == true)
+-- --- the scheduler ----------------------------------------------------------
+--
+-- ONE thread owns every periodic thing this resource does: the vitals and
+-- player-data trailing flushes, vehicle telemetry, the mic sample, and the
+-- minimap re-assert. It replaces the five independent loops those used to be,
+-- for the reason in rule 1 of the cost model above -- plus a second one:
+-- deadlines coincide constantly (vitals at 300ms, voice at 400ms, minimap and
+-- vehicle both at 500ms). One thread waking once and running three due tasks
+-- is one resume; three threads waking is three.
+--
+-- Each task declares whether it has any reason to run at all (`active`), and
+-- the sleep is computed from the tasks themselves rather than being a fixed
+-- tick, so an idle HUD really is idle: standing still with nothing dirty and
+-- no vehicle, the only thing left waking this thread is the minimap re-assert.
+--
+---@class QBHudTask
+---@field interval integer ms between runs
+---@field due integer earliest GetGameTimer() value this task may run at
+---@field active fun(): boolean whether the task has any reason to run right now
+---@field run fun() the work itself
+local tasks = {}
+local schedulerRunning = false
+
+-- Only reached if every task is inactive AND none is inside a cooldown that
+-- could still turn into a trailing flush -- i.e. never, while the minimap task
+-- exists. Present so the loop can never reach Wait(nil).
+local SCHEDULER_IDLE_SLEEP = 500
+
+---@param task QBHudTask
+---@return QBHudTask
+local function addTask(task)
+    task.due = 0
+    tasks[#tasks + 1] = task
+    return task
+end
+
+local function startScheduler()
+    if schedulerRunning or not visible then return end
+    schedulerRunning = true
+
+    CreateThread(function()
+        while visible do
+            local now = GetGameTimer()
+            local nextDue
+
+            for i = 1, #tasks do
+                local task = tasks[i]
+
+                if task.active() then
+                    if now >= task.due then
+                        task.due = now + task.interval
+                        task.run()
+                    end
+                    if not nextDue or task.due < nextDue then nextDue = task.due end
+                elseif task.due > now and (not nextDue or task.due < nextDue) then
+                    -- Inactive but still inside its interval: a channel that
+                    -- just flushed and could be dirtied again before the
+                    -- cooldown expires. Waking for it bounds how late that
+                    -- trailing flush can be -- and costs nothing once the
+                    -- cooldown lapses, because a task whose `due` is in the
+                    -- past stops being counted here at all. That is what lets
+                    -- an idle HUD stop waking for the fast channels entirely
+                    -- without giving a busy one unbounded latency.
+                    nextDue = task.due
+                end
+            end
+
+            local sleep = nextDue and (nextDue - GetGameTimer()) or SCHEDULER_IDLE_SLEEP
+            Wait(sleep > 0 and sleep or 0)
+        end
+
+        schedulerRunning = false
+    end)
+end
+
+-- Builds a rate-limited output channel and returns its `request` function.
+--
+-- Leading edge: if the channel is outside its interval the flush happens on
+-- THIS frame -- a job change, a login, a status effect applying has no reason
+-- to wait -- and only a further change arriving inside the interval is
+-- deferred to the scheduler's trailing pass. That ordering is what keeps the
+-- HUD feeling immediate at a cadence a HUD does not otherwise need.
+---@param interval integer
+---@param flush fun()
+---@return fun() request
+local function channel(interval, flush)
+    local pending = false
+
+    local task = addTask({
+        interval = interval,
+        active = function() return pending end,
+        run = function()
+            pending = false
+            flush()
+        end,
+    })
+
+    return function()
+        if not visible then return end
+
+        local now = GetGameTimer()
+        if now >= task.due then
+            task.due = now + interval
+            flush()
+        else
+            pending = true
+            startScheduler()
+        end
+    end
 end
 
 -- --- vitals -----------------------------------------------------------------
 --
 -- Local mirror of the four continuously-moving values, kept current from the
 -- change notifications that already exist for them rather than re-read per
--- push (see the COST MODEL note at the top of this file). Quantised to whole
--- units on the way in, which is what actually makes the throttle idle: raw
--- GetPedArmour/GetPlayerStamina are floats, so without rounding the qblib
--- cache reports a "change" for sub-display-resolution drift and the HUD sends
--- a message nobody can see the effect of. The NUI renders these as a 44px
--- ring, so one whole unit is already finer than one pixel of arc.
+-- push (cost model rule 3). Quantised to whole units on the way in, which is
+-- what actually makes the channel idle: raw GetPedArmour/GetPlayerStamina are
+-- floats, so without rounding the qblib cache reports a "change" for
+-- sub-display-resolution drift and the HUD sends a message nobody can see the
+-- effect of. The NUI renders these as a 44px ring, so one whole unit is
+-- already finer than one pixel of arc.
 local vitals = {
     health = 0,
     maxHealth = 200,
@@ -199,13 +293,12 @@ local function flushVitals()
     })
 end
 
-local requestVitals = throttle(VITALS_INTERVAL, flushVitals)
+local requestVitals = channel(VITALS_INTERVAL, flushVitals)
 
 ---Writes one mirrored vital, requesting a push only if the value really moved.
 ---The mirror is kept current even while the HUD is hidden -- character select,
 ---a cutscene -- so a later show has real values to paint; only the PUSH is
----skipped, so a hidden HUD doesn't spin up a throttle thread per stamina tick
----to feed a flush that would return early anyway.
+---skipped.
 local function setVital(key, value)
     if vitals[key] == value then return end
     vitals[key] = value
@@ -230,12 +323,12 @@ local function flushPlayer()
     })
 end
 
-local requestPlayer = throttle(PLAYER_INTERVAL, flushPlayer)
+local requestPlayer = channel(PLAYER_INTERVAL, flushPlayer)
 
 -- --- vehicle telemetry ------------------------------------------------------
 
 -- Mirrored from the cache (see the onChange registration below) so the
--- sampling loop's own condition isn't a cross-resource call four times a
+-- sampling task's own condition isn't a cross-resource call four times a
 -- second for a value the cache already pushes to us.
 ---@type integer|false
 local currentVehicle = false
@@ -301,6 +394,82 @@ local function pushVehicleUpdate(force)
     send("qbhud:vehicle", payload)
 end
 
+-- --- minimap ----------------------------------------------------------------
+--
+-- The minimap's own scaleform draws a health/armour/breath cluster straight
+-- from the engine's internal ped state -- it is not driven by
+-- QB.cache.health() and has its own smoothing/thresholds, so left alone it
+-- visibly disagrees with the radial gauges above (that's the "health isn't
+-- matching the default hud" symptom: two independent renderers of the same
+-- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
+-- the minimap draws; 3 draws neither, ceding the stat entirely to this
+-- resource's NUI, and 0 is the engine's own default of drawing both.
+--
+-- Requested once (not per-run) since scaleform handles are movie instances,
+-- not frame-scoped state -- re-requesting repeatedly would leak a new instance
+-- each time. pcall'd because it is the one native this chunk calls at load
+-- outside a handler, and a failure must not take the rest of the file (that
+-- is, everything the NUI depends on) down with it.
+local MINIMAP_DRAW_NEITHER = 3
+local MINIMAP_DRAW_DEFAULT = 0
+
+local minimapOk, minimapScaleform = pcall(RequestScaleformMovie, "minimap")
+if not minimapOk then minimapScaleform = nil end
+
+local function setupMinimapHealthArmour(param)
+    if not minimapScaleform then return end
+
+    BeginScaleformMovieMethod(minimapScaleform, "SETUP_HEALTH_ARMOUR")
+    ScaleformMovieMethodAddParamInt(param)
+    EndScaleformMovieMethod()
+end
+
+-- Re-asserted on an interval rather than every frame. The flag persists inside
+-- the scaleform between calls, so the per-frame Wait(0) loop this replaces was
+-- spending a thread resume plus three natives every single frame to re-state
+-- something that had not changed. Config.poll.minimapInterval documents the
+-- escape hatch (0 restores per-frame behaviour) if a build turns out to
+-- re-assert the engine default underneath us.
+--
+-- Always active, so while the HUD is visible this is what keeps the scheduler
+-- alive; the moment the HUD hides, refreshVisibility restores the engine
+-- default once and the whole thread exits.
+if minimapScaleform then
+    addTask({
+        interval = MINIMAP_INTERVAL,
+        active = function() return true end,
+        run = function() setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end,
+    })
+end
+
+-- --- sampled inputs ---------------------------------------------------------
+
+-- Mic state is the only HUD input with no change notification anywhere in the
+-- stack, so it is genuinely sampled -- but on the shared thread, and only
+-- while the element is on AND the HUD is visible (Voice.setActive owns that
+-- second half). client/voice.lua deliberately owns no thread of its own.
+if ELEMENTS.mic and Config.voice.enabled ~= false then
+    addTask({
+        interval = VOICE_INTERVAL,
+        active = Voice.isActive,
+        run = Voice.sample,
+    })
+end
+
+-- Speed and fuel change continuously, so no event can carry them either. The
+-- task goes inactive the moment the player is out of a vehicle, which is what
+-- makes on-foot vehicle telemetry cost exactly nothing. Not registered at all
+-- when the panel is switched off.
+if ELEMENTS.vehicle then
+    addTask({
+        interval = VEHICLE_INTERVAL,
+        active = function() return currentVehicle ~= false end,
+        run = pushVehicleUpdate,
+    })
+end
+
+-- --- change notifications ---------------------------------------------------
+
 -- Push-driven for anything that already has cheap change notification --
 -- these fire immediately instead of waiting for a tick. Each handler takes the
 -- new value from its own ARGUMENT: qblib's cache passes (new, old), so there
@@ -308,19 +477,17 @@ end
 -- were just handed.
 QB.cache.onChange("health", function(value) setVital('health', round(value)) end)
 QB.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
--- Stamina moves continuously while sprinting, so it is the one HUD field that
--- would visibly lag on any push-only path -- it belongs to no framework delta
--- and no adapter can announce it. qblib's cache re-reads it on its own shared
--- tick (Config.cache.tickInterval, 100ms) and only notifies on an actual
--- change: full rate mid-sprint, silent standing still, and no second thread
--- here to own.
-QB.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
 Voice.onChange(function(value) setVital('talking', value == true) end)
 
--- Forward-declared: the ped handler below re-asserts the minimap suppression
--- on respawn, but the scaleform is only requested further down (after
--- everything that can throw at load).
-local reassertMinimap
+-- Stamina moves continuously while sprinting -- it belongs to no framework
+-- delta and no adapter can announce it -- which makes it far and away the
+-- highest-frequency notification the HUD receives, and each one is a
+-- cross-resource funcref invocation. So it is subscribed ONLY when something
+-- actually renders it: a server with the stamina ring switched off pays
+-- nothing for it, rather than paying to receive and discard it.
+if ELEMENTS.stamina then
+    QB.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
+end
 
 -- Maximum health is per-ped (freemode male 200, female 175) and only ever
 -- changes when the ped itself does -- a respawn, a model change, a script
@@ -341,39 +508,24 @@ end
 QB.cache.onChange("ped", function(ped)
     refreshMaxHealth(ped)
     -- A respawn rebuilds the minimap, which is the one moment the suppression
-    -- below is most likely to have been dropped. Re-assert it now rather than
+    -- above is most likely to have been dropped. Re-assert it now rather than
     -- leaving the stock cluster on screen until the next interval.
-    if reassertMinimap then reassertMinimap() end
+    if visible then setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end
 end)
 
--- Everything else about the vehicle is event-driven -- the cache tells us when
--- the player gets in or out, and the sampling thread exists only for that
--- span. Mirrors the lazy tick-thread pattern client/vehicle.lua already uses
--- to READ the telemetry (and qblib's own modules/zones); previously this ran
--- forever at bridgeInterval even on foot, pushing a null payload every tick.
-local vehicleTickRunning = false
-
-local function startVehicleTick()
-    if vehicleTickRunning then return end
-    vehicleTickRunning = true
-
-    CreateThread(function()
-        while currentVehicle do
-            pushVehicleUpdate()
-            Wait(VEHICLE_INTERVAL)
-        end
-
-        vehicleTickRunning = false
-        -- One final push so the NUI gets the null payload that clears the
-        -- vehicle panel -- the loop above exits before sending it.
+-- Vehicle lifecycle is announced; only the telemetry inside it is sampled.
+-- Both edges push on the spot rather than waiting for the sampling task's next
+-- turn: getting into a car should fill the panel on the frame the door shuts,
+-- and getting out should clear it just as fast (that push is the null payload
+-- the NUI reads as "on foot"). The task's own next run is deduplicated against
+-- this one, so the immediacy costs no extra message.
+if ELEMENTS.vehicle then
+    QB.cache.onChange("vehicle", function(vehicle)
+        currentVehicle = vehicle or false
         pushVehicleUpdate()
+        if currentVehicle then startScheduler() end
     end)
 end
-
-QB.cache.onChange("vehicle", function(vehicle)
-    currentVehicle = vehicle or false
-    if currentVehicle then startVehicleTick() else pushVehicleUpdate() end
-end)
 
 -- Seeds the mirrors above with the values the change handlers will keep current
 -- from here on. Runs at CHUNK LOAD rather than in the start-up thread below,
@@ -387,9 +539,9 @@ local seeded = false
 local function seedFromCache()
     vitals.health = round(QB.cache.health())
     vitals.armour = round(QB.cache.armour())
-    vitals.stamina = round(QB.cache.stamina())
+    if ELEMENTS.stamina then vitals.stamina = round(QB.cache.stamina()) end
     refreshMaxHealth(QB.cache.ped())
-    currentVehicle = QB.cache.vehicle() or false
+    if ELEMENTS.vehicle then currentVehicle = QB.cache.vehicle() or false end
     seeded = true
 end
 
@@ -410,15 +562,23 @@ pcall(function()
     end)
 end)
 
+-- --- visibility -------------------------------------------------------------
+
+local function syncVoiceSampling()
+    Voice.setActive(visible and ELEMENTS.mic == true)
+end
+
 -- Recomputes `visible` from the two inputs and pushes the change to the NUI.
 -- Show/hide happen immediately on a login transition rather than waiting for
 -- the next poll tick -- e.g. qbcore's adapter pushes this off its replicated
 -- login state bag. Adapters with no login concept (the stub) don't implement
 -- onLoginChange, so for them only the exports below ever change visibility.
 --
+-- This is also the resource's on/off switch: showing starts the scheduler,
+-- hiding lets it exit on its next wake, so a hidden HUD costs nothing at all.
 -- The pushes here deliberately call the flush functions DIRECTLY rather than
--- going through the throttles: a show has to repaint the whole HUD on the spot,
--- and a throttle already mid-interval from some unrelated change would
+-- going through the channels: a show has to repaint the whole HUD on the spot,
+-- and a channel already mid-interval from some unrelated change would
 -- otherwise defer it.
 local function refreshVisibility()
     local newVisible = loggedIn and not forcedHidden
@@ -435,6 +595,11 @@ local function refreshVisibility()
         flushVitals()
         flushPlayer()
         pushVehicleUpdate(true)
+        startScheduler()
+    else
+        -- Hand the stat back to the engine's own minimap cluster: from here
+        -- until the HUD is shown again, nothing in this resource draws it.
+        setupMinimapHealthArmour(MINIMAP_DRAW_DEFAULT)
     end
 end
 
@@ -471,6 +636,11 @@ sendInitialState = function()
     send("qbhud:config", {
         dynamic = Config.hud.dynamic == true,
         elements = Config.hud.elements,
+        -- The NUI matches its gauge animation to this so the rings interpolate
+        -- exactly between samples. That is what makes the cadence a pure cost
+        -- knob: raising it cuts the message rate and costs nothing visually.
+        -- See web/src/components/hud/RadialGauge.tsx.
+        vitalsInterval = VITALS_INTERVAL,
     })
 
     -- QB.theme.tokens() is a cross-resource call into qblib; a qblib restart
@@ -484,8 +654,8 @@ sendInitialState = function()
 
     if visible then
         -- Direct, un-throttled and unconditional: this is a REMOUNT, so the
-        -- page holds no state at all and the change checks the throttled paths
-        -- rely on would happily conclude there is nothing to say.
+        -- page holds no state at all and the change checks the channels rely
+        -- on would happily conclude there is nothing to say.
         flushVitals()
         flushPlayer()
         pushVehicleUpdate(true)
@@ -505,6 +675,10 @@ if HudBridge.onChange then
         requestPlayer()
     end)
 else
+    -- The one loop that is NOT a scheduler task: it has to keep running while
+    -- the HUD is hidden, because `latestBridgeSnapshot` must already be current
+    -- the moment a login shows the HUD, and it must outlive the scheduler
+    -- exiting. Only adapters with no push path ever reach this (not qbcore's).
     CreateThread(function()
         while true do
             -- Unlike safeGetBridgeSnapshot, a failed poll keeps the LAST good
@@ -521,76 +695,14 @@ else
     end)
 end
 
--- The minimap's own scaleform draws its own health/armour/breath cluster
--- straight from the engine's internal ped state -- it is not driven by
--- QB.cache.health() and has its own smoothing/thresholds, so left alone it
--- visibly disagrees with the radial gauges above (that's the "health isn't
--- matching the default hud" symptom: two independent renderers of the same
--- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
--- the minimap draws; 3 draws neither, ceding the stat entirely to this
--- resource's NUI, and 0 is the engine's own default of drawing both.
---
--- Requested once (not per-tick) since scaleform handles are movie instances,
--- not frame-scoped state -- re-requesting repeatedly would leak a new instance
--- each time.
-local MINIMAP_DRAW_NEITHER = 3
-local MINIMAP_DRAW_DEFAULT = 0
-
-local minimapScaleform = RequestScaleformMovie("minimap")
-
-local function setupMinimapHealthArmour(param)
-    BeginScaleformMovieMethod(minimapScaleform, "SETUP_HEALTH_ARMOUR")
-    ScaleformMovieMethodAddParamInt(param)
-    EndScaleformMovieMethod()
-end
-
--- Assignment, not `local function` -- see sendInitialState above for why the
--- forward declaration must not be shadowed.
-reassertMinimap = function()
-    if visible then setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end
-end
-
--- Re-asserted on an interval rather than every frame. The flag persists inside
--- the scaleform between calls, so the per-frame Wait(0) loop this replaces was
--- spending a thread resume plus three natives every single frame to re-state
--- something that had not changed -- for a HUD whose entire job here is one
--- boolean. Config.poll.minimapInterval documents the escape hatch (0 restores
--- the per-frame behaviour) if a build turns out to re-assert the engine
--- default underneath us.
---
--- `suppressed` tracks what was last asked for so the engine default is
--- restored exactly once when the HUD hides (a cutscene, a logout), instead of
--- leaving the stock cluster suppressed on a screen this resource is no longer
--- drawing on.
-CreateThread(function()
-    local suppressed = false
-
-    while true do
-        if visible then
-            setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER)
-            suppressed = true
-        elseif suppressed then
-            setupMinimapHealthArmour(MINIMAP_DRAW_DEFAULT)
-            suppressed = false
-        end
-
-        Wait(MINIMAP_INTERVAL)
-    end
-end)
-
 CreateThread(function()
     -- Only if the load-time attempt above lost the race with a qblib restart.
     if not seeded then pcall(seedFromCache) end
 
     -- Best-effort: lost if the page hasn't mounted yet (the qbhud:ready
     -- callback at the top of this file covers that). pcall'd so a failure here
-    -- can't abort the thread before the vehicle tick below is armed.
+    -- can't abort the thread before the scheduler below is armed.
     pcall(sendInitialState)
     syncVoiceSampling()
-
-    -- Arms the vehicle tick for a player who is ALREADY in a vehicle when this
-    -- resource starts (`ensure qbhud` mid-drive): QB.cache.onChange only ever
-    -- observes future transitions, so nothing else would start it until the
-    -- player got out and back in.
-    if currentVehicle then startVehicleTick() end
+    startScheduler()
 end)

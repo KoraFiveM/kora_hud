@@ -50,6 +50,13 @@ export function RadialGauge({
 }: RadialGaugeProps) {
     const config = useHudConfig()
     const clamped = Math.max(0, Math.min(100, value))
+    // Animate over exactly one update interval so the arc interpolates from
+    // one sample to the next instead of jumping and then sitting still. This
+    // is what decouples "smooth" from "frequent": Lua can send vitals every
+    // 150ms (or 250, or 400) and the ring still sweeps continuously, because
+    // the browser -- which is already compositing this frame -- fills in
+    // between samples instead of Lua paying to produce more of them.
+    const sweep = `${config.vitalsInterval}ms`
     const clampedDefault = Math.max(0, Math.min(100, defaultValue))
 
     // Compare the clamped values so engine noise outside the documented
@@ -87,7 +94,8 @@ export function RadialGauge({
                     strokeLinecap="round"
                     strokeDasharray={circumference}
                     strokeDashoffset={offset}
-                    className="transition-[stroke-dashoffset,stroke] duration-fast"
+                    className="transition-[stroke-dashoffset,stroke] ease-linear"
+                    style={{ transitionDuration: sweep }}
                 />
             </svg>
             <Icon className="absolute h-4 w-4 text-foreground overlay-text" aria-hidden />

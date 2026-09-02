@@ -21,6 +21,9 @@ const DEFAULT_CONFIG: HudConfigPayload = {
         stress: true,
         vehicle: true,
     },
+    // Matches client/hud.lua's own fallback, so the gauges animate correctly
+    // even in the window before the first "qbhud:config" message lands.
+    vitalsInterval: 150,
 }
 
 const DEFAULT_VITALS: HudVitalsPayload = {

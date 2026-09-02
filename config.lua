@@ -53,9 +53,15 @@ Config.poll = {
     -- Health/armour/stamina/talking. Stamina is the one field that moves
     -- continuously (every 100ms qblib cache tick for the whole length of a
     -- sprint), so this is the cadence that decides the resource's cost while
-    -- moving. 100ms tracks the cache tick exactly -- anything faster only
-    -- re-sends values that cannot have changed.
-    vitalsInterval  = 100,
+    -- the player is moving.
+    --
+    -- This value is forwarded to the NUI, which sets its gauge animation to
+    -- match, so the rings interpolate exactly between samples rather than
+    -- stepping. That makes this a pure cost knob: raising it cuts the message
+    -- rate and the visible result is identical. What it does trade is the
+    -- worst-case age of a value -- and only for a SECOND change inside one
+    -- interval, since the first of any burst is sent on the frame it happens.
+    vitalsInterval  = 150,
 
     -- Job/gang/cash/bank/hunger/thirst/stress/status. These are event-driven
     -- (the qbcore adapter pushes off qbcore's delta stream), so this interval

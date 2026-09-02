@@ -10,12 +10,20 @@
 -- installed pma-voice version's actual export/state-bag name and add the
 -- lookup here, wrapped in pcall like NetworkIsPlayerTalking below -- so a
 -- missing/renamed pma-voice API degrades to "use the native", not an error.
+--
+-- This module owns NO thread. Mic state is the one HUD input with no change
+-- notification of its own, so it genuinely has to be sampled -- but the HUD
+-- already runs a single scheduler thread (client/hud.lua) for exactly this
+-- kind of periodic work, and FiveM's scheduler walks every live coroutine each
+-- frame to decide what to resume. A second thread here would be a second entry
+-- in that walk for one boolean. Voice.sample() is the unit of work; the HUD
+-- decides when to call it and stops calling it the moment the HUD is hidden or
+-- the mic element is off.
 Voice = Voice or {}
 
 local talking = false
 local listeners = {}
 local active = false
-local sampling = false
 
 local function setTalking(value)
     if value == talking then return end
@@ -36,36 +44,34 @@ end
 -- are expensive or need a shared tick; PlayerId() is neither.
 local playerId
 
-local function sample()
+---Reads the native once and notifies onChange listeners if the state flipped.
+---Called by client/hud.lua's scheduler on Config.voice.interval, and only
+---while Voice.isActive() -- a no-op otherwise, so a stray call during
+---character select can't light up the mic indicator.
+function Voice.sample()
+    if not active then return end
     if playerId == nil then playerId = PlayerId() end
 
     local ok, result = pcall(NetworkIsPlayerTalking, playerId)
     setTalking(ok and result or false)
 end
 
----Starts/stops the native voice sampler. HUD visibility owns this lifecycle so
----the resource has no polling thread during character select, logout, or when
----the mic element is disabled.
+---Enables/disables mic sampling. HUD visibility owns this lifecycle so nothing
+---is sampled during character select, logout, or when the mic element is
+---disabled -- the HUD's scheduler skips the sample task entirely while this is
+---false, rather than calling into a no-op.
 ---@param value boolean
 function Voice.setActive(value)
     active = value == true and Config.voice.enabled == true
 
-    if not active then
-        setTalking(false)
-        return
-    end
-    if sampling then return end
+    if not active then setTalking(false) end
+end
 
-    sampling = true
-    local interval = Config.voice.interval or 200
-
-    CreateThread(function()
-        while active do
-            sample()
-            Wait(interval)
-        end
-        sampling = false
-    end)
+---Whether mic sampling is currently enabled. Drives the HUD scheduler's voice
+---task, so the sample native is never reached while the HUD is hidden.
+---@return boolean
+function Voice.isActive()
+    return active
 end
 
 ---@return boolean
