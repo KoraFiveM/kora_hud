@@ -1,11 +1,12 @@
 import { Droplets, Utensils } from "lucide-react"
 
-import { useHudState } from "@/lib/hudState"
+import { useHudConfig, useHudUpdate } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
 
 export function HungerThirst() {
-    const { config, update } = useHudState()
+    const config = useHudConfig()
+    const update = useHudUpdate()
     if (!config.elements.hungerThirst) return null
 
     return (

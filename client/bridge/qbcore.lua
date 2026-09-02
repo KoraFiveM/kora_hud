@@ -36,6 +36,31 @@ local loginHandlers = {}
 local loginGeneration = 0
 local dataHandlers = {}
 
+-- Rebuilding the snapshot is not free -- it is a getPlayerData export call
+-- plus a QB.status.getActive one -- and qbcore's delta stream routinely fires
+-- several of the roots this adapter subscribes to for ONE logical update (a
+-- resync touches money, job, gang and metadata). Coalesce every notification
+-- landing in the same frame into a single rebuild and a single push.
+--
+-- The one-frame wait is load-bearing beyond the coalescing: CFX fires a state
+-- bag change handler BEFORE the new value is committed to the local store, and
+-- snapshotFrom reads CASH_STATE back out of it, so pushing synchronously from
+-- a bag handler would hand consumers the OLD balance.
+local pushScheduled = false
+
+local function schedulePush()
+    if pushScheduled then return end
+    pushScheduled = true
+
+    CreateThread(function()
+        Wait(0)
+        pushScheduled = false
+
+        local snapshot = HudBridge.getSnapshot()
+        for _, handler in ipairs(dataHandlers) do handler(snapshot) end
+    end)
+end
+
 -- Status effects are an optional qblib enhancement to the HUD, never a
 -- prerequisite for the base player HUD.  In particular, this lets qbhud
 -- start cleanly during a rolling update where qbhud has been updated before a
@@ -191,12 +216,7 @@ CreateThread(function()
 
     AddStateBagChangeHandler(CASH_STATE, localPlayerBag, function(_, _, value)
         if type(value) ~= 'number' then return end
-        -- Same pre-commit quirk: snapshotFrom reads CASH_STATE back out of the
-        -- bag, so pushing synchronously would hand consumers the OLD balance.
-        CreateThread(function()
-            Wait(0)
-            for _, handler in ipairs(dataHandlers) do handler(HudBridge.getSnapshot()) end
-        end)
+        schedulePush()
     end)
 
     -- Reconcile immediately for `ensure qbhud` after a character is already
@@ -289,14 +309,15 @@ end
 ---@param handler fun(snapshot: QBHudBridgeSnapshot)
 function HudBridge.onChange(handler)
     dataHandlers[#dataHandlers + 1] = handler
-    local function push()
-        handler(HudBridge.getSnapshot())
-    end
+
     -- One subscription per relevant root. onPlayerDataChange fires the handler
-    -- with (path, value); we ignore the specifics and re-snapshot (cheap).
+    -- with (path, value); we ignore the specifics and re-snapshot -- but via
+    -- schedulePush, so four roots changing together cost one snapshot, not
+    -- four.
     for _, root in ipairs({ 'money', 'job', 'gang', 'metadata' }) do
-        exports.qbcore:onPlayerDataChange({ root }, function() push() end)
+        exports.qbcore:onPlayerDataChange({ root }, schedulePush)
     end
+
     -- Push once immediately so the HUD reflects current state without waiting
     -- for the first change. Capped rather than an unbounded poll -- see the
     -- reconcileLogin thread above for why this doesn't use QB.loops.controlled.
@@ -306,6 +327,6 @@ function HudBridge.onChange(handler)
             Wait(100)
             attempts = attempts + 1
         end
-        push()
+        handler(HudBridge.getSnapshot())
     end)
 end

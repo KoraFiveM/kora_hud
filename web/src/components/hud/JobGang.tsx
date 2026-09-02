@@ -1,11 +1,11 @@
 import { Briefcase, Users } from "lucide-react"
 
 import { cn } from "@/lib/cn"
-import { useHudState } from "@/lib/hudState"
+import { useHudUpdate } from "@/lib/hudState"
 
 // Baseline "usual player data" -- always rendered, not config-toggleable.
 export function JobGang() {
-    const { update } = useHudState()
+    const update = useHudUpdate()
 
     return (
         <div className="hud-panel flex flex-col gap-1.5 rounded-2xl px-3.5 py-2.5 text-sm overlay-text">

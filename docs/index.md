@@ -184,11 +184,44 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
 - `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and
   the expected Mumble-backed voice resource.
+- `Config.voice.interval` (200ms) — mic sampling cadence. The sampler only
+  exists while the HUD is visible and the `mic` element is enabled.
+- `Config.poll.*` — see "Update cadences" below.
+
+## Update cadences
+
+Nothing in this resource runs per frame, and nothing polls a value something
+else can announce. Health, armour, stamina, vehicle lifecycle and framework
+player data all arrive as change notifications (qblib's cache and the bridge
+adapter's own push path); the values they carry are mirrored into plain locals,
+so no update re-reads them back across the `exports.qblib` boundary.
+
+Each wire channel is then rate-limited by a **leading-edge** throttle: the
+first change goes out on the frame it happened, and only a burst is collapsed
+to one message per interval. Quiet inputs mean no running thread and no
+messages at all.
+
+- `Config.poll.vitalsInterval` (100ms) — health/armour/stamina/talking
+  (`qbhud:vitals`). Stamina is the only field that moves continuously, so this
+  is the cadence that decides the resource's cost while the player is moving.
+  Values are rounded to whole units first, so float drift below what the gauges
+  can render never reaches the wire.
+- `Config.poll.playerInterval` (100ms) — job/gang/money/needs/status
+  (`qbhud:update`). Event-driven, so this only ever collapses a burst — e.g. a
+  qbcore resync firing the adapter's four root subscriptions in one frame.
 - `Config.poll.vehicleInterval` (250ms) — speed/fuel/engine/headlight refresh
-  while in a vehicle.
+  while in a vehicle (`qbhud:vehicle`). The sampling thread exists only while
+  the player is in a vehicle, and an unchanged reading (idling at a light) is
+  sampled but not sent.
 - `Config.poll.bridgeInterval` (500ms) — fallback poll cadence for adapters
   with no `onChange` push path (the qbcore adapter pushes instead and never
   uses this).
+- `Config.poll.minimapInterval` (250ms) — how often `SETUP_HEALTH_ARMOUR` is
+  re-issued to suppress the minimap's own health/armour cluster, which would
+  otherwise disagree with the radial gauges. The usual snippet for this runs on
+  a `Wait(0)` loop; the flag persists in the scaleform between calls, so a few
+  times a second is enough. Set to `0` to restore per-frame behaviour if the
+  stock cluster visibly flickers back in on your build.
 
 ## Related resources
 

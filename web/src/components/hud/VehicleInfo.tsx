@@ -1,6 +1,6 @@
 import { Fuel, Gauge, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
-import { useHudState } from "@/lib/hudState"
+import { useHudConfig, useHudVehicle } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
 
@@ -9,7 +9,8 @@ import { RadialGauge } from "./RadialGauge"
 // is present -- client/hud.lua sends null on foot -- and the vehicle element
 // is enabled.
 export function VehicleInfo() {
-    const { config, vehicle } = useHudState()
+    const config = useHudConfig()
+    const vehicle = useHudVehicle()
     if (!config.elements.vehicle || !vehicle) return null
 
     const { speed, fuel, engineOn, headlights, seatbelt } = vehicle

@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/cn"
-import { useHudState } from "@/lib/hudState"
+import { useHudConfig } from "@/lib/hudState"
 
 interface RadialGaugeProps {
     icon: LucideIcon
@@ -48,7 +48,7 @@ export function RadialGauge({
     stroke = 3.5,
     pulse = false,
 }: RadialGaugeProps) {
-    const { config } = useHudState()
+    const config = useHudConfig()
     const clamped = Math.max(0, Math.min(100, value))
     const clampedDefault = Math.max(0, Math.min(100, defaultValue))
 

@@ -1,7 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
 import { fetchNui } from "./fetchNui"
-import type { HudConfigPayload, HudUpdatePayload, HudVehiclePayload, HudVisibilityPayload } from "./types"
+import type {
+    HudConfigPayload,
+    HudUpdatePayload,
+    HudVehiclePayload,
+    HudVisibilityPayload,
+    HudVitalsPayload,
+} from "./types"
 import { useNuiEvent } from "./useNuiEvent"
 
 const DEFAULT_CONFIG: HudConfigPayload = {
@@ -17,12 +23,15 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     },
 }
 
-const DEFAULT_UPDATE: HudUpdatePayload = {
+const DEFAULT_VITALS: HudVitalsPayload = {
     health: 200,
     maxHealth: 200,
     armour: 0,
     stamina: 100,
     talking: false,
+}
+
+const DEFAULT_UPDATE: HudUpdatePayload = {
     job: { name: "unemployed", label: "Civilian", grade: 0, gradeLabel: "Civilian", onDuty: false },
     gang: null,
     cash: 0,
@@ -38,13 +47,6 @@ const DEFAULT_UPDATE: HudUpdatePayload = {
 // own faster cadence without dragging the rest of the HUD along with it.
 const DEFAULT_VEHICLE: HudVehiclePayload = null
 
-interface HudState {
-    config: HudConfigPayload
-    update: HudUpdatePayload
-    vehicle: HudVehiclePayload
-    visible: boolean
-}
-
 // Hidden until Lua says otherwise: client/hud.lua sends "qbhud:visibility"
 // synchronously on resource start regardless of adapter (true immediately for
 // an adapter with no login concept, e.g. the stub), so this default only
@@ -53,28 +55,42 @@ interface HudState {
 // since "only show once logged in" must hold even during it.
 const DEFAULT_VISIBLE = false
 
-const HudStateContext = createContext<HudState>({
-    config: DEFAULT_CONFIG,
-    update: DEFAULT_UPDATE,
-    vehicle: DEFAULT_VEHICLE,
-    visible: DEFAULT_VISIBLE,
-})
+// One context PER CHANNEL rather than a single object holding all of them.
+// React re-renders every consumer of a context whose value changed, so a
+// combined `{ config, vitals, update, vehicle, visible }` value means one
+// stamina tick -- ten a second for the whole length of a sprint -- re-renders
+// the job panel, the money panel and the status list too, none of which can
+// possibly have changed. Split, a vitals message re-renders exactly the
+// health/armour/stamina/mic components that read it.
+//
+// This mirrors client/hud.lua's own split: the wire channels and the contexts
+// are the same four cadences end to end.
+const HudConfigContext = createContext<HudConfigPayload>(DEFAULT_CONFIG)
+const HudVitalsContext = createContext<HudVitalsPayload>(DEFAULT_VITALS)
+const HudUpdateContext = createContext<HudUpdatePayload>(DEFAULT_UPDATE)
+const HudVehicleContext = createContext<HudVehiclePayload>(DEFAULT_VEHICLE)
+const HudVisibleContext = createContext<boolean>(DEFAULT_VISIBLE)
 
 /**
- * Single subscription point for "qbhud:config", "qbhud:update",
- * "qbhud:vehicle", and "qbhud:visibility" -- every HUD element reads its own
- * slice from this context instead of each independently subscribing to the
- * wire messages, so client/hud.lua's payloads have exactly one consumer-side
- * entry point.
+ * Single subscription point for "qbhud:config", "qbhud:vitals",
+ * "qbhud:update", "qbhud:vehicle", and "qbhud:visibility" -- every HUD element
+ * reads its own slice through the hooks below instead of each independently
+ * subscribing to the wire messages, so client/hud.lua's payloads have exactly
+ * one consumer-side entry point.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
+    const [vitals, setVitals] = useState<HudVitalsPayload>(DEFAULT_VITALS)
     const [update, setUpdate] = useState<HudUpdatePayload>(DEFAULT_UPDATE)
     const [vehicle, setVehicle] = useState<HudVehiclePayload>(DEFAULT_VEHICLE)
     const [visible, setVisible] = useState<boolean>(DEFAULT_VISIBLE)
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (payload) setConfig(payload)
+    })
+
+    useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
+        if (payload) setVitals(payload)
     })
 
     useNuiEvent<HudUpdatePayload>("qbhud:update", (payload) => {
@@ -104,11 +120,43 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         })
     }, [])
 
-    const value = useMemo(() => ({ config, update, vehicle, visible }), [config, update, vehicle, visible])
-
-    return <HudStateContext.Provider value={value}>{children}</HudStateContext.Provider>
+    // Each provider is handed the state value itself -- no useMemo wrapper
+    // object to build, and nothing that changes identity unless that specific
+    // channel's own message arrived.
+    return (
+        <HudConfigContext.Provider value={config}>
+            <HudVisibleContext.Provider value={visible}>
+                <HudVitalsContext.Provider value={vitals}>
+                    <HudUpdateContext.Provider value={update}>
+                        <HudVehicleContext.Provider value={vehicle}>{children}</HudVehicleContext.Provider>
+                    </HudUpdateContext.Provider>
+                </HudVitalsContext.Provider>
+            </HudVisibleContext.Provider>
+        </HudConfigContext.Provider>
+    )
 }
 
-export function useHudState() {
-    return useContext(HudStateContext)
+/** Element toggles and dynamic-gauge mode. Sent once, on resource start. */
+export function useHudConfig() {
+    return useContext(HudConfigContext)
+}
+
+/** Health/armour/stamina/talking -- the fast channel. */
+export function useHudVitals() {
+    return useContext(HudVitalsContext)
+}
+
+/** Job/gang/money/needs/status -- the framework-sourced, event-driven channel. */
+export function useHudUpdate() {
+    return useContext(HudUpdateContext)
+}
+
+/** Vehicle telemetry, or null on foot. */
+export function useHudVehicle() {
+    return useContext(HudVehicleContext)
+}
+
+/** Whether the HUD should render at all (login state and the show/hide exports). */
+export function useHudVisible() {
+    return useContext(HudVisibleContext)
 }

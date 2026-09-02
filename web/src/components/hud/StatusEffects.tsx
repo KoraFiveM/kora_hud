@@ -1,6 +1,6 @@
 import { AlertTriangle } from "lucide-react"
 
-import { useHudState } from "@/lib/hudState"
+import { useHudUpdate } from "@/lib/hudState"
 
 /**
  * Renders one badge per active qblib QB.status effect (e.g. "bleeding",
@@ -24,7 +24,7 @@ function humanize(name: string): string {
 }
 
 export function StatusEffects() {
-    const { update } = useHudState()
+    const update = useHudUpdate()
     if (!update.status || update.status.length === 0) return null
 
     return (

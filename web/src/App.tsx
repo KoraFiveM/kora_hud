@@ -8,16 +8,22 @@ import { Stamina } from "@/components/hud/Stamina"
 import { StatusEffects } from "@/components/hud/StatusEffects"
 import { Stress } from "@/components/hud/Stress"
 import { VehicleInfo } from "@/components/hud/VehicleInfo"
-import { HudStateProvider, useHudState } from "@/lib/hudState"
+import { HudStateProvider, useHudVisible } from "@/lib/hudState"
 
 /**
  * The actual HUD layout, gated on login state. Each element is otherwise
- * self-contained -- it reads its own slice of HudStateProvider's context and
+ * self-contained -- it reads its own slice of HudStateProvider's contexts and
  * applies its configured element/dynamic visibility -- so mounting all of
  * them unconditionally here (once visible) *is* the layout, same pattern as
  * qblib's own web/src/App.tsx. Split out from App so the visibility check has
  * HudStateProvider's context available (a provider's own children can't read
  * the context it provides).
+ *
+ * Subscribes to visibility ONLY, deliberately. A parent re-render re-renders
+ * its whole subtree regardless of memoisation, so reading the fast vitals
+ * channel here would undo the point of splitting the contexts at all -- every
+ * stamina tick would re-render the entire HUD from this node down. Visibility
+ * changes a handful of times per session.
  *
  * The glanceable gauges live in a single bottom-centred row. Vehicle telemetry
  * stacks immediately above them when present, while the wider identity/money
@@ -25,7 +31,7 @@ import { HudStateProvider, useHudState } from "@/lib/hudState"
  * the gauges away from the true screen centre.
  */
 function HudContent() {
-    const { visible } = useHudState()
+    const visible = useHudVisible()
     if (!visible) return null
 
     return (

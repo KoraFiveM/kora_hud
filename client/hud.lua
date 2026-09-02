@@ -1,18 +1,33 @@
 -- Orchestrator: the only file that talks to the NUI. Combines qblib's cache
--- (health/armour, push-driven via onChange), client/voice.lua, client/vehicle.lua,
--- and HudBridge (the configured adapter, currently client/bridge/stub.lua)
--- into two consolidated payloads -- qbhud:update (general) and qbhud:vehicle
--- (fast-cadence vehicle telemetry, sent separately so it doesn't drag the
--- rest of the HUD onto its cadence) -- rather than one NUI message per
--- element, so the NUI side has a small, fixed wire contract to keep in sync
--- (web/src/lib/types.ts).
+-- (health/armour/stamina, push-driven via onChange), client/voice.lua,
+-- client/vehicle.lua, and HudBridge (the configured adapter) into three
+-- consolidated payloads -- qbhud:vitals (health/armour/stamina/talking),
+-- qbhud:update (job/gang/money/needs/status) and qbhud:vehicle (vehicle
+-- telemetry) -- rather than one NUI message per element, so the NUI side has
+-- a small, fixed wire contract to keep in sync (web/src/lib/types.ts).
+--
+-- The three channels are split by CADENCE, not by topic: stamina alone moves
+-- on every 100ms cache tick for the whole length of a sprint, and it has no
+-- business dragging the job label, the gang table and the status list through
+-- msgpack (and through a React re-render of every panel) ten times a second
+-- with it. Each channel is independently throttled -- see `throttle` below.
+--
+-- COST MODEL (this file is the HUD's whole per-frame budget, so it is written
+-- against one): nothing here runs per frame, nothing here polls a value that
+-- something else can announce, and every value read on a hot path is mirrored
+-- into a plain local first. That last one matters more than it looks: every
+-- QB.<module>.<fn> access is a cross-resource export call (see qblib/init.lua's
+-- proxy metatable), i.e. a full boundary crossing with argument marshalling --
+-- not a table lookup. Reading four of them (health/ped/armour/stamina) inside a
+-- 10Hz push was most of this resource's cost while sprinting. They are now read
+-- exactly once at load and kept current from the onChange handlers' own
+-- arguments.
 --
 -- NOTE: this resource owns its own NUI frame (ui_page in fxmanifest.lua), so
--- every NUI native below is called RAW rather than through QB.nui.*. Each
--- QB.<module>.<fn> access is a cross-resource export call (see qblib/init.lua's
--- proxy metatable), so the body runs in QBLIB's Lua VM: SendNUIMessage would
--- post into qblib's frame, and RegisterNUICallback would publish the callback
--- at https://qblib/<name> while this resource's page fetches
+-- every NUI native below is called RAW rather than through QB.nui.*. Because
+-- the body of a QB.* call runs in QBLIB's Lua VM, SendNUIMessage would post
+-- into qblib's frame and RegisterNUICallback would publish the callback at
+-- https://qblib/<name> while this resource's page fetches
 -- https://qbhud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
 -- a permanent 404 that leaves the HUD stuck on DEFAULT_VISIBLE=false. Same
 -- reasoning and same fix as qbloading/client.lua and qbinventory/client/ui.lua.
@@ -56,6 +71,48 @@ RegisterNUICallback('qbhud:ready', function(_, cb)
         print(('[qbhud] qbhud:ready initial push failed: %s'):format(tostring(err)))
     end
 end)
+
+-- Hoisted to locals with defaults rather than read from the Config table on
+-- every loop iteration: these are read inside the hot paths, and a missing key
+-- would otherwise reach Wait(nil), which raises in FiveM.
+local POLL = (type(Config) == 'table' and Config.poll) or {}
+local VITALS_INTERVAL = POLL.vitalsInterval or 100
+local PLAYER_INTERVAL = POLL.playerInterval or 100
+local VEHICLE_INTERVAL = POLL.vehicleInterval or 250
+local BRIDGE_INTERVAL = POLL.bridgeInterval or 500
+local MINIMAP_INTERVAL = POLL.minimapInterval or 250
+
+-- Leading-edge throttle. `request()` fires `fn` IMMEDIATELY when nothing is
+-- in flight, then collapses every further request arriving inside `interval`
+-- into a single trailing call. That ordering is the point: a one-off change
+-- (job label, a login, a status effect applying) reaches the NUI on the same
+-- frame it happened -- no interval of added latency -- while a continuous
+-- stream (stamina draining, four adapter subscriptions all firing off one
+-- resync) is capped at one message per interval.
+--
+-- The worker thread exists only while requests keep arriving and returns to
+-- nothing once they stop, the same lazy-thread shape the vehicle sampler and
+-- qblib's own modules/zones use. `running`/`pending` need no locking: Lua
+-- threads here are cooperative, and neither is read across a Wait boundary
+-- without being re-checked after it.
+local function throttle(interval, fn)
+    local pending, running = false, false
+
+    return function()
+        pending = true
+        if running then return end
+        running = true
+
+        CreateThread(function()
+            while pending do
+                pending = false
+                fn()
+                Wait(interval)
+            end
+            running = false
+        end)
+    end
+end
 
 -- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
 -- (or qblib, via the status export inside getSnapshot) is mid-restart right
@@ -108,8 +165,90 @@ local function syncVoiceSampling()
     Voice.setActive(visible and Config.hud.elements.mic == true)
 end
 
+-- --- vitals -----------------------------------------------------------------
+--
+-- Local mirror of the four continuously-moving values, kept current from the
+-- change notifications that already exist for them rather than re-read per
+-- push (see the COST MODEL note at the top of this file). Quantised to whole
+-- units on the way in, which is what actually makes the throttle idle: raw
+-- GetPedArmour/GetPlayerStamina are floats, so without rounding the qblib
+-- cache reports a "change" for sub-display-resolution drift and the HUD sends
+-- a message nobody can see the effect of. The NUI renders these as a 44px
+-- ring, so one whole unit is already finer than one pixel of arc.
+local vitals = {
+    health = 0,
+    maxHealth = 200,
+    armour = 0,
+    stamina = 100,
+    talking = false,
+}
+
+local function round(value)
+    return math.floor((tonumber(value) or 0) + 0.5)
+end
+
+local function flushVitals()
+    if not visible then return end
+
+    send("qbhud:vitals", {
+        health = vitals.health,
+        maxHealth = vitals.maxHealth,
+        armour = vitals.armour,
+        stamina = vitals.stamina,
+        talking = vitals.talking,
+    })
+end
+
+local requestVitals = throttle(VITALS_INTERVAL, flushVitals)
+
+---Writes one mirrored vital, requesting a push only if the value really moved.
+---The mirror is kept current even while the HUD is hidden -- character select,
+---a cutscene -- so a later show has real values to paint; only the PUSH is
+---skipped, so a hidden HUD doesn't spin up a throttle thread per stamina tick
+---to feed a flush that would return early anyway.
+local function setVital(key, value)
+    if vitals[key] == value then return end
+    vitals[key] = value
+    if visible then requestVitals() end
+end
+
+-- --- bridge-sourced player data ---------------------------------------------
+
+local function flushPlayer()
+    if not visible then return end
+
+    local snapshot = latestBridgeSnapshot
+    send("qbhud:update", {
+        job = snapshot.job,
+        gang = snapshot.gang,
+        cash = snapshot.cash,
+        bank = snapshot.bank,
+        hunger = snapshot.hunger,
+        thirst = snapshot.thirst,
+        stress = snapshot.stress,
+        status = snapshot.status or {},
+    })
+end
+
+local requestPlayer = throttle(PLAYER_INTERVAL, flushPlayer)
+
+-- --- vehicle telemetry ------------------------------------------------------
+
+-- Mirrored from the cache (see the onChange registration below) so the
+-- sampling loop's own condition isn't a cross-resource call four times a
+-- second for a value the cache already pushes to us.
+---@type integer|false
+local currentVehicle = false
+
+-- Last payload actually sent, for the change check below. Vehicle telemetry is
+-- the one thing here that genuinely has to be SAMPLED -- speed and fuel change
+-- continuously, so no event can carry them -- but "sampled" doesn't have to
+-- mean "sent": a car idling at a red light, or parked with the engine running,
+-- produces the same reading every tick.
+local lastVehiclePayload = nil
+
 local function buildVehiclePayload()
-    local snapshot = Vehicle.getSnapshot()
+    local snapshot = Vehicle.getSnapshot(currentVehicle)
     if not snapshot then return nil end
 
     -- Seatbelt is local adapter state. Prefer its cheap accessor so this hot
@@ -122,65 +261,96 @@ local function buildVehiclePayload()
         seatbelt = latestBridgeSnapshot.seatbelt == true
     end
 
+    -- Rounded for the same reason the vitals are: the NUI renders speed as a
+    -- whole number and fuel as a ring, so sub-unit float drift is a message
+    -- with no visible effect. It also makes fuel's "neutral" 100 exact, which
+    -- is what Config.hud.dynamic compares against to hide a full gauge.
     return {
-        speed = snapshot.speed,
-        fuel = snapshot.fuel,
+        speed = round(snapshot.speed),
+        fuel = snapshot.fuel and round(snapshot.fuel) or nil,
         engineOn = snapshot.engineOn,
         headlights = snapshot.headlights,
         seatbelt = seatbelt,
     }
 end
 
-local function pushUpdate()
-    if not visible then return end
+local function vehiclePayloadChanged(payload)
+    if payload == nil or lastVehiclePayload == nil then
+        return payload ~= lastVehiclePayload
+    end
 
-    send("qbhud:update", {
-        health = QB.cache.health(),
-        maxHealth = GetEntityMaxHealth(QB.cache.ped()),
-        armour = QB.cache.armour(),
-        stamina = QB.cache.stamina(),
-        talking = Voice.isTalking(),
-        job = latestBridgeSnapshot.job,
-        gang = latestBridgeSnapshot.gang,
-        cash = latestBridgeSnapshot.cash,
-        bank = latestBridgeSnapshot.bank,
-        hunger = latestBridgeSnapshot.hunger,
-        thirst = latestBridgeSnapshot.thirst,
-        stress = latestBridgeSnapshot.stress,
-        status = latestBridgeSnapshot.status or {},
-    })
+    return payload.speed ~= lastVehiclePayload.speed
+        or payload.fuel ~= lastVehiclePayload.fuel
+        or payload.engineOn ~= lastVehiclePayload.engineOn
+        or payload.headlights ~= lastVehiclePayload.headlights
+        or payload.seatbelt ~= lastVehiclePayload.seatbelt
 end
 
--- Sent separately from qbhud:update (see buildVehiclePayload) so vehicle
--- telemetry can refresh on Config.poll.vehicleInterval -- much faster than
--- the rest of the HUD needs -- without dragging job/cash/hunger/etc. along
--- for the ride on every tick while driving.
-local function pushVehicleUpdate()
+-- Sent on its own channel (not folded into qbhud:update) so vehicle telemetry
+-- can refresh on Config.poll.vehicleInterval -- much faster than the rest of
+-- the HUD needs -- without dragging job/cash/hunger/etc. along for the ride on
+-- every tick while driving.
+---@param force boolean|nil Send even if nothing changed (visibility/initial-state pushes).
+local function pushVehicleUpdate(force)
     if not visible then return end
 
-    send("qbhud:vehicle", buildVehiclePayload())
+    local payload = buildVehiclePayload()
+    if not force and not vehiclePayloadChanged(payload) then return end
+
+    lastVehiclePayload = payload
+    send("qbhud:vehicle", payload)
 end
 
 -- Push-driven for anything that already has cheap change notification --
--- these fire immediately instead of waiting for a tick.
-QB.cache.onChange("health", pushUpdate)
-QB.cache.onChange("armour", pushUpdate)
+-- these fire immediately instead of waiting for a tick. Each handler takes the
+-- new value from its own ARGUMENT: qblib's cache passes (new, old), so there
+-- is no reason to call back across the export boundary to ask for what we
+-- were just handed.
+QB.cache.onChange("health", function(value) setVital('health', round(value)) end)
+QB.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
 -- Stamina moves continuously while sprinting, so it is the one HUD field that
 -- would visibly lag on any push-only path -- it belongs to no framework delta
 -- and no adapter can announce it. qblib's cache re-reads it on its own shared
 -- tick (Config.cache.tickInterval, 100ms) and only notifies on an actual
 -- change: full rate mid-sprint, silent standing still, and no second thread
 -- here to own.
-QB.cache.onChange("stamina", pushUpdate)
-Voice.onChange(pushUpdate)
+QB.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
+Voice.onChange(function(value) setVital('talking', value == true) end)
 
--- Vehicle telemetry is the ONE thing that genuinely has to be sampled: speed
--- and fuel change continuously, so no event can carry them. Everything else
--- about it is event-driven -- the cache tells us when the player gets in or
--- out, and the sampling thread exists only for that span. Mirrors the lazy
--- tick-thread pattern client/vehicle.lua already uses to READ the telemetry
--- (and qblib's own modules/zones); previously this ran forever at
--- bridgeInterval even on foot, pushing a null payload every tick.
+-- Forward-declared: the ped handler below re-asserts the minimap suppression
+-- on respawn, but the scaleform is only requested further down (after
+-- everything that can throw at load).
+local reassertMinimap
+
+-- Maximum health is per-ped (freemode male 200, female 175) and only ever
+-- changes when the ped itself does -- a respawn, a model change, a script
+-- setting a new maximum. Reading it per push meant a native call AND a
+-- cross-resource QB.cache.ped() on every single stamina tick.
+--
+-- A non-positive reading is discarded rather than published: the native
+-- answers 0 for a handle that isn't a valid entity yet (the join/loading
+-- window, the frame either side of a respawn), and the NUI divides by this to
+-- get a percentage. Keeping the last good maximum is always closer to the
+-- truth than zero.
+local function refreshMaxHealth(ped)
+    local maxHealth = GetEntityMaxHealth(ped)
+    if type(maxHealth) ~= 'number' or maxHealth <= 0 then return end
+    setVital('maxHealth', maxHealth)
+end
+
+QB.cache.onChange("ped", function(ped)
+    refreshMaxHealth(ped)
+    -- A respawn rebuilds the minimap, which is the one moment the suppression
+    -- below is most likely to have been dropped. Re-assert it now rather than
+    -- leaving the stock cluster on screen until the next interval.
+    if reassertMinimap then reassertMinimap() end
+end)
+
+-- Everything else about the vehicle is event-driven -- the cache tells us when
+-- the player gets in or out, and the sampling thread exists only for that
+-- span. Mirrors the lazy tick-thread pattern client/vehicle.lua already uses
+-- to READ the telemetry (and qblib's own modules/zones); previously this ran
+-- forever at bridgeInterval even on foot, pushing a null payload every tick.
 local vehicleTickRunning = false
 
 local function startVehicleTick()
@@ -188,9 +358,9 @@ local function startVehicleTick()
     vehicleTickRunning = true
 
     CreateThread(function()
-        while QB.cache.vehicle() do
+        while currentVehicle do
             pushVehicleUpdate()
-            Wait(Config.poll.vehicleInterval)
+            Wait(VEHICLE_INTERVAL)
         end
 
         vehicleTickRunning = false
@@ -201,8 +371,30 @@ local function startVehicleTick()
 end
 
 QB.cache.onChange("vehicle", function(vehicle)
-    if vehicle then startVehicleTick() else pushVehicleUpdate() end
+    currentVehicle = vehicle or false
+    if currentVehicle then startVehicleTick() else pushVehicleUpdate() end
 end)
+
+-- Seeds the mirrors above with the values the change handlers will keep current
+-- from here on. Runs at CHUNK LOAD rather than in the start-up thread below,
+-- because the qbhud:ready callback can fire first (a page that mounts before
+-- that thread is scheduled) and sendInitialState must never paint a HUD out of
+-- the zeroed defaults. pcall'd as a group -- these are cross-resource reads,
+-- and qblib mid-restart must leave the HUD on its defaults, not abort the rest
+-- of this chunk; the start-up thread retries once if that happens.
+local seeded = false
+
+local function seedFromCache()
+    vitals.health = round(QB.cache.health())
+    vitals.armour = round(QB.cache.armour())
+    vitals.stamina = round(QB.cache.stamina())
+    refreshMaxHealth(QB.cache.ped())
+    currentVehicle = QB.cache.vehicle() or false
+    seeded = true
+end
+
+pcall(seedFromCache)
+
 -- QB.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
 -- in spirit (it's read directly from qblib, not through HudBridge's own
 -- change notification), so a status effect applying/clearing needs its own
@@ -214,7 +406,7 @@ pcall(function()
     QB.status.onChange(function()
         local ok, status = pcall(function() return QB.status.getActive() end)
         latestBridgeSnapshot.status = ok and type(status) == 'table' and status or {}
-        pushUpdate()
+        requestPlayer()
     end)
 end)
 
@@ -223,6 +415,11 @@ end)
 -- the next poll tick -- e.g. qbcore's adapter pushes this off its replicated
 -- login state bag. Adapters with no login concept (the stub) don't implement
 -- onLoginChange, so for them only the exports below ever change visibility.
+--
+-- The pushes here deliberately call the flush functions DIRECTLY rather than
+-- going through the throttles: a show has to repaint the whole HUD on the spot,
+-- and a throttle already mid-interval from some unrelated change would
+-- otherwise defer it.
 local function refreshVisibility()
     local newVisible = loggedIn and not forcedHidden
     if newVisible == visible then return end
@@ -235,8 +432,9 @@ local function refreshVisibility()
         -- login-notify loop, and a mid-restart qbcore export must not abort
         -- it after the visibility send already went out.
         latestBridgeSnapshot = safeGetBridgeSnapshot()
-        pushUpdate()
-        pushVehicleUpdate()
+        flushVitals()
+        flushPlayer()
+        pushVehicleUpdate(true)
     end
 end
 
@@ -285,8 +483,12 @@ sendInitialState = function()
     send("qbhud:visibility", visible)
 
     if visible then
-        pushUpdate()
-        pushVehicleUpdate()
+        -- Direct, un-throttled and unconditional: this is a REMOUNT, so the
+        -- page holds no state at all and the change checks the throttled paths
+        -- rely on would happily conclude there is nothing to say.
+        flushVitals()
+        flushPlayer()
+        pushVehicleUpdate(true)
     end
 end
 
@@ -300,7 +502,7 @@ end
 if HudBridge.onChange then
     HudBridge.onChange(function(snapshot)
         latestBridgeSnapshot = snapshot
-        pushUpdate()
+        requestPlayer()
     end)
 else
     CreateThread(function()
@@ -312,14 +514,74 @@ else
             local ok, snapshot = pcall(function() return HudBridge.getSnapshot() end)
             if ok and type(snapshot) == 'table' then
                 latestBridgeSnapshot = snapshot
-                pushUpdate()
+                requestPlayer()
             end
-            Wait(Config.poll.bridgeInterval)
+            Wait(BRIDGE_INTERVAL)
         end
     end)
 end
 
+-- The minimap's own scaleform draws its own health/armour/breath cluster
+-- straight from the engine's internal ped state -- it is not driven by
+-- QB.cache.health() and has its own smoothing/thresholds, so left alone it
+-- visibly disagrees with the radial gauges above (that's the "health isn't
+-- matching the default hud" symptom: two independent renderers of the same
+-- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
+-- the minimap draws; 3 draws neither, ceding the stat entirely to this
+-- resource's NUI, and 0 is the engine's own default of drawing both.
+--
+-- Requested once (not per-tick) since scaleform handles are movie instances,
+-- not frame-scoped state -- re-requesting repeatedly would leak a new instance
+-- each time.
+local MINIMAP_DRAW_NEITHER = 3
+local MINIMAP_DRAW_DEFAULT = 0
+
+local minimapScaleform = RequestScaleformMovie("minimap")
+
+local function setupMinimapHealthArmour(param)
+    BeginScaleformMovieMethod(minimapScaleform, "SETUP_HEALTH_ARMOUR")
+    ScaleformMovieMethodAddParamInt(param)
+    EndScaleformMovieMethod()
+end
+
+-- Assignment, not `local function` -- see sendInitialState above for why the
+-- forward declaration must not be shadowed.
+reassertMinimap = function()
+    if visible then setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end
+end
+
+-- Re-asserted on an interval rather than every frame. The flag persists inside
+-- the scaleform between calls, so the per-frame Wait(0) loop this replaces was
+-- spending a thread resume plus three natives every single frame to re-state
+-- something that had not changed -- for a HUD whose entire job here is one
+-- boolean. Config.poll.minimapInterval documents the escape hatch (0 restores
+-- the per-frame behaviour) if a build turns out to re-assert the engine
+-- default underneath us.
+--
+-- `suppressed` tracks what was last asked for so the engine default is
+-- restored exactly once when the HUD hides (a cutscene, a logout), instead of
+-- leaving the stock cluster suppressed on a screen this resource is no longer
+-- drawing on.
 CreateThread(function()
+    local suppressed = false
+
+    while true do
+        if visible then
+            setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER)
+            suppressed = true
+        elseif suppressed then
+            setupMinimapHealthArmour(MINIMAP_DRAW_DEFAULT)
+            suppressed = false
+        end
+
+        Wait(MINIMAP_INTERVAL)
+    end
+end)
+
+CreateThread(function()
+    -- Only if the load-time attempt above lost the race with a qblib restart.
+    if not seeded then pcall(seedFromCache) end
+
     -- Best-effort: lost if the page hasn't mounted yet (the qbhud:ready
     -- callback at the top of this file covers that). pcall'd so a failure here
     -- can't abort the thread before the vehicle tick below is armed.
@@ -330,30 +592,5 @@ CreateThread(function()
     -- resource starts (`ensure qbhud` mid-drive): QB.cache.onChange only ever
     -- observes future transitions, so nothing else would start it until the
     -- player got out and back in.
-    if QB.cache.vehicle() then startVehicleTick() end
-end)
-
--- The minimap's own scaleform draws its own health/armour/breath cluster
--- straight from the engine's internal ped state -- it is not driven by
--- QB.cache.health() and has its own smoothing/thresholds, so left alone it
--- visibly disagrees with the radial gauges above (that's the "health isn't
--- matching the default hud" symptom: two independent renderers of the same
--- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
--- the minimap draws; 3 draws neither, ceding the stat entirely to this
--- resource's NUI. Requested once (not per-frame) since scaleform handles are
--- movie instances, not frame-scoped state -- re-requesting every tick would
--- leak a new instance each frame. Reissued every tick because the game
--- re-applies its own default (0, both shown) each frame if not told
--- otherwise, same reason the native is documented as a per-frame call.
-local minimapScaleform = RequestScaleformMovie("minimap")
-
-CreateThread(function()
-    while true do
-        Wait(0)
-        if visible then
-            BeginScaleformMovieMethod(minimapScaleform, "SETUP_HEALTH_ARMOUR")
-            ScaleformMovieMethodAddParamInt(3)
-            EndScaleformMovieMethod()
-        end
-    end
+    if currentVehicle then startVehicleTick() end
 end)

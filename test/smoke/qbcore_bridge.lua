@@ -7,6 +7,11 @@ local harness = require('harness')
 
 local function loadBridge(initialState, initialData, initialMode, sessionStarted)
     local handlers, threads, registeredEvents = {}, {}, {}
+    -- One entry per root client/bridge/qbcore.lua subscribes to via qbcore's
+    -- delta stream, so a test can fire several of them in one frame the way a
+    -- server-side resync does.
+    local dataChangeHandlers = {}
+    local snapshotBuilds = 0
     -- Defaults to an already-live session: every test but the deferred-
     -- registration ones below is about what happens once the bag handlers are
     -- actually armed.
@@ -44,8 +49,11 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
     _G.Wait = function() coroutine.yield() end
     _G.exports = {
         qbcore = {
-            getPlayerData = function(...) return getPlayerDataImpl(...) end,
-            onPlayerDataChange = function() end,
+            getPlayerData = function(...) snapshotBuilds = snapshotBuilds + 1; return getPlayerDataImpl(...) end,
+            -- Colon-called by the adapter (`exports.qbcore:onPlayerDataChange`),
+            -- so the receiver arrives as the first argument ahead of the
+            -- (paths, callback) pair.
+            onPlayerDataChange = function(_, _paths, callback) dataChangeHandlers[#dataChangeHandlers + 1] = callback end,
             requestResync = function() resyncCalls = resyncCalls + 1 end,
         },
     }
@@ -62,6 +70,20 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
         -- N calls before succeeding (simulating qbcore mid-restart).
         setPlayerDataImpl = function(fn) getPlayerDataImpl = fn end,
         resyncCalls = function() return resyncCalls end,
+        snapshotBuilds = function() return snapshotBuilds end,
+        -- Fires every root subscription in one frame, as a full resync does.
+        fireAllDataChanges = function()
+            for _, callback in ipairs(dataChangeHandlers) do callback({ 'money' }, nil) end
+            return #dataChangeHandlers
+        end,
+        setCash = function(value)
+            for _, handler in ipairs(handlers) do
+                if handler.key == 'qbcore:money:cash' then
+                    handler.callback('player:17', 'qbcore:money:cash', value, nil, true)
+                end
+            end
+            LocalPlayer.state['qbcore:money:cash'] = value
+        end,
         startSession = function() sessionLive = true end,
         -- REAL CFX ORDERING: a state bag change handler fires BEFORE the new
         -- value is committed to the local store -- LocalPlayer.state still
@@ -258,6 +280,45 @@ harness.test('a pcall-guarded getPlayerData error does not kill the reconcile th
     bridge.step() -- the retry succeeds
 
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'an error on one export call must be swallowed and retried, not kill the thread')
+end)
+
+harness.test('a burst of delta roots costs one snapshot rebuild, not one per root', function()
+    -- qbcore fires money/job/gang/metadata separately, and a resync touches all
+    -- four at once. Each rebuild is a getPlayerData export call plus a
+    -- QB.status.getActive one, so re-snapshotting per root turns one logical
+    -- update into four boundary crossings and four HUD pushes.
+    local bridge = loadBridge(true, { money = { cash = 10 }, metadata = {} })
+    local pushes = 0
+    bridge.bridge.onChange(function() pushes = pushes + 1 end)
+    bridge.step()
+
+    local roots = bridge.fireAllDataChanges()
+    harness.assertEqual(roots, 4, 'sanity: money/job/gang/metadata are all subscribed')
+
+    -- Measured as deltas: onChange itself pushes once on registration so the
+    -- HUD reflects current state without waiting for a first change.
+    local buildsBefore, pushesBefore = bridge.snapshotBuilds(), pushes
+    bridge.step()
+
+    harness.assertEqual(bridge.snapshotBuilds() - buildsBefore, 1,
+        'four roots changing in one frame must rebuild the snapshot once')
+    harness.assertEqual(pushes - pushesBefore, 1, 'and push once')
+end)
+
+harness.test('an authoritative cash change still reaches the HUD, one frame later', function()
+    -- The deferred frame is load-bearing: CFX fires a bag handler before the
+    -- new value is committed, and snapshotFrom reads the cash key back out of
+    -- the store.
+    local bridge = loadBridge(true, { money = { cash = 10 }, metadata = {} })
+    local latest
+    bridge.bridge.onChange(function(snapshot) latest = snapshot end)
+    bridge.step()
+
+    bridge.setCash(250)
+    bridge.step()
+
+    harness.assertTrue(latest ~= nil, 'the cash bag handler must push a snapshot')
+    harness.assertEqual(latest.cash, 250, 'and it must carry the COMMITTED balance, not the pre-change one')
 end)
 
 harness.report('qbcore_bridge')

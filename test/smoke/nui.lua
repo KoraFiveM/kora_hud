@@ -34,6 +34,18 @@ local function loadHud(opts)
     local seatbelt = false
     local loggedIn = opts.loggedIn ~= false
     local exported = {}
+    -- Every ms value any thread has ever passed to Wait, so a reintroduced
+    -- per-frame loop is a test failure rather than a resmon surprise.
+    local waits = {}
+    -- Every QB.cache.<fn>() read, by key. Each one is a cross-resource export
+    -- call, so "how many of these happen per update" IS this resource's cost
+    -- while the player is moving -- pinned below.
+    local cacheReads = { health = 0, armour = 0, stamina = 0, ped = 0, vehicle = 0 }
+    -- Vehicle telemetry is deduplicated before it goes on the wire, so a mock
+    -- that reports the same reading forever can't tell a live sampler from a
+    -- dead one. Move one field per sample, the way a driven car does.
+    local vehicleSamples = 0
+    local vehicleHandles = {}
 
     _G.SendNUIMessage = function(message) sent[#sent + 1] = message end
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
@@ -58,11 +70,20 @@ local function loadHud(opts)
         -- Runs to the first Wait(); a sampling thread suspends there.
         assert(coroutine.resume(thread))
     end
-    _G.Wait = function() coroutine.yield() end
+    _G.Wait = function(ms)
+        waits[#waits + 1] = ms
+        coroutine.yield()
+    end
 
     _G.Config = {
         hud = { dynamic = opts.dynamicHud == true, elements = { mic = true, cash = true, vehicle = true } },
-        poll = { bridgeInterval = 500, vehicleInterval = 250 },
+        poll = {
+            vitalsInterval = 100,
+            playerInterval = 100,
+            vehicleInterval = 250,
+            bridgeInterval = 500,
+            minimapInterval = 250,
+        },
     }
 
     _G.HudBridge = {
@@ -82,9 +103,15 @@ local function loadHud(opts)
     end
 
     _G.Vehicle = {
-        getSnapshot = function()
-            if not vehicle then return nil end
-            return { speed = 60, fuel = 50, engineOn = true, headlights = 'low' }
+        -- Reads the handle it is HANDED, not the cache: client/hud.lua already
+        -- has the vehicle from QB.cache.onChange and must not pay for an
+        -- export call to re-ask for it four times a second.
+        getSnapshot = function(handle)
+            vehicleHandles[#vehicleHandles + 1] = handle
+            if not handle then return nil end
+            vehicleSamples = vehicleSamples + 1
+            local speed = opts.staticVehicle and 60 or (59 + vehicleSamples)
+            return { speed = speed, fuel = 50, engineOn = true, headlights = 'low' }
         end,
     }
     _G.Voice = { isTalking = function() return false end, onChange = function() end, setActive = function() end }
@@ -96,11 +123,11 @@ local function loadHud(opts)
                 cacheHandlers[key] = cacheHandlers[key] or {}
                 table.insert(cacheHandlers[key], handler)
             end,
-            health = function() return 200 end,
-            ped = function() return 42 end,
-            armour = function() return 0 end,
-            stamina = function() return 100 end,
-            vehicle = function() return vehicle end,
+            health = function() cacheReads.health = cacheReads.health + 1; return 200 end,
+            ped = function() cacheReads.ped = cacheReads.ped + 1; return 42 end,
+            armour = function() cacheReads.armour = cacheReads.armour + 1; return 0 end,
+            stamina = function() cacheReads.stamina = cacheReads.stamina + 1; return 100 end,
+            vehicle = function() cacheReads.vehicle = cacheReads.vehicle + 1; return vehicle end,
             playerId = function() return 3 end,
         },
         theme = { tokens = function() return { bg = '0 0% 0%' } end },
@@ -148,6 +175,14 @@ local function loadHud(opts)
             for _, handler in ipairs(cacheHandlers.vehicle or {}) do handler(value) end
         end,
         setSeatbelt = function(value) seatbelt = value end,
+        waits = function() return waits end,
+        cacheReads = function() return cacheReads end,
+        vehicleHandles = function() return vehicleHandles end,
+        -- Drives one qblib cache change notification, exactly as qblib's own
+        -- modules/cache setValue does: handler(newValue, oldValue).
+        pushCache = function(key, value, old)
+            for _, handler in ipairs(cacheHandlers[key] or {}) do handler(value, old) end
+        end,
         exported = exported,
         setLoggedIn = function(value)
             loggedIn = value
@@ -251,10 +286,10 @@ harness.test('the HUD sends the ped-specific maximum health for percentage conve
     local hud = loadHud({ maxHealth = 175 })
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:update' then latest = message.data end
+        if message.action == 'qbhud:vitals' then latest = message.data end
     end
 
-    harness.assertTrue(latest ~= nil, 'initial state should include a HUD update')
+    harness.assertTrue(latest ~= nil, 'initial state should include the vitals channel')
     harness.assertEqual(latest.maxHealth, 175,
         'female freemode peds use a 175 maximum rather than the male 200 maximum')
 end)
@@ -402,6 +437,169 @@ harness.test('show cannot reveal the HUD while logged out', function()
     hud.exported.show()
     harness.assertEqual(hud.lastVisibility(), nil, 'show() clears the override but login still gates')
     harness.assertEqual(hud.exported.isVisible(), false, 'the HUD stays hidden during character select')
+end)
+
+-- --- cost: nothing per frame, nothing re-read across the export boundary ---
+
+harness.test('no HUD thread runs on a per-frame Wait(0)', function()
+    -- The whole resource is written against a per-frame budget: every loop it
+    -- owns is an interval, including the minimap scaleform re-assert that used
+    -- to be a Wait(0) spin. A 0 (or nil, which Wait rejects in FiveM) here
+    -- means something went back to running 60 times a second.
+    local hud = loadHud({ bridgePush = true })
+    hud.tick()
+    hud.tick()
+
+    for _, ms in ipairs(hud.waits()) do
+        harness.assertTrue(type(ms) == 'number' and ms > 0,
+            ('every HUD loop must wait a real interval, got %s'):format(tostring(ms)))
+    end
+end)
+
+harness.test('a vitals change costs zero cross-resource cache reads', function()
+    -- Every QB.cache.<fn>() is an export call. The old push read four of them
+    -- (health/ped/armour/stamina) EVERY time stamina moved -- ten times a
+    -- second for the whole length of a sprint. The change handlers are handed
+    -- the new value as an argument; there is nothing left to go and ask for.
+    local hud = loadHud({ bridgePush = true })
+    hud.reset()
+
+    local before = hud.cacheReads()
+    local baseline = { health = before.health, armour = before.armour,
+                       stamina = before.stamina, ped = before.ped, vehicle = before.vehicle }
+
+    for value = 99, 90, -1 do hud.pushCache('stamina', value) end
+    hud.tick()
+
+    local after = hud.cacheReads()
+    for key, count in pairs(baseline) do
+        harness.assertEqual(after[key], count,
+            ('a stamina tick must not read QB.cache.%s across the export boundary'):format(key))
+    end
+end)
+
+harness.test('stamina goes out on the vitals channel, not with job/gang/status', function()
+    local hud = loadHud({ bridgePush = true })
+    hud.reset()
+
+    hud.pushCache('stamina', 42)
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'a stamina change pushes vitals')
+    harness.assertEqual(hud.countAction('qbhud:update'), 0,
+        'the job label, gang table and status list must not be re-serialized for a stamina tick')
+
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:vitals' then latest = message.data end
+    end
+    harness.assertEqual(latest.stamina, 42, 'the pushed value is the one the cache handed us')
+    harness.assertTrue(latest.job == nil, 'player data has no business on the fast channel')
+end)
+
+harness.test('a burst of changes inside one interval collapses into a single message', function()
+    -- Leading edge: the first change is immediate (no added latency on a
+    -- one-off), everything arriving before the interval elapses is coalesced.
+    local hud = loadHud({ bridgePush = true })
+    hud.reset()
+
+    hud.pushCache('stamina', 80)
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'the first change must not wait for the interval')
+
+    for value = 79, 70, -1 do hud.pushCache('stamina', value) end
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'ten more changes inside the interval add no messages')
+
+    hud.tick()
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 2, 'the interval elapsing sends the latest value once')
+end)
+
+harness.test('sub-unit drift never reaches the wire', function()
+    -- GetPedArmour/GetPlayerStamina are floats, so qblib's cache reports a
+    -- change for movement far below what a 44px ring can render. Rounding on
+    -- the way in is what lets the throttle actually go idle.
+    local hud = loadHud({ bridgePush = true })
+    hud.reset()
+
+    hud.pushCache('stamina', 90.4)
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'the first whole-unit value is sent')
+    hud.tick()
+    hud.reset()
+
+    hud.pushCache('stamina', 90.1)
+    hud.pushCache('stamina', 89.8)
+    hud.pushCache('stamina', 90.3)
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 0,
+        'drift that rounds to the same whole unit must not send anything')
+end)
+
+harness.test('maximum health is resolved on a ped change, not on every push', function()
+    local hud = loadHud({ bridgePush = true, maxHealth = 200 })
+    hud.reset()
+
+    _G.GetEntityMaxHealth = function() return 175 end
+    hud.pushCache('ped', 77)
+
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:vitals' then latest = message.data end
+    end
+    harness.assertTrue(latest ~= nil, 'a ped change must refresh the vitals')
+    harness.assertEqual(latest.maxHealth, 175, 'a respawn onto a different ped model updates the maximum')
+end)
+
+harness.test('an unchanged vehicle reading is sampled but not re-sent', function()
+    -- Idling at a red light, or parked with the engine running, produces the
+    -- same reading every tick. Sampling is unavoidable (no event carries speed
+    -- or fuel); sending is not.
+    local hud = loadHud({ bridgePush = true, inVehicle = true, staticVehicle = true })
+    hud.tick()
+    hud.reset()
+
+    local sampledBefore = #hud.vehicleHandles()
+    hud.tick()
+    hud.tick()
+
+    harness.assertTrue(#hud.vehicleHandles() > sampledBefore, 'the sampler must keep running')
+    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0,
+        'a reading identical to the last one sent is not worth a NUI message')
+end)
+
+harness.test('the vehicle sampler is handed the cached handle rather than re-reading it', function()
+    local hud = loadHud({ bridgePush = true, inVehicle = true })
+    hud.tick()
+
+    local handles = hud.vehicleHandles()
+    harness.assertTrue(#handles > 0, 'sanity: the sampler ran')
+    for _, handle in ipairs(handles) do
+        harness.assertEqual(handle, 42, 'every sample must use the handle QB.cache.onChange pushed')
+    end
+end)
+
+harness.test('a hidden HUD does no work for a change nobody can see', function()
+    -- Stamina keeps ticking through character select and cutscenes. The mirror
+    -- must stay current (a later show has to paint real values) but nothing
+    -- should reach the wire, and no throttle thread should be started to find
+    -- that out.
+    local hud = loadHud({ bridgePush = true, loggedIn = false })
+    hud.reset()
+
+    local threadsBefore = hud.threadCount()
+    for value = 99, 90, -1 do hud.pushCache('stamina', value) end
+
+    harness.assertEqual(hud.countAction('qbhud:vitals'), 0, 'a hidden HUD sends nothing')
+    harness.assertEqual(hud.threadCount(), threadsBefore, 'and starts no thread to send nothing with')
+
+    hud.setLoggedIn(true)
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:vitals' then latest = message.data end
+    end
+    harness.assertTrue(latest ~= nil, 'showing the HUD paints it immediately')
+    harness.assertEqual(latest.stamina, 90, 'with the value the mirror tracked while hidden')
+end)
+
+harness.test('the HUD subscribes to exactly the cache keys it mirrors', function()
+    local hud = loadHud({ bridgePush = true })
+    harness.assertEqual(table.concat(hud.cacheKeys(), ','), 'armour,health,ped,stamina,vehicle',
+        'a new subscription here is a new hot path -- add it deliberately')
 end)
 
 harness.report('nui')

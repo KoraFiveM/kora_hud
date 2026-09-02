@@ -2,8 +2,16 @@
 // arrives as a `window` `message` event shaped like NuiWireMessage below (see
 // useNuiEvent.ts). qb-hud only ever sends fire-and-forget messages (no
 // request/response round trip -- there's nothing for the player to answer)
-// from client/hud.lua. Keep this file in sync with that file's QB.nui.send
+// from client/hud.lua. Keep this file in sync with that file's SendNUIMessage
 // call sites.
+//
+// The three data channels ("qbhud:vitals", "qbhud:update", "qbhud:vehicle")
+// are split by how FAST each one changes, not by topic. Stamina moves on
+// every 100ms cache tick for the whole length of a sprint; the job label and
+// the status list change a handful of times an hour. Keeping them on one
+// message would mean serializing (and re-rendering) all of it at the fastest
+// member's rate -- hudState.tsx gives each channel its own context for the
+// same reason.
 
 export interface NuiWireMessage<T = unknown> {
     action: string
@@ -68,17 +76,26 @@ export interface HudStatusEffect {
     severity: number | null
 }
 
-// action: "qbhud:update" -- sent on every cache/bridge refresh (see
-// client/hud.lua's pushUpdate), on Config.poll.bridgeInterval regardless of
-// vehicle state. Vehicle telemetry is NOT included here -- see
-// HudVehiclePayload below -- so this payload doesn't have to go out at
-// vehicle telemetry's much faster cadence too.
-export interface HudUpdatePayload {
+// action: "qbhud:vitals" -- the continuously-moving player stats, rate-limited
+// to Config.poll.vitalsInterval (see client/hud.lua's `throttle`). This is the
+// HUD's fastest non-vehicle channel: stamina alone changes on every qblib
+// cache tick while sprinting. Every number here is already rounded to a whole
+// unit in Lua, so a value arriving at all means it moved by at least one unit.
+export interface HudVitalsPayload {
     health: number
     maxHealth: number
     armour: number
     stamina: number
     talking: boolean
+}
+
+// action: "qbhud:update" -- the slow, framework-sourced half of the player
+// state, pushed when the bridge adapter reports a delta (or on
+// Config.poll.bridgeInterval for an adapter with no push path). Vitals and
+// vehicle telemetry are deliberately NOT included -- see HudVitalsPayload
+// above and HudVehiclePayload below -- so this payload never has to go out at
+// their much faster cadence.
+export interface HudUpdatePayload {
     job: HudJob
     gang: HudGang | null
     cash: number
@@ -91,5 +108,6 @@ export interface HudUpdatePayload {
 
 // action: "qbhud:vehicle" -- sent independently of "qbhud:update" (see
 // client/hud.lua's pushVehicleUpdate), on the faster Config.poll.vehicleInterval
-// cadence while driving. `null` while on foot.
+// cadence while driving, and only when a value actually changed (a car idling
+// at a light sends nothing). `null` while on foot.
 export type HudVehiclePayload = HudVehicleInfo | null

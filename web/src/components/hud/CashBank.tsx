@@ -1,13 +1,14 @@
 import { Landmark, Wallet } from "lucide-react"
 
-import { useHudState } from "@/lib/hudState"
+import { useHudConfig, useHudUpdate } from "@/lib/hudState"
 
 function formatMoney(amount: number) {
     return `$${Math.round(amount).toLocaleString("en-US")}`
 }
 
 export function CashBank() {
-    const { config, update } = useHudState()
+    const config = useHudConfig()
+    const update = useHudUpdate()
     if (!config.elements.cash && !config.elements.bank) return null
 
     return (

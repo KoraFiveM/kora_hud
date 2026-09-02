@@ -8,12 +8,19 @@
 -- it remains bridge state and is refreshed by that same HUD vehicle tick.
 Vehicle = Vehicle or {}
 
+---@param vehicle integer|false|nil The caller's already-known vehicle handle. Every
+---QB.<module>.<fn> access is a cross-resource export call, so the sampling loop
+---in client/hud.lua -- which is already handed the handle by
+---QB.cache.onChange('vehicle') -- passes it in rather than paying for that
+---crossing four times a second to re-ask for a value it was pushed. Omitted,
+---this falls back to the cache read, so a caller with no handle of its own
+---(and the standalone smoke test) still works unchanged.
 ---@return { speed: number, fuel: number | nil, engineOn: boolean, headlights: 'off'|'low'|'high' } | nil
-function Vehicle.getSnapshot()
+function Vehicle.getSnapshot(vehicle)
     -- The qblib cache is the single source of vehicle lifecycle truth. This
     -- avoids a second IsPedInAnyVehicle loop in qbhud and guarantees no vehicle
     -- native is touched while the player is on foot.
-    local vehicle = QB.cache.vehicle()
+    if vehicle == nil then vehicle = QB.cache.vehicle() end
     if not vehicle then return nil end
 
     -- GetVehicleFuelLevel and IsVehicleEngineRunning are not guaranteed on all

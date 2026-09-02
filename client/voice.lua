@@ -29,8 +29,17 @@ local function setTalking(value)
     end
 end
 
+-- Resolved once, not per sample. The local player index is a session constant,
+-- and QB.cache.playerId() is a cross-resource export call (see qblib/init.lua's
+-- proxy metatable) -- a full boundary crossing to be handed back the same
+-- integer the native returns directly. The cache exists to avoid natives that
+-- are expensive or need a shared tick; PlayerId() is neither.
+local playerId
+
 local function sample()
-    local ok, result = pcall(NetworkIsPlayerTalking, QB.cache.playerId())
+    if playerId == nil then playerId = PlayerId() end
+
+    local ok, result = pcall(NetworkIsPlayerTalking, playerId)
     setTalking(ok and result or false)
 end
 
@@ -48,10 +57,12 @@ function Voice.setActive(value)
     if sampling then return end
 
     sampling = true
+    local interval = Config.voice.interval or 200
+
     CreateThread(function()
         while active do
             sample()
-            Wait(200)
+            Wait(interval)
         end
         sampling = false
     end)
