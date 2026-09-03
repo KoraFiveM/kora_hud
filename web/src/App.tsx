@@ -3,6 +3,7 @@ import { CashBank } from "@/components/hud/CashBank"
 import { HealthArmour } from "@/components/hud/HealthArmour"
 import { HungerThirst } from "@/components/hud/HungerThirst"
 import { JobGang } from "@/components/hud/JobGang"
+import { HUD_SECTIONS, LayoutEditorOverlay, MovableSection } from "@/components/hud/LayoutEditor"
 import { MicIndicator } from "@/components/hud/MicIndicator"
 import { Stamina } from "@/components/hud/Stamina"
 import { StatusEffects } from "@/components/hud/StatusEffects"
@@ -29,6 +30,11 @@ import { HudStateProvider, useHudVisible } from "@/lib/hudState"
  * stacks immediately above them when present, while the wider identity/money
  * panels remain independently pinned to the lower-right so neither can pull
  * the gauges away from the true screen centre.
+ *
+ * Those three clusters are exactly the three movable sections: each one is
+ * wrapped in a MovableSection carrying its own persisted id, and the position
+ * classes below stay that section's zero point (see MovableSection's own
+ * comment), so a player with nothing saved sees this layout unchanged.
  */
 function HudContent() {
     const visible = useHudVisible()
@@ -36,7 +42,15 @@ function HudContent() {
 
     return (
         <div className="pointer-events-none fixed inset-0 z-hud">
-            <div className="fixed bottom-4 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
+            <LayoutEditorOverlay />
+            <MovableSection
+                id={HUD_SECTIONS.gauges}
+                label="Gauges"
+                position="bottom-4 left-1/2"
+                handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
+                inner="flex flex-col items-center gap-2"
+                centerX
+            >
                 <VehicleInfo />
                 <div className="flex items-center gap-2">
                     <HealthArmour />
@@ -44,15 +58,28 @@ function HudContent() {
                     <HungerThirst />
                     <Stress />
                 </div>
-            </div>
-            <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
+            </MovableSection>
+            <MovableSection
+                id={HUD_SECTIONS.identity}
+                label="Player"
+                position="bottom-4 right-4"
+                handlePosition="bottom-full right-0 mb-3"
+                inner="flex flex-col items-end gap-2"
+            >
                 <MicIndicator />
                 <JobGang />
                 <CashBank />
-            </div>
-            <div className="fixed right-4 top-4">
+            </MovableSection>
+            {/* Handle BELOW this one: the section is pinned to the top of the
+                screen, so a handle above it would render off the top edge. */}
+            <MovableSection
+                id={HUD_SECTIONS.status}
+                label="Status"
+                position="right-4 top-4"
+                handlePosition="top-full right-0 mt-3"
+            >
                 <StatusEffects />
-            </div>
+            </MovableSection>
         </div>
     )
 }

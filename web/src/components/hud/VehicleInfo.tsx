@@ -1,4 +1,4 @@
-import { Fuel, Gauge, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
+import { Fuel, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
 import { useHudConfig, useHudVehicle } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
@@ -21,8 +21,11 @@ export function VehicleInfo() {
                 <RadialGauge icon={Fuel} value={fuel} defaultValue={100} label="Fuel" color={statColor(fuel)} size={36} stroke={3} />
             )}
             <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
+                {/* No speedometer icon. "km/h" beside a large number already
+                    says what this is, and a gauge glyph next to it was the one
+                    decorative element in a row where every other icon reports
+                    a live state (engine, lights, belt). */}
                 <div className="flex items-baseline gap-1.5 text-foreground">
-                    <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="w-[4ch] text-right text-2xl font-bold leading-none tabular-nums">{Math.round(speed)}</span>
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">km/h</span>
                 </div>

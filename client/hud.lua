@@ -55,6 +55,11 @@ end
 -- 404 on its ready ping forever with nothing left to retry it.
 local sendInitialState
 
+-- Hands the radar back to the engine when the HUD hides. Assigned only when
+-- Config.hud.minimap actually takes control of it; nil in 'always' mode, where
+-- this resource never touches DisplayRadar at all.
+local minimapRelease
+
 -- FiveM delivers SendNUIMessage like postMessage, not like a mailbox: if the
 -- NUI page hasn't finished mounting (and attaching its "message" listener)
 -- yet, a send is lost, not queued. That's silent AND permanent for a player
@@ -100,6 +105,124 @@ local VOICE_INTERVAL = (Config.voice and Config.voice.interval) or 200
 -- and one with the vehicle panel off has no reason to sample vehicle natives
 -- four times a second. See the guarded registrations further down.
 local ELEMENTS = Config.hud.elements or {}
+
+-- --- per-player layout ------------------------------------------------------
+--
+-- Section positions are stored on THIS player's machine, as JSON in a FiveM
+-- KVP key. Client-side on purpose: a HUD layout is a personal preference about
+-- one screen, so it needs neither a database column nor a server round trip,
+-- and nothing here ever leaves the client.
+--
+-- The stored value is untrusted input like any other persisted blob -- a player
+-- can edit their own KVP file, and an older version of this resource may have
+-- written a different shape -- so it is validated on read rather than trusted
+-- because we wrote it.
+local LAYOUT = Config.layout or {}
+-- Whether the player currently has the layout editor open. The NUI holds focus
+-- only in this state.
+local layoutEditing = false
+local LAYOUT_KVP = LAYOUT.kvpKey or 'qbhud:layout'
+
+-- Offsets are stored as FRACTIONS of the viewport, not pixels: a layout saved
+-- on a 3440x1440 ultrawide would put half the HUD off screen on a 1920x1080
+-- monitor otherwise. Clamped well inside the edges so a section can never be
+-- dragged somewhere it cannot be dragged back from.
+local LAYOUT_LIMIT = 0.45
+
+---@param value any
+---@return number|nil
+local function layoutOffset(value)
+    local number = tonumber(value)
+    if not number or number ~= number then return nil end -- NaN
+    if number > LAYOUT_LIMIT then return LAYOUT_LIMIT end
+    if number < -LAYOUT_LIMIT then return -LAYOUT_LIMIT end
+    return number
+end
+
+---This player's saved section offsets, as { [section] = { x, y } }.
+---
+---Returns an empty table for anything malformed rather than raising: a corrupt
+---or hand-edited KVP value must cost the player their layout, not their HUD.
+---@return table
+local function readLayout()
+    if LAYOUT.movable == false then return {} end
+
+    local raw = GetResourceKvpString(LAYOUT_KVP)
+    if type(raw) ~= 'string' or raw == '' then return {} end
+
+    local ok, decoded = pcall(json.decode, raw)
+    if not ok or type(decoded) ~= 'table' then return {} end
+
+    local out = {}
+    for section, offset in pairs(decoded) do
+        if type(section) == 'string' and type(offset) == 'table' then
+            local x, y = layoutOffset(offset.x), layoutOffset(offset.y)
+            if x and y then out[section] = { x = x, y = y } end
+        end
+    end
+    return out
+end
+
+---Persists a layout the NUI submitted. Re-validated here, not merely stored:
+---this is the one write in the whole resource whose payload comes from the
+---browser, and the values are read back on the next boot as HUD geometry.
+---@param payload any
+---@return boolean saved
+local function writeLayout(payload)
+    if LAYOUT.movable == false then return false end
+    if type(payload) ~= 'table' then return false end
+
+    local clean = {}
+    local count = 0
+    for section, offset in pairs(payload) do
+        -- Section ids come from the NUI's own fixed list; cap the key length
+        -- and the entry count so a malformed submission cannot grow the stored
+        -- blob without bound.
+        if type(section) == 'string' and #section <= 32 and type(offset) == 'table' and count < 16 then
+            local x, y = layoutOffset(offset.x), layoutOffset(offset.y)
+            if x and y then
+                clean[section] = { x = x, y = y }
+                count = count + 1
+            end
+        end
+    end
+
+    SetResourceKvp(LAYOUT_KVP, json.encode(clean))
+    return true
+end
+
+RegisterNUICallback('qbhud:saveLayout', function(payload, cb)
+    -- Answer first and unconditionally, same reasoning as qbhud:ready above.
+    cb({})
+    pcall(writeLayout, payload)
+end)
+
+-- Layout edit mode is an explicit mode, entered by command, rather than the HUD
+-- being draggable all the time. The HUD is pointer-transparent during play and
+-- has to stay that way -- a permanently grabbable HUD would eat the clicks the
+-- game needs. The NUI takes focus only while this mode is open.
+RegisterCommand(LAYOUT.command or 'hudlayout', function()
+    if LAYOUT.movable == false then
+        QB.notify.send({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
+        return
+    end
+
+    layoutEditing = not layoutEditing
+    SetNuiFocus(layoutEditing, layoutEditing)
+    send('qbhud:layoutMode', layoutEditing)
+end, false)
+
+-- `reset` is separate from the editor rather than a button inside it: a player
+-- whose layout put a section somewhere unreachable needs a way out that does
+-- not require clicking on the HUD.
+RegisterCommand('hudlayoutreset', function()
+    DeleteResourceKvp(LAYOUT_KVP)
+    layoutEditing = false
+    SetNuiFocus(false, false)
+    send('qbhud:layoutMode', false)
+    send('qbhud:layoutReset', true)
+    QB.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
+end, false)
 
 -- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
 -- (or qblib, via the status export inside getSnapshot) is mid-restart right
@@ -442,6 +565,56 @@ if minimapScaleform then
     })
 end
 
+-- --- minimap visibility -----------------------------------------------------
+--
+-- Separate from the health/armour cluster above: that decides what the radar
+-- DRAWS, this decides whether it is on screen at all.
+--
+-- 'always' is not "call DisplayRadar(true) repeatedly" -- it is not calling
+-- DisplayRadar at all. Asserting `true` every 250ms would silently override any
+-- other resource that hides the radar for a cutscene, a phone, or a death
+-- screen, which is a far worse default than leaving the engine alone.
+local MINIMAP_MODE = (type(Config.hud.minimap) == 'string' and Config.hud.minimap) or 'always'
+
+---Whether the radar should be on screen right now, or nil for "not our call".
+---@return boolean|nil
+local function minimapShouldShow()
+    if MINIMAP_MODE == 'never' then return false end
+    if MINIMAP_MODE == 'vehicle' then return QB.cache.vehicle() ~= nil and QB.cache.vehicle() ~= 0 end
+    return nil
+end
+
+if MINIMAP_MODE ~= 'always' then
+    -- Tracked so the radar is only touched when the answer CHANGES. A resource
+    -- that legitimately hid the radar for its own reasons then keeps working
+    -- between our transitions instead of being overruled four times a second.
+    local lastRadar
+
+    local function applyMinimap()
+        local shouldShow = minimapShouldShow()
+        if shouldShow == nil or shouldShow == lastRadar then return end
+
+        lastRadar = shouldShow
+        DisplayRadar(shouldShow)
+    end
+
+    addTask({
+        interval = MINIMAP_INTERVAL,
+        active = function() return true end,
+        run = applyMinimap,
+    })
+
+    -- The scheduler only runs while the HUD is visible, so hand the radar back
+    -- when it is not: a hidden HUD must not leave the radar forced off with
+    -- nothing left running to turn it on again.
+    minimapRelease = function()
+        if lastRadar == false then
+            lastRadar = nil
+            DisplayRadar(true)
+        end
+    end
+end
+
 -- --- sampled inputs ---------------------------------------------------------
 
 -- Mic state is the only HUD input with no change notification anywhere in the
@@ -600,6 +773,8 @@ local function refreshVisibility()
         -- Hand the stat back to the engine's own minimap cluster: from here
         -- until the HUD is shown again, nothing in this resource draws it.
         setupMinimapHealthArmour(MINIMAP_DRAW_DEFAULT)
+        -- And the radar itself, for the same reason -- see minimapRelease.
+        if minimapRelease then minimapRelease() end
     end
 end
 
@@ -641,6 +816,15 @@ sendInitialState = function()
         -- knob: raising it cuts the message rate and costs nothing visually.
         -- See web/src/components/hud/RadialGauge.tsx.
         vitalsInterval = VITALS_INTERVAL,
+        money = Config.hud.money,
+        layout = {
+            movable = LAYOUT.movable ~= false,
+            command = LAYOUT.command or 'hudlayout',
+            -- Seeded from this player's own machine. Sent with the config
+            -- rather than on its own channel so the HUD's first paint is
+            -- already in the right place instead of visibly jumping.
+            offsets = readLayout(),
+        },
     })
 
     -- QB.theme.tokens() is a cross-resource call into qblib; a qblib restart

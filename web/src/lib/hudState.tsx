@@ -1,8 +1,11 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { fetchNui } from "./fetchNui"
 import type {
     HudConfigPayload,
+    HudLayoutModePayload,
+    HudLayoutOffset,
+    HudLayoutResetPayload,
     HudUpdatePayload,
     HudVehiclePayload,
     HudVisibilityPayload,
@@ -24,6 +27,14 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     // Matches client/hud.lua's own fallback, so the gauges animate correctly
     // even in the window before the first "qbhud:config" message lands.
     vitalsInterval: 150,
+    // Both of these mirror config.lua's shipped defaults for the same reason
+    // as vitalsInterval: this is the state the HUD renders in before
+    // "qbhud:config" arrives, and in a plain browser (`pnpm dev`) where it
+    // never does. Cash/bank side by side and an unmoved layout are the
+    // pre-existing behaviour, so defaulting to them means the pre-config
+    // window looks like the HUD rather than like a different one.
+    money: { scrollAccounts: false, scrollAccountsTime: 5000 },
+    layout: { movable: true, command: "hudlayout", offsets: {} },
 }
 
 const DEFAULT_VITALS: HudVitalsPayload = {
@@ -58,6 +69,37 @@ const DEFAULT_VEHICLE: HudVehiclePayload = null
 // since "only show once logged in" must hold even during it.
 const DEFAULT_VISIBLE = false
 
+/**
+ * The layout editor's whole state, assembled from three different sources --
+ * Config.layout (a "qbhud:config" message), the editor toggle
+ * ("qbhud:layoutMode"), and the offsets the page is currently holding -- so
+ * every movable section reads one value instead of three.
+ */
+export interface HudLayoutState {
+    /** Config.layout.movable. False means sections are never draggable. */
+    movable: boolean
+    /** Config.layout.command, shown in the editor hint so it isn't hardcoded twice. */
+    command: string
+    /** Whether the player has the editor open (Lua holds NUI focus while true). */
+    editing: boolean
+    offsets: Record<string, HudLayoutOffset>
+    /**
+     * Called once per finished drag with that section's new offset. Updates
+     * the page and persists the FULL map through Lua -- the NUI holds no
+     * authority over any of this, it just reports where the player dropped
+     * the section.
+     */
+    commitOffset: (section: string, offset: HudLayoutOffset) => void
+}
+
+const DEFAULT_LAYOUT: HudLayoutState = {
+    movable: true,
+    command: "hudlayout",
+    editing: false,
+    offsets: {},
+    commitOffset: () => {},
+}
+
 // One context PER CHANNEL rather than a single object holding all of them.
 // React re-renders every consumer of a context whose value changed, so a
 // combined `{ config, vitals, update, vehicle, visible }` value means one
@@ -73,13 +115,17 @@ const HudVitalsContext = createContext<HudVitalsPayload>(DEFAULT_VITALS)
 const HudUpdateContext = createContext<HudUpdatePayload>(DEFAULT_UPDATE)
 const HudVehicleContext = createContext<HudVehiclePayload>(DEFAULT_VEHICLE)
 const HudVisibleContext = createContext<boolean>(DEFAULT_VISIBLE)
+const HudLayoutContext = createContext<HudLayoutState>(DEFAULT_LAYOUT)
 
 /**
  * Single subscription point for "qbhud:config", "qbhud:vitals",
- * "qbhud:update", "qbhud:vehicle", and "qbhud:visibility" -- every HUD element
- * reads its own slice through the hooks below instead of each independently
- * subscribing to the wire messages, so client/hud.lua's payloads have exactly
- * one consumer-side entry point.
+ * "qbhud:update", "qbhud:vehicle", "qbhud:visibility", "qbhud:layoutMode" and
+ * "qbhud:layoutReset" -- every HUD element reads its own slice through the
+ * hooks below instead of each independently subscribing to the wire messages,
+ * so client/hud.lua's payloads have exactly one consumer-side entry point.
+ *
+ * It is also the only place that posts BACK to Lua ("qbhud:ready" and
+ * "qbhud:saveLayout"), for the same reason.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
@@ -87,9 +133,59 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const [update, setUpdate] = useState<HudUpdatePayload>(DEFAULT_UPDATE)
     const [vehicle, setVehicle] = useState<HudVehiclePayload>(DEFAULT_VEHICLE)
     const [visible, setVisible] = useState<boolean>(DEFAULT_VISIBLE)
+    const [layoutEditing, setLayoutEditing] = useState(false)
+    const [offsets, setOffsets] = useState<Record<string, HudLayoutOffset>>(DEFAULT_LAYOUT.offsets)
+
+    // Mirrors `offsets` for the callbacks below, which run from a mouseup
+    // listener and from a wire handler rather than from a render -- both need
+    // the CURRENT map to build the next one, and neither can read it out of a
+    // closure without pinning whatever it was when that closure was made.
+    const offsetsRef = useRef(offsets)
+    // True from the moment a drag is committed until Lua has acknowledged the
+    // matching save. See the "qbhud:layoutMode" handler for what it's for.
+    const unsavedRef = useRef(false)
+
+    const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
+        offsetsRef.current = next
+        setOffsets(next)
+    }, [])
+
+    // Fire-and-forget on purpose: this is presentation geometry, and Lua
+    // re-validates and clamps every value before it reaches KVP (see
+    // client/hud.lua's writeLayout), so there is nothing in the response for
+    // the page to apply -- the layout it already rendered IS the answer.
+    const saveOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
+        unsavedRef.current = true
+        fetchNui("qbhud:saveLayout", next)
+            .then(() => {
+                unsavedRef.current = false
+            })
+            .catch((error) => {
+                console.error("[qbhud] qbhud:saveLayout failed:", error)
+            })
+    }, [])
+
+    // The WHOLE map goes over, not just the section that moved: Lua stores
+    // one JSON blob per player and overwrites it outright, so a partial
+    // submission would delete every other section's saved position.
+    const commitOffset = useCallback(
+        (section: string, offset: HudLayoutOffset) => {
+            const next = { ...offsetsRef.current, [section]: offset }
+            applyOffsets(next)
+            saveOffsets(next)
+        },
+        [applyOffsets, saveOffsets],
+    )
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
-        if (payload) setConfig(payload)
+        if (!payload) return
+        setConfig(payload)
+        // Config only ever arrives on resource start or in answer to the ready
+        // ping below -- i.e. at a point where this page holds no layout state
+        // worth keeping -- so taking Lua's KVP-backed offsets verbatim here
+        // can't discard a move the player has just made.
+        const seeded = payload.layout?.offsets
+        applyOffsets(seeded && typeof seeded === "object" ? seeded : {})
     })
 
     useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
@@ -111,6 +207,26 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         if (typeof payload === "boolean") setVisible(payload)
     })
 
+    useNuiEvent<HudLayoutModePayload>("qbhud:layoutMode", (payload) => {
+        if (typeof payload !== "boolean") return
+        setLayoutEditing(payload)
+        // Second chance at the save, not a duplicate of it: the drag-end post
+        // is fire-and-forget, so one that failed (or that the player closed
+        // the editor on top of) would otherwise lose the move without saying
+        // so. Closing the editor is the last moment the page can resend, and
+        // re-sending an already-stored layout is a no-op in Lua.
+        if (!payload && unsavedRef.current) saveOffsets(offsetsRef.current)
+    })
+
+    useNuiEvent<HudLayoutResetPayload>("qbhud:layoutReset", () => {
+        // Lua has already deleted the KVP key, so this deliberately does NOT
+        // post anything back -- it only drops what the page is holding, which
+        // leaving edit mode does not do. Ignores the payload value: the
+        // message arriving at all is the event.
+        unsavedRef.current = false
+        applyOffsets({})
+    })
+
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
     // FiveM drops them if this page hasn't mounted (and attached its
     // "message" listener) yet, which is common for a player already logged
@@ -123,18 +239,36 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         })
     }, [])
 
+    // The one context value that IS an assembled object rather than a raw
+    // channel payload, because it has no single channel of its own. Safe
+    // where the four data channels wouldn't be: its inputs are a config
+    // message, an editor toggle and a finished drag, so it changes a handful
+    // of times per session instead of ten times a second.
+    const layout = useMemo<HudLayoutState>(
+        () => ({
+            movable: config.layout?.movable !== false,
+            command: config.layout?.command ?? DEFAULT_LAYOUT.command,
+            editing: layoutEditing,
+            offsets,
+            commitOffset,
+        }),
+        [config.layout, layoutEditing, offsets, commitOffset],
+    )
+
     // Each provider is handed the state value itself -- no useMemo wrapper
     // object to build, and nothing that changes identity unless that specific
     // channel's own message arrived.
     return (
         <HudConfigContext.Provider value={config}>
-            <HudVisibleContext.Provider value={visible}>
-                <HudVitalsContext.Provider value={vitals}>
-                    <HudUpdateContext.Provider value={update}>
-                        <HudVehicleContext.Provider value={vehicle}>{children}</HudVehicleContext.Provider>
-                    </HudUpdateContext.Provider>
-                </HudVitalsContext.Provider>
-            </HudVisibleContext.Provider>
+            <HudLayoutContext.Provider value={layout}>
+                <HudVisibleContext.Provider value={visible}>
+                    <HudVitalsContext.Provider value={vitals}>
+                        <HudUpdateContext.Provider value={update}>
+                            <HudVehicleContext.Provider value={vehicle}>{children}</HudVehicleContext.Provider>
+                        </HudUpdateContext.Provider>
+                    </HudVitalsContext.Provider>
+                </HudVisibleContext.Provider>
+            </HudLayoutContext.Provider>
         </HudConfigContext.Provider>
     )
 }
@@ -162,4 +296,9 @@ export function useHudVehicle() {
 /** Whether the HUD should render at all (login state and the show/hide exports). */
 export function useHudVisible() {
     return useContext(HudVisibleContext)
+}
+
+/** Per-player section offsets and layout-editor state. */
+export function useHudLayout() {
+    return useContext(HudLayoutContext)
 }

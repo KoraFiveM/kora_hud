@@ -25,6 +25,29 @@ local FORBIDDEN_NUI = setmetatable({}, {
     end,
 })
 
+-- json is an FXServer global with no plain-Lua equivalent. Encoded values are
+-- stashed behind an opaque token rather than really serialised: the exact bytes
+-- in the KVP blob are not what these tests are about, the round trip and the
+-- VALIDATION either side of it are.
+--
+-- Module scope, NOT per-loadHud: a KVP value outlives a resource restart, so a
+-- reload handed a previous instance's `kvp` table has to be able to decode what
+-- that instance wrote -- which is exactly the seeding path under test.
+local encodedJson, nextEncodedJson = {}, 0
+_G.json = {
+    encode = function(value)
+        nextEncodedJson = nextEncodedJson + 1
+        local token = ('json:%d'):format(nextEncodedJson)
+        encodedJson[token] = value
+        return token
+    end,
+    decode = function(token)
+        local value = encodedJson[token]
+        if value == nil then error('malformed json', 0) end
+        return value
+    end,
+}
+
 ---@param opts table|nil  -- { snapshotError, bridgePush, inVehicle, dynamicHud, maxHealth }
 local function loadHud(opts)
     opts = opts or {}
@@ -48,6 +71,11 @@ local function loadHud(opts)
     -- dead one. Move one field per sample, the way a driven car does.
     local vehicleSamples = 0
     local vehicleHandles = {}
+    -- Console commands, NUI focus, the per-player layout KVP store and every
+    -- DisplayRadar call, so the layout editor and the minimap policy can be
+    -- driven and asserted rather than merely loaded.
+    local commands, kvp, radar, notices = {}, opts.kvp or {}, {}, {}
+    local nuiFocus = { keyboard = false, mouse = false }
 
     _G.SendNUIMessage = function(message) sent[#sent + 1] = message end
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
@@ -62,6 +90,17 @@ local function loadHud(opts)
     -- reissues the method every tick. Unmocked, the load-time
     -- RequestScaleformMovie aborts the whole chunk, which fails every
     -- assertion in this file rather than just the scaleform behaviour.
+    -- Console commands and the per-player layout store. KVP is a table rather
+    -- than a stub pair so a write/read round trip can actually be asserted --
+    -- the saved layout is HUD geometry read back on the next boot, so "it was
+    -- persisted" is the interesting part, not "SetResourceKvp was called".
+    _G.RegisterCommand = function(name, handler) commands[name] = handler end
+    _G.SetNuiFocus = function(keyboard, mouse) nuiFocus = { keyboard = keyboard, mouse = mouse } end
+    _G.GetResourceKvpString = function(key) return kvp[key] end
+    _G.SetResourceKvp = function(key, value) kvp[key] = value end
+    _G.DeleteResourceKvp = function(key) kvp[key] = nil end
+    _G.DisplayRadar = function(show) radar[#radar + 1] = show end
+
     _G.RequestScaleformMovie = function(movie) return 'scaleform:' .. tostring(movie) end
     _G.BeginScaleformMovieMethod = function() end
     _G.ScaleformMovieMethodAddParamInt = function() end
@@ -87,7 +126,14 @@ local function loadHud(opts)
                 mic = true, cash = true, bank = true, hungerThirst = true,
                 stamina = true, stress = true, vehicle = true,
             },
+            money = opts.money or { scrollAccounts = false, scrollAccountsTime = 5000 },
+            -- 'always' means client/hud.lua never touches DisplayRadar at all,
+            -- which is the shipped default and the only mode where no radar
+            -- native is called; the modes that DO take control are covered by
+            -- their own cases below.
+            minimap = opts.minimap or 'always',
         },
+        layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
         voice = { enabled = true, interval = 200 },
         poll = {
             vitalsInterval = 100,
@@ -154,6 +200,7 @@ local function loadHud(opts)
         },
         theme = { tokens = function() return { bg = '0 0% 0%' } end },
         status = { onChange = function() end, getActive = function() return {} end },
+        notify = { send = function(payload) notices[#notices + 1] = payload end },
     }
 
     local ok, err = pcall(dofile, repoRoot .. 'client/hud.lua')
@@ -219,6 +266,11 @@ local function loadHud(opts)
             for _, handler in ipairs(cacheHandlers[key] or {}) do handler(value, old) end
         end,
         exported = exported,
+        commands = commands,
+        kvp = kvp,
+        radar = radar,
+        notices = notices,
+        nuiFocus = function() return nuiFocus end,
         setLoggedIn = function(value)
             loggedIn = value
             for _, handler in ipairs(loginHandlers) do handler(value) end
@@ -701,6 +753,134 @@ harness.test('the HUD subscribes to exactly the cache keys it mirrors', function
     local hud = loadHud({ bridgePush = true })
     harness.assertEqual(table.concat(hud.cacheKeys(), ','), 'armour,health,ped,stamina,vehicle',
         'a new subscription here is a new hot path -- add it deliberately')
+end)
+
+-- --- per-player layout -----------------------------------------------------
+
+local function configPayload(hud)
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:config' then latest = message.data end
+    end
+    return latest
+end
+
+harness.test('the layout editor is a mode, entered by command, not a permanently grabbable HUD', function()
+    local hud = loadHud({ bridgePush = true })
+
+    harness.assertTrue(hud.commands.hudlayout ~= nil, 'the configured command is registered')
+    harness.assertFalse(hud.nuiFocus().mouse, 'the HUD holds no focus during normal play')
+
+    hud.reset()
+    hud.commands.hudlayout()
+
+    harness.assertTrue(hud.nuiFocus().mouse, 'entering the editor takes mouse focus so sections can be dragged')
+    harness.assertTrue(hud.contains('qbhud:layoutMode'), 'and tells the NUI to render the editor')
+
+    hud.commands.hudlayout()
+    harness.assertFalse(hud.nuiFocus().mouse, 'leaving it hands focus straight back -- a stuck cursor is a stuck player')
+end)
+
+harness.test('a submitted layout is persisted as viewport fractions', function()
+    local hud = loadHud({ bridgePush = true })
+
+    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = -0.2 } }, function() end)
+
+    local stored = hud.kvp['qbhud:layout']
+    harness.assertTrue(stored ~= nil, 'the layout reaches this player\'s own KVP store')
+
+    -- Reloading with that KVP already present is the real test: the offsets have
+    -- to be seeded into the FIRST config push, or the HUD paints at the default
+    -- position and then visibly jumps.
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
+    local config = configPayload(reloaded)
+    harness.assertTrue(config ~= nil, 'the config push happened')
+    harness.assertEqual(config.layout.offsets.gauges.x, 0.1, 'the saved offset is seeded on load')
+    harness.assertEqual(config.layout.offsets.gauges.y, -0.2, 'on both axes')
+end)
+
+harness.test('a submitted layout is re-validated, never merely stored', function()
+    local hud = loadHud({ bridgePush = true })
+
+    hud.callbacks['qbhud:saveLayout']({
+        gauges = { x = 9.0, y = -9.0 },           -- far off screen
+        status = { x = 'left', y = 0 },            -- not a number at all
+        [17] = { x = 0.1, y = 0.1 },               -- not a section id
+        ['this-key-is-far-too-long-to-be-a-real-section-id'] = { x = 0.1, y = 0.1 },
+    }, function() end)
+
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertEqual(config.layout.offsets.gauges.x, 0.45,
+        'an off-screen offset is clamped -- a section must never be draggable somewhere it cannot be dragged back from')
+    harness.assertEqual(config.layout.offsets.gauges.y, -0.45, 'on both axes')
+    harness.assertEqual(config.layout.offsets.status, nil, 'a non-numeric offset is dropped, not coerced')
+    harness.assertEqual(config.layout.offsets[17], nil, 'a non-string section id is dropped')
+end)
+
+harness.test('a corrupt stored layout costs the layout, not the HUD', function()
+    -- A player can edit their own KVP file, and an older version of this
+    -- resource may have written a different shape.
+    local hud = loadHud({ bridgePush = true, kvp = { ['qbhud:layout'] = 'not json at all' } })
+
+    harness.assertTrue(hud.loaded, 'client/hud.lua still loads: ' .. tostring(hud.loadError))
+    local config = configPayload(hud)
+    harness.assertEqual(next(config.layout.offsets), nil, 'and simply reports no saved offsets')
+end)
+
+harness.test('the reset command clears the stored layout', function()
+    local hud = loadHud({ bridgePush = true })
+    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = 0.1 } }, function() end)
+    harness.assertTrue(hud.kvp['qbhud:layout'] ~= nil, 'sanity: something was stored')
+
+    hud.commands.hudlayoutreset()
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil,
+        'reset is the way out for a player whose layout put a section somewhere unreachable')
+end)
+
+harness.test('a pinned layout accepts nothing', function()
+    local hud = loadHud({ bridgePush = true, layout = { movable = false, command = 'hudlayout', kvpKey = 'qbhud:layout' } })
+
+    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = 0.1 } }, function() end)
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'movable = false stores nothing')
+
+    hud.commands.hudlayout()
+    harness.assertFalse(hud.nuiFocus().mouse, 'and never takes focus for an editor it will not honour')
+    harness.assertEqual(#hud.notices, 1, 'the player is told why the command did nothing')
+end)
+
+-- --- minimap ----------------------------------------------------------------
+
+harness.test("minimap 'always' never touches the radar at all", function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.tick()
+
+    harness.assertEqual(#hud.radar, 0,
+        'asserting DisplayRadar(true) on an interval would silently override another resource hiding it for a cutscene')
+end)
+
+harness.test("minimap 'vehicle' follows the player in and out of a vehicle", function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle' })
+    hud.tick()
+
+    harness.assertEqual(hud.radar[#hud.radar], false, 'hidden on foot')
+
+    local before = #hud.radar
+    hud.tick()
+    harness.assertEqual(#hud.radar, before, 'and not re-asserted every pass while the answer has not changed')
+
+    hud.setVehicle(42)
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'shown once they are in one')
+end)
+
+harness.test('hiding the HUD hands the radar back', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle' })
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'sanity: the radar was forced off')
+
+    hud.setLoggedIn(false)
+    harness.assertEqual(hud.radar[#hud.radar], true,
+        'the scheduler stops with the HUD, so a hidden HUD must not leave the radar off with nothing left to restore it')
 end)
 
 harness.report('nui')

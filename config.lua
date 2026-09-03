@@ -20,6 +20,44 @@ Config.hud = {
         stress       = true,
         vehicle      = true, -- speed/fuel/engine/headlights/seatbelt, shown only while in a vehicle
     },
+
+    -- Money display. Off by default: cash and bank shown side by side is the
+    -- existing behaviour, and an upgrading server should not silently start
+    -- hiding half of it.
+    money = {
+        -- Show one account at a time, alternating. Useful where the HUD is
+        -- crowded, or where two money rows read as clutter.
+        scrollAccounts = false,
+        -- ms each account is shown for before switching to the other. Only
+        -- meaningful while scrollAccounts is true, and only when BOTH
+        -- `elements.cash` and `elements.bank` are enabled -- with one of them
+        -- off there is nothing to alternate with.
+        scrollAccountsTime = 5000,
+    },
+
+    -- Minimap visibility.
+    --   'always'  -- leave the radar exactly as the game left it. qbhud does
+    --              not touch DisplayRadar at all in this mode, so another
+    --              resource hiding the radar for a cutscene still works.
+    --   'vehicle' -- only while the player is in a vehicle.
+    --   'never'   -- always hidden.
+    minimap = 'always',
+}
+
+-- Per-player HUD layout. Each section can be dragged to a new position and the
+-- result is saved on that player's own machine, so it survives a reconnect
+-- without a database column or a server round trip.
+Config.layout = {
+    -- Set false to pin the layout for everyone; /hudlayout then reports that
+    -- moving sections is disabled rather than opening the editor.
+    movable = true,
+    -- Command that enters and leaves layout edit mode. The HUD is
+    -- pointer-transparent during normal play and must stay that way, so
+    -- dragging is only possible inside this explicit mode.
+    command = 'hudlayout',
+    -- FiveM KVP key the saved offsets are written to, as JSON. Client-side
+    -- storage only -- nothing here ever reaches the server.
+    kvpKey = 'qbhud:layout',
 }
 
 Config.bridge = {

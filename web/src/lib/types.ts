@@ -38,7 +38,67 @@ export interface HudConfigPayload {
      * rate without the HUD looking any less smooth.
      */
     vitalsInterval: number
+    /**
+     * Config.hud.money. Optional, like `layout` below: a "qbhud:config"
+     * message REPLACES the whole config object (see hudState.tsx), so a
+     * payload from an older client/hud.lua that never sent this key would
+     * leave it genuinely absent at runtime whatever the type claimed. Typed
+     * optional so consumers are forced to handle that instead of reading
+     * through undefined.
+     */
+    money?: HudMoneyConfig
+    /** Config.layout plus this player's own saved section offsets. */
+    layout?: HudLayoutConfig
 }
+
+export interface HudMoneyConfig {
+    /**
+     * Show one account at a time, alternating, instead of cash and bank side
+     * by side. Only has anything to alternate BETWEEN while both
+     * `elements.cash` and `elements.bank` are on -- with one of them off the
+     * enabled account is simply shown permanently.
+     */
+    scrollAccounts: boolean
+    /** ms each account is shown for before switching. */
+    scrollAccountsTime: number
+}
+
+/**
+ * One section's position, as a FRACTION of the viewport rather than pixels: a
+ * layout saved on a 3440x1440 ultrawide would put half the HUD off screen on
+ * a 1920x1080 monitor otherwise. client/hud.lua clamps both axes to +/-0.45
+ * on read AND on write, and the NUI clamps to the same limit while dragging
+ * so a section can never be dropped somewhere it cannot be dragged back from.
+ */
+export interface HudLayoutOffset {
+    x: number
+    y: number
+}
+
+export interface HudLayoutConfig {
+    /** False pins the layout for everyone -- sections are never draggable. */
+    movable: boolean
+    /** Command that opens the layout editor, shown in the editor's own hint. */
+    command: string
+    /**
+     * `{ [sectionId]: offset }` read back from this player's KVP, keyed by the
+     * ids in components/hud/LayoutEditor.tsx. Sent with the config rather than
+     * on a channel of its own so the HUD's first paint is already in the right
+     * place instead of visibly jumping.
+     */
+    offsets: Record<string, HudLayoutOffset>
+}
+
+// action: "qbhud:layoutMode" -- the player toggled layout edit mode with
+// Config.layout.command. Lua owns NUI focus either side of this (see the
+// SetNuiFocus call beside the send), so the NUI only reacts visually and
+// starts accepting drags; it never asks for focus itself.
+export type HudLayoutModePayload = boolean
+
+// action: "qbhud:layoutReset" -- /hudlayoutreset deleted the stored layout.
+// Separate from "qbhud:layoutMode" because a reset also has to discard
+// offsets the NUI is holding in memory, which leaving edit mode does not.
+export type HudLayoutResetPayload = boolean
 
 // action: "qbhud:theme" -- QB.theme.tokens() from qblib, forwarded verbatim.
 // Keys are CSS custom-property names (no leading "--"); values are ready-to-

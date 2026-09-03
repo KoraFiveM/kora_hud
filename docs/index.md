@@ -90,6 +90,59 @@ Config.hud = {
 `client/voice.lua` (`Voice.setActive`) — disabling it stops
 `NetworkIsPlayerTalking` polling entirely, not just the on-screen icon.
 
+### Show cash and bank one at a time
+```lua
+-- config.lua
+Config.hud.money = {
+    scrollAccounts     = true,   -- one account at a time instead of both rows
+    scrollAccountsTime = 5000,   -- ms each account is shown for
+}
+```
+Off by default — cash and bank side by side is the pre-existing behaviour, and
+upgrading shouldn't silently hide half of it. Cycling only happens when
+**both** `elements.cash` and `elements.bank` are on; with one of them off
+there's nothing to alternate with, so the enabled account is simply shown
+permanently. The swap is a short fade/slide on the money row only, nothing
+else in the panel moves.
+
+### Let players move HUD sections
+```
+/hudlayout        -- toggle layout edit mode
+/hudlayoutreset   -- forget the saved layout, back to the shipped positions
+```
+```lua
+-- config.lua
+Config.layout = {
+    movable = true,             -- false pins the layout for everyone
+    command = 'hudlayout',
+    kvpKey  = 'qbhud:layout',
+}
+```
+Three sections can be repositioned, each persisted under a stable id: `gauges`
+(bottom-centre — vehicle telemetry plus the gauge row), `identity`
+(bottom-right — mic, job/gang, money) and `status` (top-right — active status
+effects).
+
+`/hudlayout` is an explicit **mode**, not an always-on affordance: the HUD is a
+click-through overlay during play and has to stay that way, so it takes NUI
+focus, dims the screen and puts a drag handle on each section, then hands
+focus back and returns to pointer-transparent when toggled off. Positions are
+saved on drag end.
+
+Offsets are stored as **fractions of the viewport**, not pixels, and clamped
+to ±0.45 on both axes — a layout arranged on a 3440×1440 ultrawide still lands
+on screen on a 1920×1080 monitor, and no section can be dropped somewhere it
+can't be dragged back from. Each section's shipped corner remains its zero
+point, so a player with nothing saved sees exactly the default layout.
+
+Storage is a client-side FiveM KVP key (`Config.layout.kvpKey`), so a layout is
+per player *and per machine*: no database column, no server round trip, and
+nothing about it ever leaves the client. The stored blob is treated as
+untrusted input on read and re-validated/clamped on write in `client/hud.lua`
+— the NUI stays render-only and has no authority over anything but where it
+draws its own boxes. `movable = false` makes `/hudlayout` report that moving
+sections is disabled instead of opening the editor.
+
 ### Drive HUD values manually for testing (stub adapter only)
 ```
 /hudtest_cash 1500
@@ -180,6 +233,13 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
 - `Config.hud.elements.*` — per-element on/off (`mic`, `cash`, `bank`,
   `hungerThirst`, `stamina`, `stress`, `vehicle`). Health/armour/job/gang are
   always shown — they aren't independently toggleable.
+- `Config.hud.money.scrollAccounts` / `.scrollAccountsTime` — show one money
+  account at a time, alternating on that interval, instead of both rows. Only
+  applies while both the `cash` and `bank` elements are enabled.
+- `Config.hud.minimap` — `'always'` (never touch `DisplayRadar`), `'vehicle'`,
+  or `'never'`.
+- `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD
+  sections, saved client-side in KVP. See "Let players move HUD sections".
 - `Config.bridge.adapter` — documents which adapter is loaded (`"qbcore"` by
   default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
 - `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and

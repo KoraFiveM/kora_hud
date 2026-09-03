@@ -87,6 +87,22 @@
     border-color: hsl(var(--success));
   }
 
+  /*
+   * Entry animation for the alternating money row (Config.hud.money.
+   * scrollAccounts -- see components/hud/CashBank.tsx). Opacity and transform
+   * only, so the swap is composited and never triggers layout: this runs on
+   * an overlay drawn over live gameplay, where a repeating animation that
+   * costs a reflow costs it in the frame budget of the game itself.
+   */
+  @keyframes money-swap-in {
+    from { opacity: 0; transform: translateY(-0.35rem); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .money-swap {
+    animation: money-swap-in 180ms ease-out;
+  }
+
   /* Small round icon badges used inside hud-panel rows (job/gang/cash/status). */
   .icon-badge {
     display: flex;
