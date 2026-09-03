@@ -13,7 +13,7 @@ Config.hud = {
     dynamic = false,
     elements = {
         mic          = true,
-        cash         = false,
+        cash         = true,
         bank         = true,
         hungerThirst = true,
         stamina      = true,
@@ -27,7 +27,7 @@ Config.hud = {
     money = {
         -- Show one account at a time, alternating. Useful where the HUD is
         -- crowded, or where two money rows read as clutter.
-        scrollAccounts = false,
+        scrollAccounts = true,
         -- ms each account is shown for before switching to the other. Only
         -- meaningful while scrollAccounts is true, and only when BOTH
         -- `elements.cash` and `elements.bank` are enabled -- with one of them
