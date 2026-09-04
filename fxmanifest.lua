@@ -12,6 +12,7 @@ dependency 'qblib'
 -- The HUD now sources real player data from qbcore via client/bridge/qbcore.lua
 -- (Config.bridge.adapter = 'qbcore'). Revert to the stub by flipping both.
 dependency 'qbcore'
+dependency 'qbfuel'
 
 -- Required to reach QB.cache/QB.theme/QB.nui -- see qblib's own AGENTS.md for
 -- why this is how a consumer resource pulls in the QB proxy (init.lua).

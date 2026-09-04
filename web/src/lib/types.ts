@@ -129,6 +129,8 @@ export interface HudGang {
 export interface HudVehicleInfo {
     speed: number
     fuel: number | null
+    /** `charge` for a vehicle qbfuel classifies as electric; otherwise fuel. */
+    fuelKind: "fuel" | "charge"
     engineOn: boolean
     headlights: "off" | "low" | "high"
     seatbelt: boolean

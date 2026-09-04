@@ -15,7 +15,7 @@ Vehicle = Vehicle or {}
 ---crossing four times a second to re-ask for a value it was pushed. Omitted,
 ---this falls back to the cache read, so a caller with no handle of its own
 ---(and the standalone smoke test) still works unchanged.
----@return { speed: number, fuel: number | nil, engineOn: boolean, headlights: 'off'|'low'|'high' } | nil
+---@return { speed: number, fuel: number | nil, fuelKind: 'fuel'|'charge', engineOn: boolean, headlights: 'off'|'low'|'high' } | nil
 function Vehicle.getSnapshot(vehicle)
     -- The qblib cache is the single source of vehicle lifecycle truth. This
     -- avoids a second IsPedInAnyVehicle loop in qbhud and guarantees no vehicle
@@ -28,6 +28,12 @@ function Vehicle.getSnapshot(vehicle)
     local fuelOk, fuel = pcall(GetVehicleFuelLevel, vehicle)
     local engineOk, engineOn = pcall(IsVehicleEngineRunning, vehicle)
     local lightsOk, _, lightsOn, highbeamsOn = pcall(GetVehicleLightsState, vehicle)
+    -- qbfuel is the one authoritative classifier for standard and addon EVs.
+    -- Its export is pcall'd so a transient resource restart only makes this
+    -- one HUD sample fall back to Fuel; the entire vehicle panel keeps working.
+    local electricOk, electric = pcall(function()
+        return exports.qbfuel:isElectricVehicle(vehicle)
+    end)
 
     local headlights = 'off'
     if lightsOk then
@@ -41,6 +47,7 @@ function Vehicle.getSnapshot(vehicle)
     return {
         speed = GetEntitySpeed(vehicle) * 3.6, -- m/s -> km/h
         fuel = fuelOk and fuel or nil,
+        fuelKind = electricOk and electric == true and 'charge' or 'fuel',
         engineOn = engineOk and engineOn == true,
         headlights = headlights,
     }

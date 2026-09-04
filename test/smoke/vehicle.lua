@@ -31,6 +31,7 @@ harness.test('vehicle telemetry reads the cache-selected vehicle only when reque
     local snapshot = Vehicle.getSnapshot()
     harness.assertEqual(snapshot.speed, 36, 'speed should be converted from m/s to km/h')
     harness.assertEqual(snapshot.fuel, 55, 'fuel should be passed through')
+    harness.assertEqual(snapshot.fuelKind, 'fuel', 'unclassified vehicles should retain a fuel label')
     harness.assertTrue(snapshot.engineOn, 'engine state should be passed through')
     harness.assertEqual(snapshot.headlights, 'low', 'headlight state should be normalized for the NUI')
     harness.assertEqual(speedCalls, 1, 'one HUD request should read speed once')

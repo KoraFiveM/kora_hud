@@ -484,6 +484,7 @@ local function buildVehiclePayload()
     return {
         speed = round(snapshot.speed),
         fuel = snapshot.fuel and round(snapshot.fuel) or nil,
+        fuelKind = snapshot.fuelKind or 'fuel',
         engineOn = snapshot.engineOn,
         headlights = snapshot.headlights,
         seatbelt = seatbelt,
@@ -497,6 +498,7 @@ local function vehiclePayloadChanged(payload)
 
     return payload.speed ~= lastVehiclePayload.speed
         or payload.fuel ~= lastVehiclePayload.fuel
+        or payload.fuelKind ~= lastVehiclePayload.fuelKind
         or payload.engineOn ~= lastVehiclePayload.engineOn
         or payload.headlights ~= lastVehiclePayload.headlights
         or payload.seatbelt ~= lastVehiclePayload.seatbelt

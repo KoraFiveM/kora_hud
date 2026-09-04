@@ -1,4 +1,4 @@
-import { Fuel, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
+import { BatteryCharging, Fuel, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
 import { useHudConfig, useHudVehicle } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
@@ -13,12 +13,13 @@ export function VehicleInfo() {
     const vehicle = useHudVehicle()
     if (!config.elements.vehicle || !vehicle) return null
 
-    const { speed, fuel, engineOn, headlights, seatbelt } = vehicle
+    const { speed, fuel, fuelKind, engineOn, headlights, seatbelt } = vehicle
+    const electric = fuelKind === "charge"
 
     return (
         <div className="flex items-center gap-3">
             {fuel !== null && (
-                <RadialGauge icon={Fuel} value={fuel} defaultValue={100} label="Fuel" color={statColor(fuel)} size={36} stroke={3} />
+                <RadialGauge icon={electric ? BatteryCharging : Fuel} value={fuel} defaultValue={100} label={electric ? "Charge" : "Fuel"} color={statColor(fuel)} size={36} stroke={3} />
             )}
             <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
                 {/* No speedometer icon. "km/h" beside a large number already
