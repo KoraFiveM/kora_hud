@@ -118,22 +118,35 @@ Config.layout = {
     kvpKey  = 'qbhud:layout',
 }
 ```
-Three sections can be repositioned, each persisted under a stable id: `gauges`
-(bottom-centre — vehicle telemetry plus the gauge row), `identity`
+Four HUD sections can be repositioned and resized (75%–150%), each persisted under a stable id: `gauges`
+(bottom-centre — the gauge row), `vehicle` (bottom-centre — vehicle telemetry), `identity`
 (bottom-right — mic, job/gang, money) and `status` (top-right — active status
-effects).
+effects), plus `chatInput` (the qbchat composer), which can be repositioned.
+The chat preview in the
+editor moves only the input and its command suggestions; received messages
+stay in their normal position.
 
 `/hudlayout` is an explicit **mode**, not an always-on affordance: the HUD is a
 click-through overlay during play and has to stay that way, so it takes NUI
-focus, dims the screen and puts a drag handle on each section. **Confirm** saves
-the new positions and **Cancel** (or Escape) restores the positions from when
+focus, dims the screen and puts a move handle plus a resize grip on each resizable
+section. Drag the resize grip left or right to adjust its size. These are regular
+pointer gestures, not browser HTML5 drag-and-drop controls. **Confirm** saves the
+new positions and component sizes; **Cancel** (or Escape) restores the layout from when
 the editor opened; either action hands focus back to the game. Dragging itself
 only previews the layout and does not write it.
 
-Offsets are stored as **fractions of the viewport**, not pixels, and clamped
-to ±0.45 on both axes — a layout arranged on a 3440×1440 ultrawide still lands
-on screen on a 1920×1080 monitor, and no section can be dropped somewhere it
-can't be dragged back from. Each section's shipped corner remains its zero
+There is no editor panel across the top of the HUD. Each resizable section has
+its own attached Move, Resize and Align icons: drag Move to reposition, drag
+Resize left or right to scale, and click Align to cycle Left, Centre and Right
+for the elements inside it; the component itself stays where it was placed.
+A compact three-icon container in the centre of the screen confirms the preview,
+closes without saving, or resets to the shipped layout.
+
+Offsets are stored as **fractions of the viewport**, not pixels. Their bounds
+are aware of each section's shipped anchor, so every section can travel across
+the screen while retaining a small recovery margin at its far edge — a layout
+arranged on a 3440×1440 ultrawide still lands on screen on a 1920×1080 monitor.
+Each section's shipped corner remains its zero
 point, so a player with nothing saved sees exactly the default layout.
 
 Storage is a client-side FiveM KVP key (`Config.layout.kvpKey`), so a layout is

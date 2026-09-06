@@ -1,6 +1,6 @@
 import { AlertTriangle } from "lucide-react"
 
-import { useHudUpdate } from "@/lib/hudState"
+import { useHudLayout, useHudUpdate } from "@/lib/hudState"
 
 /**
  * Renders one badge per active qblib QB.status effect (e.g. "bleeding",
@@ -25,10 +25,12 @@ function humanize(name: string): string {
 
 export function StatusEffects() {
     const update = useHudUpdate()
+    const layout = useHudLayout()
+    const alignment = layout.justifications.status ?? "right"
     if (!update.status || update.status.length === 0) return null
 
     return (
-        <div className="flex flex-col items-end gap-1.5">
+        <div className={`flex flex-col gap-1.5 ${alignment === "left" ? "items-start" : alignment === "center" ? "items-center" : "items-end"}`}>
             {update.status.map((effect) => (
                 <div
                     key={effect.name}

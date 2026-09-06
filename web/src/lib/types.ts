@@ -75,6 +75,8 @@ export interface HudLayoutOffset {
     y: number
 }
 
+export type HudLayoutJustification = "left" | "center" | "right"
+
 export interface HudLayoutConfig {
     /** False pins the layout for everyone -- sections are never draggable. */
     movable: boolean
@@ -87,6 +89,10 @@ export interface HudLayoutConfig {
      * place instead of visibly jumping.
      */
     offsets: Record<string, HudLayoutOffset>
+    /** Per-section scale, constrained by Lua to 75% through 150%. */
+    scales: Record<string, number>
+    /** Per-section alignment for the elements inside that section. */
+    justifications: Record<string, HudLayoutJustification>
 }
 
 // action: "qbhud:layoutMode" -- the player entered layout edit mode with

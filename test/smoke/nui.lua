@@ -813,6 +813,8 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     hud.callbacks['qbhud:finishLayout']({
         confirmed = true,
         offsets = { gauges = { x = 0.1, y = -0.2 } },
+        scales = { gauges = 1.25 },
+        justifications = { gauges = 'left' },
     }, function() end)
 
     local stored = hud.kvp['qbhud:layout']
@@ -826,6 +828,56 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     harness.assertTrue(config ~= nil, 'the config push happened')
     harness.assertEqual(config.layout.offsets.gauges.x, 0.1, 'the saved offset is seeded on load')
     harness.assertEqual(config.layout.offsets.gauges.y, -0.2, 'on both axes')
+    harness.assertEqual(config.layout.scales.gauges, 1.25, 'and its resized scale is seeded too')
+    harness.assertEqual(config.layout.justifications.gauges, 'left', 'and its chosen alignment is seeded too')
+end)
+
+harness.test('layout alignment is validated without changing component placement', function()
+    local hud = loadHud({ bridgePush = true })
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { identity = { x = 2, y = 0 } },
+        justifications = { identity = 'left', status = 'not-an-alignment' },
+    }, function() end)
+
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
+    local config = configPayload(reloaded)
+    harness.assertEqual(config.layout.justifications.identity, 'left', 'left alignment is persisted')
+    harness.assertEqual(config.layout.offsets.identity.x, 0, 'content alignment does not change the component\'s right-anchored travel bounds')
+    harness.assertEqual(config.layout.justifications.status, nil, 'unknown alignment values are ignored')
+end)
+
+harness.test('a component can be resized without moving it', function()
+    local hud = loadHud({ bridgePush = true })
+
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = {},
+        scales = { status = 1.4 },
+    }, function() end)
+
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertEqual(config.layout.scales.status, 1.4, 'the chosen scale survives a reload')
+    harness.assertEqual(config.layout.offsets.status.x, 0, 'resizing alone keeps the shipped horizontal position')
+    harness.assertEqual(config.layout.offsets.status.y, 0, 'resizing alone keeps the shipped vertical position')
+end)
+
+harness.test('the chat input position is saved with the HUD layout', function()
+    local hud = loadHud({ bridgePush = true })
+
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { chatInput = { x = 9, y = -9 } },
+    }, function() end)
+
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertEqual(config.layout.offsets.chatInput.x, 0.95,
+        'the chat composer can reach the far right of the viewport')
+    harness.assertEqual(config.layout.offsets.chatInput.y, -0.95,
+        'and the top edge while retaining a recovery margin')
 end)
 
 harness.test('a submitted layout is re-validated, never merely stored', function()
@@ -840,14 +892,42 @@ harness.test('a submitted layout is re-validated, never merely stored', function
             [17] = { x = 0.1, y = 0.1 },               -- not a section id
             ['this-key-is-far-too-long-to-be-a-real-section-id'] = { x = 0.1, y = 0.1 },
         },
+        scales = {
+            gauges = 9.0,
+            identity = 0.1,
+            status = 'large',
+        },
     }, function() end)
 
     local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
-    harness.assertEqual(config.layout.offsets.gauges.x, 0.45,
-        'an off-screen offset is clamped -- a section must never be draggable somewhere it cannot be dragged back from')
-    harness.assertEqual(config.layout.offsets.gauges.y, -0.45, 'on both axes')
+    harness.assertEqual(config.layout.offsets.gauges.x, 0.5,
+        'the bottom-centre gauges can travel across the full screen width')
+    harness.assertEqual(config.layout.offsets.gauges.y, -0.95,
+        'and nearly to the top edge without becoming unrecoverable')
     harness.assertEqual(config.layout.offsets.status, nil, 'a non-numeric offset is dropped, not coerced')
     harness.assertEqual(config.layout.offsets[17], nil, 'a non-string section id is dropped')
+    harness.assertEqual(config.layout.scales.gauges, 1.5, 'an oversized component scale is clamped')
+    harness.assertEqual(config.layout.scales.identity, 0.75, 'an undersized component scale is clamped')
+    harness.assertEqual(config.layout.scales.status, nil, 'a non-numeric component scale is dropped')
+end)
+
+harness.test('corner-pinned sections can cross the full screen', function()
+    local hud = loadHud({ bridgePush = true })
+
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = {
+            identity = { x = -9.0, y = -9.0 },
+            status = { x = -9.0, y = 9.0 },
+        },
+    }, function() end)
+
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertEqual(config.layout.offsets.identity.x, -0.95, 'bottom-right sections reach the far left')
+    harness.assertEqual(config.layout.offsets.identity.y, -0.95, 'bottom-right sections reach the top')
+    harness.assertEqual(config.layout.offsets.status.x, -0.95, 'top-right sections reach the far left')
+    harness.assertEqual(config.layout.offsets.status.y, 0.95, 'top-right sections reach the bottom')
 end)
 
 harness.test('a corrupt stored layout costs the layout, not the HUD', function()
@@ -866,6 +946,7 @@ harness.test('the reset command clears the stored layout', function()
     hud.callbacks['qbhud:finishLayout']({
         confirmed = true,
         offsets = { gauges = { x = 0.1, y = 0.1 } },
+        scales = { gauges = 1.2 },
     }, function() end)
     harness.assertTrue(hud.kvp['qbhud:layout'] ~= nil, 'sanity: something was stored')
 

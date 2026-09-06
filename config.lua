@@ -41,7 +41,7 @@ Config.hud = {
     --              resource hiding the radar for a cutscene still works.
     --   'vehicle' -- only while the player is in a vehicle.
     --   'never'   -- always hidden.
-    minimap = 'always',
+    minimap = 'vehicle',
 }
 
 -- Per-player HUD layout. Each section can be dragged to a new position and the

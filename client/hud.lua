@@ -126,42 +126,83 @@ local LAYOUT_KVP = LAYOUT.kvpKey or 'qbhud:layout'
 
 -- Offsets are stored as FRACTIONS of the viewport, not pixels: a layout saved
 -- on a 3440x1440 ultrawide would put half the HUD off screen on a 1920x1080
--- monitor otherwise. Clamped well inside the edges so a section can never be
--- dragged somewhere it cannot be dragged back from.
-local LAYOUT_LIMIT = 0.45
+-- monitor otherwise. Each section starts from a different anchor, so one
+-- shared +/- limit would prevent corner-pinned sections reaching much of the
+-- display. These bounds let every section cross the screen while retaining a
+-- small recovery margin at the far edge.
+local LAYOUT_BOUNDS = {
+    gauges = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
+    vehicle = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
+    identity = { minX = -0.95, maxX = 0.00, minY = -0.95, maxY = 0.00 },
+    status = { minX = -0.95, maxX = 0.00, minY = 0.00, maxY = 0.95 },
+    -- qbchat's composer has a top-left zero point. It is rendered by a
+    -- separate NUI, but shares this KVP so /hudlayout remains the one place a
+    -- player arranges all of their on-screen interface.
+    chatInput = { minX = -0.95, maxX = 0.95, minY = -0.95, maxY = 0.95 },
+}
+local FALLBACK_LAYOUT_LIMIT = 0.45
+-- Component scale is deliberately constrained to keep a large HUD useful
+-- without letting a malformed NUI payload cover the whole screen.
+local LAYOUT_SCALE_MIN = 0.75
+local LAYOUT_SCALE_MAX = 1.50
+---@param value any
+---@return 'left'|'center'|'right'|nil
+local function layoutJustification(value)
+    if value == 'left' or value == 'center' or value == 'right' then return value end
+    return nil
+end
 
+---@param section string
+---@param axis 'x'|'y'
 ---@param value any
 ---@return number|nil
-local function layoutOffset(value)
+local function layoutOffset(section, axis, value)
     local number = tonumber(value)
     if not number or number ~= number then return nil end -- NaN
-    if number > LAYOUT_LIMIT then return LAYOUT_LIMIT end
-    if number < -LAYOUT_LIMIT then return -LAYOUT_LIMIT end
+    local bounds = LAYOUT_BOUNDS[section]
+    local minimum = bounds and bounds[axis == 'x' and 'minX' or 'minY'] or -FALLBACK_LAYOUT_LIMIT
+    local maximum = bounds and bounds[axis == 'x' and 'maxX' or 'maxY'] or FALLBACK_LAYOUT_LIMIT
+    if number > maximum then return maximum end
+    if number < minimum then return minimum end
     return number
 end
 
----This player's saved section offsets, as { [section] = { x, y } }.
+---@param value any
+---@return number|nil
+local function layoutScale(value)
+    local number = tonumber(value)
+    if not number or number ~= number then return nil end -- NaN
+    if number > LAYOUT_SCALE_MAX then return LAYOUT_SCALE_MAX end
+    if number < LAYOUT_SCALE_MIN then return LAYOUT_SCALE_MIN end
+    return number
+end
+
+---This player's saved section layout, split for the NUI into offsets and scales.
 ---
 ---Returns an empty table for anything malformed rather than raising: a corrupt
 ---or hand-edited KVP value must cost the player their layout, not their HUD.
 ---@return table
 local function readLayout()
-    if LAYOUT.movable == false then return {} end
+    if LAYOUT.movable == false then return { offsets = {}, scales = {}, justifications = {} } end
 
     local raw = GetResourceKvpString(LAYOUT_KVP)
-    if type(raw) ~= 'string' or raw == '' then return {} end
+    if type(raw) ~= 'string' or raw == '' then return { offsets = {}, scales = {}, justifications = {} } end
 
     local ok, decoded = pcall(json.decode, raw)
-    if not ok or type(decoded) ~= 'table' then return {} end
+    if not ok or type(decoded) ~= 'table' then return { offsets = {}, scales = {}, justifications = {} } end
 
-    local out = {}
-    for section, offset in pairs(decoded) do
-        if type(section) == 'string' and type(offset) == 'table' then
-            local x, y = layoutOffset(offset.x), layoutOffset(offset.y)
-            if x and y then out[section] = { x = x, y = y } end
+    local offsets, scales, justifications = {}, {}, {}
+    for section, entry in pairs(decoded) do
+        if type(section) == 'string' and type(entry) == 'table' then
+            local justification = layoutJustification(entry.justification)
+            local x, y = layoutOffset(section, 'x', entry.x), layoutOffset(section, 'y', entry.y)
+            local scale = layoutScale(entry.scale)
+            if x and y then offsets[section] = { x = x, y = y } end
+            if scale then scales[section] = scale end
+            if justification then justifications[section] = justification end
         end
     end
-    return out
+    return { offsets = offsets, scales = scales, justifications = justifications }
 end
 
 ---Persists a layout the NUI submitted. Re-validated here, not merely stored:
@@ -173,14 +214,17 @@ local function writeLayout(payload)
     if LAYOUT.movable == false then return false end
     if type(payload) ~= 'table' then return false end
 
+    local offsets = type(payload.offsets) == 'table' and payload.offsets or {}
+    local scales = type(payload.scales) == 'table' and payload.scales or {}
+    local requestedJustifications = type(payload.justifications) == 'table' and payload.justifications or {}
     local clean = {}
     local count = 0
-    for section, offset in pairs(payload) do
+    for section, offset in pairs(offsets) do
         -- Section ids come from the NUI's own fixed list; cap the key length
         -- and the entry count so a malformed submission cannot grow the stored
         -- blob without bound.
         if type(section) == 'string' and #section <= 32 and type(offset) == 'table' and count < 16 then
-            local x, y = layoutOffset(offset.x), layoutOffset(offset.y)
+            local x, y = layoutOffset(section, 'x', offset.x), layoutOffset(section, 'y', offset.y)
             if x and y then
                 clean[section] = { x = x, y = y }
                 count = count + 1
@@ -188,8 +232,48 @@ local function writeLayout(payload)
         end
     end
 
+    -- Alignment is saved even when a component was not moved or resized.
+    for section, value in pairs(requestedJustifications) do
+        local justification = layoutJustification(value)
+        if type(section) == 'string' and #section <= 32 and justification then
+            local entry = clean[section]
+            if not entry and count < 16 then
+                entry = { x = 0, y = 0 }
+                clean[section] = entry
+                count = count + 1
+            end
+            if entry then entry.justification = justification end
+        end
+    end
+
+    for section, value in pairs(scales) do
+        if type(section) == 'string' and #section <= 32 then
+            local scale = layoutScale(value)
+            if scale then
+                -- A resize without a move still needs an entry. Supplying the
+                -- zero offset preserves the component's shipped position.
+                local entry = clean[section]
+                if not entry and count < 16 then
+                    entry = { x = 0, y = 0 }
+                    clean[section] = entry
+                    count = count + 1
+                end
+                if entry then entry.scale = scale end
+            end
+        end
+    end
+
     SetResourceKvp(LAYOUT_KVP, json.encode(clean))
     return true
+end
+
+---Pushes the saved chat composer position to qbchat when it is available.
+---qbchat also reads this through getLayout when it starts after qbhud, so
+---there is no ordering dependency between the two resources.
+local function syncChatInputLayout()
+    if type(GetResourceState) ~= 'function' or GetResourceState('qbchat') ~= 'started' then return end
+    if type(TriggerEvent) ~= 'function' then return end
+    TriggerEvent('qbchat:setInputLayout', readLayout().offsets.chatInput)
 end
 
 -- Layout edit mode is an explicit mode, entered by command, rather than the HUD
@@ -222,7 +306,8 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
     if not layoutEditing then return end
 
     if type(payload) == 'table' and payload.confirmed == true then
-        pcall(writeLayout, payload.offsets)
+        pcall(writeLayout, payload)
+        syncChatInputLayout()
     end
 
     layoutEditing = false
@@ -239,6 +324,7 @@ RegisterCommand('hudlayoutreset', function()
     SetNuiFocus(false, false)
     send('qbhud:layoutMode', false)
     send('qbhud:layoutReset', true)
+    syncChatInputLayout()
     QB.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end, false)
 
@@ -827,10 +913,16 @@ exports('isVisible', function()
     return visible
 end)
 
+-- qbchat uses this small read-only surface at startup to pick up a layout
+-- saved before it (re)started. Returning the already validated shape means a
+-- consumer never has to read the KVP or trust its contents.
+exports('getLayout', readLayout)
+
 -- Assignment, NOT `local function`: that would declare a fresh local shadowing
 -- the forward declaration at the top of the file, silently leaving the
 -- qbhud:ready callback's upvalue nil.
 sendInitialState = function()
+    local savedLayout = readLayout()
     send("qbhud:config", {
         dynamic = Config.hud.dynamic == true,
         elements = Config.hud.elements,
@@ -846,7 +938,9 @@ sendInitialState = function()
             -- Seeded from this player's own machine. Sent with the config
             -- rather than on its own channel so the HUD's first paint is
             -- already in the right place instead of visibly jumping.
-            offsets = readLayout(),
+            offsets = savedLayout.offsets,
+            scales = savedLayout.scales,
+            justifications = savedLayout.justifications,
         },
     })
 
@@ -903,6 +997,10 @@ CreateThread(function()
     -- callback at the top of this file covers that). pcall'd so a failure here
     -- can't abort the thread before the scheduler below is armed.
     pcall(sendInitialState)
+    -- Covers the inverse startup order too: if qbchat was already running,
+    -- give it the saved composer position without waiting for the next layout
+    -- confirmation. If it starts later it performs the same read itself.
+    syncChatInputLayout()
     syncVoiceSampling()
     startScheduler()
 end)

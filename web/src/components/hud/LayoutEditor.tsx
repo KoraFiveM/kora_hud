@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Check, Move, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Check, Maximize2, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useHudLayout } from "@/lib/hudState"
-import type { HudLayoutOffset } from "@/lib/types"
+import type { HudLayoutJustification, HudLayoutOffset } from "@/lib/types"
 
 /**
  * Section ids. PERSISTED -- these strings are the keys of the JSON blob in the
@@ -12,25 +12,49 @@ import type { HudLayoutOffset } from "@/lib/types"
  * rename them.
  */
 export const HUD_SECTIONS = {
-    /** Bottom-centre: vehicle telemetry stacked over the glanceable gauge row. */
+    /** Bottom-centre: glanceable health/needs/status gauges. */
     gauges: "gauges",
+    /** Bottom-centre, below the gauges: vehicle telemetry while driving. */
+    vehicle: "vehicle",
     /** Bottom-right: mic, job/gang, money. */
     identity: "identity",
     /** Top-right: active qblib status effects. */
     status: "status",
+    /** qbchat's composer, stored by qbhud but rendered in qbchat's NUI. */
+    chatInput: "chatInput",
 } as const
 
-// Matches client/hud.lua's LAYOUT_LIMIT exactly. Clamped here as well as there
-// because the two clamps do different jobs: Lua's protects what gets stored,
-// this one stops the section leaving the cursor behind mid-drag (the pointer
-// keeps moving whether or not the offset still can).
-const LAYOUT_LIMIT = 0.45
+// Matches client/hud.lua's section-aware LAYOUT_BOUNDS exactly. The default
+// anchors differ (bottom-centre, bottom-right and top-right), so their travel
+// ranges differ too: using one +/- limit strands every corner section on only
+// half of the screen.
+const SECTION_BOUNDS: Record<string, { minX: number; maxX: number; minY: number; maxY: number }> = {
+    [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
+    [HUD_SECTIONS.vehicle]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
+    [HUD_SECTIONS.identity]: { minX: -0.95, maxX: 0, minY: -0.95, maxY: 0 },
+    [HUD_SECTIONS.status]: { minX: -0.95, maxX: 0, minY: 0, maxY: 0.95 },
+    [HUD_SECTIONS.chatInput]: { minX: -0.95, maxX: 0.95, minY: -0.95, maxY: 0.95 },
+}
+const FALLBACK_LAYOUT_LIMIT = 0.45
+const SCALE_MIN = 0.75
+const SCALE_MAX = 1.5
+
+const DEFAULT_JUSTIFICATIONS: Record<string, HudLayoutJustification> = {
+    [HUD_SECTIONS.gauges]: "center",
+    [HUD_SECTIONS.vehicle]: "center",
+    [HUD_SECTIONS.identity]: "right",
+    [HUD_SECTIONS.status]: "right",
+    [HUD_SECTIONS.chatInput]: "left",
+}
 
 const ZERO: HudLayoutOffset = { x: 0, y: 0 }
 
-function clamp(value: number): number {
-    if (value > LAYOUT_LIMIT) return LAYOUT_LIMIT
-    if (value < -LAYOUT_LIMIT) return -LAYOUT_LIMIT
+function clamp(section: string, axis: "x" | "y", value: number): number {
+    const bounds = SECTION_BOUNDS[section]
+    const minimum = bounds ? (axis === "x" ? bounds.minX : bounds.minY) : -FALLBACK_LAYOUT_LIMIT
+    const maximum = bounds ? (axis === "x" ? bounds.maxX : bounds.maxY) : FALLBACK_LAYOUT_LIMIT
+    if (value > maximum) return maximum
+    if (value < minimum) return minimum
     return value
 }
 
@@ -40,14 +64,24 @@ function clamp(value: number): number {
  * saved layout land somewhere different for a two-row money panel than for a
  * one-row one.
  *
- * `centerX` folds the bottom-centre cluster's own -50% shift into the same
+ * Centre alignment folds the cluster's own -50% shift into the same
  * transform rather than leaving it on an inner element. That keeps the
  * wrapper's box on top of what the player actually sees, which is what the
  * editor's outline and label are positioned against.
  */
-function sectionTransform(offset: HudLayoutOffset, centerX: boolean): string {
+function sectionTransform(offset: HudLayoutOffset, centered: boolean): string {
     const x = `${offset.x * 100}vw`
-    return `translate(${centerX ? `calc(-50% + ${x})` : x}, ${offset.y * 100}vh)`
+    return `translate(${centered ? `calc(-50% + ${x})` : x}, ${offset.y * 100}vh)`
+}
+
+function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: number): string {
+    return `${sectionTransform(offset, centered)} scale(${scale})`
+}
+
+function clampScale(value: number): number {
+    if (value > SCALE_MAX) return SCALE_MAX
+    if (value < SCALE_MIN) return SCALE_MIN
+    return value
 }
 
 interface MovableSectionProps {
@@ -63,6 +97,10 @@ interface MovableSectionProps {
     inner?: string
     /** True for the bottom-centre cluster; see sectionTransform. */
     centerX?: boolean
+    /** The fixed corner each section should grow from when resized. */
+    scaleOrigin?: string
+    /** A layout-editor proxy for a component rendered by another NUI. */
+    editorOnly?: boolean
     children: ReactNode
 }
 
@@ -82,6 +120,8 @@ export function MovableSection({
     handlePosition,
     inner,
     centerX = false,
+    scaleOrigin = "center",
+    editorOnly = false,
     children,
 }: MovableSectionProps) {
     const layout = useHudLayout()
@@ -89,9 +129,12 @@ export function MovableSection({
     const [dragging, setDragging] = useState(false)
 
     const offset = layout.offsets[id] ?? ZERO
+    const scale = layout.scales[id] ?? 1
+    const justification = layout.justifications[id] ?? DEFAULT_JUSTIFICATIONS[id] ?? "right"
+    const AlignmentIcon = justification === "left" ? AlignLeft : justification === "center" ? AlignCenter : AlignRight
     const draggable = layout.editing && layout.movable
 
-    function handleMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    function handleMoveMouseDown(event: React.MouseEvent<HTMLElement>) {
         if (!draggable) return
         const node = nodeRef.current
         if (!node) return
@@ -109,15 +152,15 @@ export function MovableSection({
         // carry that check into it.
         const onMove = (moveEvent: MouseEvent) => {
             latest = {
-                x: clamp(base.x + (moveEvent.clientX - startX) / window.innerWidth),
-                y: clamp(base.y + (moveEvent.clientY - startY) / window.innerHeight),
+                x: clamp(id, "x", base.x + (moveEvent.clientX - startX) / window.innerWidth),
+                y: clamp(id, "y", base.y + (moveEvent.clientY - startY) / window.innerHeight),
             }
             // Written straight to the node instead of through state: a drag
             // fires a mousemove per frame, and routing each one through React
             // would re-render this section (and re-run every gauge inside it)
             // at the cursor's rate for a change that is one CSS property.
             // State catches up once, on mouseup.
-            node.style.transform = sectionTransform(latest, centerX)
+            node.style.transform = scaleTransform(latest, centerX, scale)
         }
 
         const onUp = () => {
@@ -139,16 +182,58 @@ export function MovableSection({
         setDragging(true)
     }
 
+    function handleResizeMouseDown(event: React.MouseEvent<HTMLButtonElement>) {
+        if (!draggable) return
+        // This is deliberately a pointer/mouse gesture, not an HTML5 drag
+        // operation. Native dragging produces browser ghost previews and does
+        // not reliably report its position inside FiveM's embedded browser.
+        event.preventDefault()
+        event.stopPropagation()
+
+        const startX = event.clientX
+        const base = scale
+        let latest = base
+
+        const onMove = (moveEvent: MouseEvent) => {
+            // Horizontal movement is intentional: it makes every section
+            // resize consistently regardless of which fixed corner it grows
+            // from. A full viewport-width drag spans the complete 75–150%
+            // range, while smaller adjustments remain easy to control.
+            latest = clampScale(base + (moveEvent.clientX - startX) / window.innerWidth)
+            const node = nodeRef.current
+            if (node) node.style.transform = scaleTransform(offset, centerX, latest)
+        }
+
+        const onUp = () => {
+            window.removeEventListener("mousemove", onMove)
+            window.removeEventListener("mouseup", onUp)
+            if (latest !== base) layout.commitScale(id, latest)
+        }
+
+        window.addEventListener("mousemove", onMove)
+        window.addEventListener("mouseup", onUp)
+    }
+
+    function cycleJustification() {
+        layout.commitJustification(id, justification === "left" ? "center" : justification === "center" ? "right" : "left")
+    }
+
+    // qbhud draws a proxy for qbchat's composer only while arranging the
+    // layout; qbchat continues to own the real input during normal play.
+    if (editorOnly && !layout.editing) return null
+
     return (
         <div
             ref={nodeRef}
             // pointer-events-auto ONLY while the editor is open. The HUD is a
             // click-through overlay over live gameplay the rest of the time
-            // (see globals.css) and has to stay that way -- a permanently
-            // grabbable HUD would eat the clicks the game needs.
-            className={cn("fixed", position, draggable && "pointer-events-auto", dragging ? "cursor-grabbing" : draggable && "cursor-grab")}
-            style={{ transform: sectionTransform(offset, centerX) }}
-            onMouseDown={handleMouseDown}
+            // (see globals.css) and has to stay that way -- only the explicit
+            // control icons take pointer input while editing.
+            className={cn("fixed", position, draggable && "pointer-events-auto")}
+            style={{
+                transform: scaleTransform(offset, centerX, scale),
+                transformOrigin: scaleOrigin,
+            }}
         >
             {draggable && (
                 <>
@@ -160,24 +245,55 @@ export function MovableSection({
                         zero-size section with nothing to grab. */}
                     <div
                         className={cn(
-                            "hud-panel absolute flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide overlay-text",
+                            "hud-panel absolute flex items-center gap-1 rounded-full p-1 overlay-text",
                             handlePosition,
                         )}
                     >
-                        <Move className="h-3 w-3 text-primary" aria-hidden />
-                        {label}
+                        <button
+                            type="button"
+                            aria-label={`Move ${label}`}
+                            title="Drag to move"
+                            onMouseDown={handleMoveMouseDown}
+                            className={cn("flex h-7 w-7 items-center justify-center rounded-full text-primary", dragging ? "cursor-grabbing" : "cursor-grab")}
+                        >
+                            <Move className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                        {!editorOnly && (
+                            <>
+                                <button
+                                    type="button"
+                                    aria-label={`Resize ${label}; drag left or right`}
+                                    title="Drag left or right to resize"
+                                    onMouseDown={handleResizeMouseDown}
+                                    className="flex h-7 w-7 cursor-ew-resize items-center justify-center rounded-full text-primary"
+                                >
+                                    <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label={`Content alignment: ${justification}. Click to cycle alignment.`}
+                                    title="Cycle content alignment: Left, Centre, Right"
+                                    onClick={cycleJustification}
+                                    className="flex h-7 w-7 items-center justify-center rounded-full text-primary"
+                                >
+                                    <AlignmentIcon className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                            </>
+                        )}
                     </div>
                     <div className="pointer-events-none absolute -inset-2 rounded-2xl border border-dashed border-[hsl(var(--primary)/55%)]" />
                 </>
             )}
-            <div className={inner}>{children}</div>
+            <div className={cn("flex flex-col", inner, justification === "left" ? "items-start text-left" : justification === "center" ? "items-center text-center" : "items-end text-right")}>
+                {children}
+            </div>
         </div>
     )
 }
 
 /**
- * The editor's backdrop and controls. The backdrop remains pointer-transparent
- * so it cannot swallow a drag; only the two explicit exit buttons take clicks.
+ * The editor backdrop and compact bottom-left actions. The backdrop remains
+ * pointer-transparent so it cannot swallow a section-control drag.
  */
 export function LayoutEditorOverlay() {
     const layout = useHudLayout()
@@ -195,30 +311,34 @@ export function LayoutEditorOverlay() {
 
     return (
         <div className="pointer-events-none fixed inset-0 bg-black/45">
-            <div className="hud-panel absolute left-1/2 top-8 -translate-x-1/2 rounded-2xl px-5 py-3 text-center overlay-text">
-                <p className="text-sm font-medium text-foreground">Drag any HUD section to move it</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                    Confirm to save your changes, or cancel to keep your previous layout.
-                </p>
-                <div className="pointer-events-auto mt-3 flex items-center justify-center gap-2">
-                    <button
-                        type="button"
-                        onClick={layout.cancel}
-                        className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/80"
-                    >
-                        <X className="h-3.5 w-3.5" aria-hidden />
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        onClick={layout.confirm}
-                        className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-                    >
-                        <Check className="h-3.5 w-3.5" aria-hidden />
-                        Confirm
-                    </button>
-                </div>
-                <p className="mt-2 text-[10px] text-muted-foreground">Esc cancels · /hudlayoutreset restores defaults</p>
+            <div className="hud-panel pointer-events-auto absolute left-1/2 top-1/2 flex w-fit -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full p-1 overlay-text">
+                <button
+                    type="button"
+                    aria-label="Confirm layout changes"
+                    title="Confirm"
+                    onClick={layout.confirm}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                    <Check className="h-4 w-4" aria-hidden />
+                </button>
+                <button
+                    type="button"
+                    aria-label="Close without saving layout changes"
+                    title="Close without saving"
+                    onClick={layout.cancel}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
+                >
+                    <X className="h-4 w-4" aria-hidden />
+                </button>
+                <button
+                    type="button"
+                    aria-label="Reset HUD layout to defaults"
+                    title="Reset to defaults"
+                    onClick={layout.resetToDefaults}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
+                >
+                    <RotateCcw className="h-4 w-4" aria-hidden />
+                </button>
             </div>
         </div>
     )

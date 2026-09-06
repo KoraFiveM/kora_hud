@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     // pre-existing behaviour, so defaulting to them means the pre-config
     // window looks like the HUD rather than like a different one.
     money: { scrollAccounts: false, scrollAccountsTime: 5000 },
-    layout: { movable: true, command: "hudlayout", offsets: {} },
+    layout: { movable: true, command: "hudlayout", offsets: {}, scales: {}, justifications: {} },
 }
 
 const DEFAULT_VITALS: HudVitalsPayload = {
@@ -84,12 +84,20 @@ export interface HudLayoutState {
     /** Whether the player has the editor open (Lua holds NUI focus while true). */
     editing: boolean
     offsets: Record<string, HudLayoutOffset>
+    scales: Record<string, number>
+    justifications: Record<string, "left" | "center" | "right">
     /**
      * Called once per finished drag with that section's new offset. Updates
      * the page preview only; the NUI holds no authority over persistence until
      * the player explicitly confirms the complete layout.
      */
     commitOffset: (section: string, offset: HudLayoutOffset) => void
+    /** Preview a section's scale until the player confirms the layout. */
+    commitScale: (section: string, scale: number) => void
+    /** Preview alignment of a component's contents until confirmation. */
+    commitJustification: (section: string, justification: "left" | "center" | "right") => void
+    /** Preview the shipped layout until the player confirms it. */
+    resetToDefaults: () => void
     /** Persist the preview and leave edit mode. */
     confirm: () => void
     /** Restore the positions from when editing began and leave edit mode. */
@@ -101,7 +109,12 @@ const DEFAULT_LAYOUT: HudLayoutState = {
     command: "hudlayout",
     editing: false,
     offsets: {},
+    scales: {},
+    justifications: {},
     commitOffset: () => {},
+    commitScale: () => {},
+    commitJustification: () => {},
+    resetToDefaults: () => {},
     confirm: () => {},
     cancel: () => {},
 }
@@ -141,6 +154,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const [visible, setVisible] = useState<boolean>(DEFAULT_VISIBLE)
     const [layoutEditing, setLayoutEditing] = useState(false)
     const [offsets, setOffsets] = useState<Record<string, HudLayoutOffset>>(DEFAULT_LAYOUT.offsets)
+    const [scales, setScales] = useState<Record<string, number>>(DEFAULT_LAYOUT.scales)
+    const [justifications, setJustifications] = useState<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
 
     // Mirrors `offsets` for the callbacks below, which run from a mouseup
     // listener and from a wire handler rather than from a render -- both need
@@ -150,6 +165,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // Snapshot taken on entry. Dragging only changes the preview; Cancel puts
     // this exact map back, while Confirm sends the current map to Lua once.
     const initialOffsetsRef = useRef<Record<string, HudLayoutOffset>>(DEFAULT_LAYOUT.offsets)
+    const scalesRef = useRef(scales)
+    const initialScalesRef = useRef<Record<string, number>>(DEFAULT_LAYOUT.scales)
+    const justificationsRef = useRef(justifications)
+    const initialJustificationsRef = useRef<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
 
     const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
         offsetsRef.current = next
@@ -164,22 +183,58 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         [applyOffsets],
     )
 
+    const applyScales = useCallback((next: Record<string, number>) => {
+        scalesRef.current = next
+        setScales(next)
+    }, [])
+
+    const commitScale = useCallback(
+        (section: string, scale: number) => applyScales({ ...scalesRef.current, [section]: scale }),
+        [applyScales],
+    )
+
+    const applyJustifications = useCallback((next: Record<string, "left" | "center" | "right">) => {
+        justificationsRef.current = next
+        setJustifications(next)
+    }, [])
+
+    const commitJustification = useCallback(
+        (section: string, justification: "left" | "center" | "right") =>
+            applyJustifications({ ...justificationsRef.current, [section]: justification }),
+        [applyJustifications],
+    )
+
+    const resetToDefaults = useCallback(() => {
+        applyOffsets({})
+        applyScales({})
+        applyJustifications({})
+    }, [applyOffsets, applyScales, applyJustifications])
+
     const confirm = useCallback(() => {
         // The WHOLE map goes over: Lua stores one JSON blob per player and
         // overwrites it outright, so a partial submission would delete every
         // other section's saved position.
-        fetchNui("qbhud:finishLayout", { confirmed: true, offsets: offsetsRef.current }).catch((error) => {
+        fetchNui("qbhud:finishLayout", {
+            confirmed: true,
+            offsets: offsetsRef.current,
+            scales: scalesRef.current,
+            justifications: justificationsRef.current,
+        }).catch((error) => {
             console.error("[qbhud] qbhud:finishLayout failed:", error)
         })
     }, [])
 
     const cancel = useCallback(() => {
         fetchNui("qbhud:finishLayout", { confirmed: false })
-            .then(() => applyOffsets(initialOffsetsRef.current))
+            .then(() => {
+                applyOffsets(initialOffsetsRef.current)
+                applyScales(initialScalesRef.current)
+                applyJustifications(initialJustificationsRef.current)
+            })
             .catch((error) => {
                 console.error("[qbhud] qbhud:finishLayout failed:", error)
             })
-    }, [applyOffsets])
+    }, [applyOffsets, applyScales, applyJustifications])
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (!payload) return
@@ -190,6 +245,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         // can't discard a move the player has just made.
         const seeded = payload.layout?.offsets
         applyOffsets(seeded && typeof seeded === "object" ? seeded : {})
+        const seededScales = payload.layout?.scales
+        applyScales(seededScales && typeof seededScales === "object" ? seededScales : {})
+        const seededJustifications = payload.layout?.justifications
+        applyJustifications(seededJustifications && typeof seededJustifications === "object" ? seededJustifications : {})
     })
 
     useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
@@ -213,7 +272,11 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
 
     useNuiEvent<HudLayoutModePayload>("qbhud:layoutMode", (payload) => {
         if (typeof payload !== "boolean") return
-        if (payload) initialOffsetsRef.current = offsetsRef.current
+        if (payload) {
+            initialOffsetsRef.current = offsetsRef.current
+            initialScalesRef.current = scalesRef.current
+            initialJustificationsRef.current = justificationsRef.current
+        }
         setLayoutEditing(payload)
     })
 
@@ -223,6 +286,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         // leaving edit mode does not do. Ignores the payload value: the
         // message arriving at all is the event.
         applyOffsets({})
+        applyScales({})
+        applyJustifications({})
     })
 
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
@@ -248,11 +313,16 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             command: config.layout?.command ?? DEFAULT_LAYOUT.command,
             editing: layoutEditing,
             offsets,
+            scales,
+            justifications,
             commitOffset,
+            commitScale,
+            commitJustification,
+            resetToDefaults,
             confirm,
             cancel,
         }),
-        [config.layout, layoutEditing, offsets, commitOffset, confirm, cancel],
+        [config.layout, layoutEditing, offsets, scales, justifications, commitOffset, commitScale, commitJustification, resetToDefaults, confirm, cancel],
     )
 
     // Each provider is handed the state value itself -- no useMemo wrapper
