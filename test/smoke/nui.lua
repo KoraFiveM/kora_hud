@@ -176,9 +176,12 @@ local function loadHud(opts)
     -- while Voice.isActive(). The mock mirrors that contract so the voice task
     -- participates in scheduling exactly as it does live.
     local voiceActive, voiceSamples = false, 0
+    local voiceModeHandler
     _G.Voice = {
         isTalking = function() return false end,
+        currentMode = function() return { index = 2, name = 'normal', label = 'Normal', range = 12.0 } end,
         onChange = function() end,
+        onModeChange = function(handler) voiceModeHandler = handler end,
         setActive = function(value) voiceActive = value == true end,
         isActive = function() return voiceActive end,
         sample = function() voiceSamples = voiceSamples + 1 end,
@@ -252,6 +255,9 @@ local function loadHud(opts)
             return live
         end,
         voiceSamples = function() return voiceSamples end,
+        pushVoiceMode = function(mode)
+            if voiceModeHandler then voiceModeHandler(mode) end
+        end,
         setVehicle = function(value)
             vehicle = value
             for _, handler in ipairs(cacheHandlers.vehicle or {}) do handler(value) end
@@ -337,7 +343,7 @@ harness.test('the ready callback is idempotent and re-pushes the full initial st
     hud.callbacks['qbhud:ready']({}, cb)
     local first = table.concat(hud.actions(), ',')
     harness.assertTrue(hud.contains('qbhud:config'), 'ready should push the element config')
-    harness.assertTrue(hud.contains('qbhud:theme'), 'ready should push the theme tokens')
+    harness.assertFalse(hud.contains('qbhud:theme'), 'qbtheme owns theme transport')
     harness.assertTrue(hud.contains('qbhud:visibility'), 'ready should push current visibility')
 
     hud.reset()
@@ -358,13 +364,13 @@ harness.test('the HUD forwards the dynamic gauge option to the NUI', function()
     harness.assertTrue(config.dynamic, 'Config.hud.dynamic should reach the gauge components')
 end)
 
-harness.test('a failing QB.theme.tokens cannot stop the visibility push', function()
+harness.test('HUD startup no longer depends on qblib theme derivation', function()
     local hud = loadHud()
     QB.theme.tokens = function() error('qblib restarting', 0) end
     hud.reset()
 
     hud.callbacks['qbhud:ready']({}, function() end)
-    harness.assertFalse(hud.contains('qbhud:theme'), 'a broken theme read should be skipped, not fatal')
+    harness.assertFalse(hud.contains('qbhud:theme'), 'the HUD must not duplicate qbtheme messages')
     harness.assertTrue(hud.contains('qbhud:visibility'),
         'visibility must still be sent -- it is what makes the HUD render at all')
 end)
@@ -572,6 +578,21 @@ harness.test('the mic is sampled on the shared scheduler, and only while visible
     harness.assertEqual(hud.voiceSamples(), hidden, 'a hidden HUD must not sample the voice native')
 end)
 
+harness.test('a proximity mode change reaches the mic indicator on the vitals channel', function()
+    local hud = loadHud({ bridgePush = true })
+    hud.reset()
+
+    hud.pushVoiceMode({ index = 3, name = 'shout', label = 'Shout', range = 35.0 })
+
+    local latest
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:vitals' then latest = message.data end
+    end
+    harness.assertTrue(latest ~= nil, 'a range change should push the mic indicator state immediately')
+    harness.assertEqual(latest.voiceMode.label, 'Shout', 'the mode label reaches the NUI')
+    harness.assertEqual(latest.voiceMode.range, 35.0, 'the metre range reaches the NUI')
+end)
+
 harness.test('a disabled element is never subscribed to, not merely never drawn', function()
     -- Stamina is the highest-frequency notification the HUD receives and each
     -- one is a cross-resource funcref invocation, so a server that does not
@@ -765,7 +786,7 @@ local function configPayload(hud)
     return latest
 end
 
-harness.test('the layout editor is a mode, entered by command, not a permanently grabbable HUD', function()
+harness.test('the layout editor requires an explicit confirm or cancel to release focus', function()
     local hud = loadHud({ bridgePush = true })
 
     harness.assertTrue(hud.commands.hudlayout ~= nil, 'the configured command is registered')
@@ -778,13 +799,21 @@ harness.test('the layout editor is a mode, entered by command, not a permanently
     harness.assertTrue(hud.contains('qbhud:layoutMode'), 'and tells the NUI to render the editor')
 
     hud.commands.hudlayout()
-    harness.assertFalse(hud.nuiFocus().mouse, 'leaving it hands focus straight back -- a stuck cursor is a stuck player')
+    harness.assertTrue(hud.nuiFocus().mouse, 'running the command again cannot bypass the confirmation choice')
+
+    hud.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+    harness.assertFalse(hud.nuiFocus().mouse, 'cancel hands focus straight back -- a stuck cursor is a stuck player')
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'cancel persists none of the previewed layout')
 end)
 
 harness.test('a submitted layout is persisted as viewport fractions', function()
     local hud = loadHud({ bridgePush = true })
 
-    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = -0.2 } }, function() end)
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { gauges = { x = 0.1, y = -0.2 } },
+    }, function() end)
 
     local stored = hud.kvp['qbhud:layout']
     harness.assertTrue(stored ~= nil, 'the layout reaches this player\'s own KVP store')
@@ -802,11 +831,15 @@ end)
 harness.test('a submitted layout is re-validated, never merely stored', function()
     local hud = loadHud({ bridgePush = true })
 
-    hud.callbacks['qbhud:saveLayout']({
-        gauges = { x = 9.0, y = -9.0 },           -- far off screen
-        status = { x = 'left', y = 0 },            -- not a number at all
-        [17] = { x = 0.1, y = 0.1 },               -- not a section id
-        ['this-key-is-far-too-long-to-be-a-real-section-id'] = { x = 0.1, y = 0.1 },
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = {
+            gauges = { x = 9.0, y = -9.0 },           -- far off screen
+            status = { x = 'left', y = 0 },            -- not a number at all
+            [17] = { x = 0.1, y = 0.1 },               -- not a section id
+            ['this-key-is-far-too-long-to-be-a-real-section-id'] = { x = 0.1, y = 0.1 },
+        },
     }, function() end)
 
     local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
@@ -829,7 +862,11 @@ end)
 
 harness.test('the reset command clears the stored layout', function()
     local hud = loadHud({ bridgePush = true })
-    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = 0.1 } }, function() end)
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { gauges = { x = 0.1, y = 0.1 } },
+    }, function() end)
     harness.assertTrue(hud.kvp['qbhud:layout'] ~= nil, 'sanity: something was stored')
 
     hud.commands.hudlayoutreset()
@@ -840,7 +877,12 @@ end)
 harness.test('a pinned layout accepts nothing', function()
     local hud = loadHud({ bridgePush = true, layout = { movable = false, command = 'hudlayout', kvpKey = 'qbhud:layout' } })
 
-    hud.callbacks['qbhud:saveLayout']({ gauges = { x = 0.1, y = 0.1 } }, function() end)
+    -- A finish callback sent while no editor is open must have no authority to
+    -- persist layout data, even if it claims to be a confirmation.
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { gauges = { x = 0.1, y = 0.1 } },
+    }, function() end)
     harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'movable = false stores nothing')
 
     hud.commands.hudlayout()

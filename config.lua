@@ -51,7 +51,8 @@ Config.layout = {
     -- Set false to pin the layout for everyone; /hudlayout then reports that
     -- moving sections is disabled rather than opening the editor.
     movable = true,
-    -- Command that enters and leaves layout edit mode. The HUD is
+    -- Command that enters layout edit mode. Confirm or Cancel in the editor
+    -- leaves it. The HUD is
     -- pointer-transparent during normal play and must stay that way, so
     -- dragging is only possible inside this explicit mode.
     command = 'hudlayout',
@@ -71,7 +72,11 @@ Config.bridge = {
 
 Config.voice = {
     enabled  = true,        -- master toggle for the mic indicator element
-    resource = "pma-voice", -- name of the voice resource providing talk state; see client/voice.lua's documented assumption
+    -- Resource that describes the current proximity mode through
+    -- getTalkingMode() -> { index, name, label, range }. qbvoice exposes this
+    -- directly; a replacement voice resource can implement the same small
+    -- presentation-only contract without coupling the HUD to its internals.
+    resource = "qbvoice",
     -- Mic state is a boolean with no change notification of its own, so it is
     -- the one input the HUD genuinely has to sample. 200ms is imperceptible
     -- on an indicator that only ever flips between two icons, and the sampler

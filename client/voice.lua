@@ -3,13 +3,9 @@
 -- pma-voice, saltychat, and mumble-voip all use the same underlying Mumble
 -- backend, so this works without any pma-voice-specific integration at all.
 --
--- ASSUMPTION TO VERIFY AT IMPLEMENTATION TIME: pma-voice has historically
--- also exposed richer state (proximity range, etc.) via its own exports or
--- state bags, but the exact name varies by version and isn't installed in
--- this repo to check against. If you want that richer state, look up the
--- installed pma-voice version's actual export/state-bag name and add the
--- lookup here, wrapped in pcall like NetworkIsPlayerTalking below -- so a
--- missing/renamed pma-voice API degrades to "use the native", not an error.
+-- Proximity presentation comes from the configured voice resource's
+-- getTalkingMode export. It is optional and pcall-guarded: swapping voice
+-- resources can remove the range display, but can never take down the mic.
 --
 -- This module owns NO thread. Mic state is the one HUD input with no change
 -- notification of its own, so it genuinely has to be sampled -- but the HUD
@@ -23,6 +19,8 @@ Voice = Voice or {}
 
 local talking = false
 local listeners = {}
+local mode = nil
+local modeListeners = {}
 local active = false
 
 local function setTalking(value)
@@ -35,6 +33,52 @@ local function setTalking(value)
             print(("[qb-hud:voice] onChange handler errored: %s"):format(tostring(err)))
         end
     end
+end
+
+local function normaliseMode(value)
+    if type(value) ~= 'table' then return nil end
+
+    local index = math.floor(tonumber(value.index) or 0)
+    local range = tonumber(value.range)
+    if index < 1 or range == nil or range < 0 then return nil end
+
+    return {
+        index = index,
+        name = type(value.name) == 'string' and value.name or '',
+        label = type(value.label) == 'string' and value.label or ('Range %d'):format(index),
+        range = range + 0.0,
+    }
+end
+
+local function sameMode(a, b)
+    if a == nil or b == nil then return a == b end
+    return a.index == b.index and a.name == b.name and a.label == b.label and a.range == b.range
+end
+
+local function setMode(value)
+    local nextMode = normaliseMode(value)
+    if sameMode(mode, nextMode) then return end
+    mode = nextMode
+
+    for _, handler in ipairs(modeListeners) do
+        local ok, err = pcall(handler, mode)
+        if not ok then
+            print(("[qb-hud:voice] onModeChange handler errored: %s"):format(tostring(err)))
+        end
+    end
+end
+
+local function sampleMode()
+    local resource = Config.voice.resource
+    if type(resource) ~= 'string' or resource == '' then
+        setMode(nil)
+        return
+    end
+
+    local ok, result = pcall(function()
+        return exports[resource]:getTalkingMode()
+    end)
+    setMode(ok and result or nil)
 end
 
 -- Resolved once, not per sample. The local player index is a session constant,
@@ -54,6 +98,7 @@ function Voice.sample()
 
     local ok, result = pcall(NetworkIsPlayerTalking, playerId)
     setTalking(ok and result or false)
+    sampleMode()
 end
 
 ---Enables/disables mic sampling. HUD visibility owns this lifecycle so nothing
@@ -79,8 +124,19 @@ function Voice.isTalking()
     return talking
 end
 
+---@return { index: integer, name: string, label: string, range: number }|nil
+function Voice.currentMode()
+    return mode
+end
+
 ---Registers `handler(talking)` to run whenever the talking state flips.
 ---@param handler fun(talking: boolean)
 function Voice.onChange(handler)
     table.insert(listeners, handler)
+end
+
+---Registers `handler(mode)` to run whenever the proximity mode changes.
+---@param handler fun(mode: table|nil)
+function Voice.onModeChange(handler)
+    table.insert(modeListeners, handler)
 end

@@ -43,6 +43,7 @@ const DEFAULT_VITALS: HudVitalsPayload = {
     armour: 0,
     stamina: 100,
     talking: false,
+    voiceMode: null,
 }
 
 const DEFAULT_UPDATE: HudUpdatePayload = {
@@ -85,11 +86,14 @@ export interface HudLayoutState {
     offsets: Record<string, HudLayoutOffset>
     /**
      * Called once per finished drag with that section's new offset. Updates
-     * the page and persists the FULL map through Lua -- the NUI holds no
-     * authority over any of this, it just reports where the player dropped
-     * the section.
+     * the page preview only; the NUI holds no authority over persistence until
+     * the player explicitly confirms the complete layout.
      */
     commitOffset: (section: string, offset: HudLayoutOffset) => void
+    /** Persist the preview and leave edit mode. */
+    confirm: () => void
+    /** Restore the positions from when editing began and leave edit mode. */
+    cancel: () => void
 }
 
 const DEFAULT_LAYOUT: HudLayoutState = {
@@ -98,6 +102,8 @@ const DEFAULT_LAYOUT: HudLayoutState = {
     editing: false,
     offsets: {},
     commitOffset: () => {},
+    confirm: () => {},
+    cancel: () => {},
 }
 
 // One context PER CHANNEL rather than a single object holding all of them.
@@ -125,7 +131,7 @@ const HudLayoutContext = createContext<HudLayoutState>(DEFAULT_LAYOUT)
  * so client/hud.lua's payloads have exactly one consumer-side entry point.
  *
  * It is also the only place that posts BACK to Lua ("qbhud:ready" and
- * "qbhud:saveLayout"), for the same reason.
+ * "qbhud:finishLayout"), for the same reason.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
@@ -141,41 +147,39 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // the CURRENT map to build the next one, and neither can read it out of a
     // closure without pinning whatever it was when that closure was made.
     const offsetsRef = useRef(offsets)
-    // True from the moment a drag is committed until Lua has acknowledged the
-    // matching save. See the "qbhud:layoutMode" handler for what it's for.
-    const unsavedRef = useRef(false)
+    // Snapshot taken on entry. Dragging only changes the preview; Cancel puts
+    // this exact map back, while Confirm sends the current map to Lua once.
+    const initialOffsetsRef = useRef<Record<string, HudLayoutOffset>>(DEFAULT_LAYOUT.offsets)
 
     const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
         offsetsRef.current = next
         setOffsets(next)
     }, [])
 
-    // Fire-and-forget on purpose: this is presentation geometry, and Lua
-    // re-validates and clamps every value before it reaches KVP (see
-    // client/hud.lua's writeLayout), so there is nothing in the response for
-    // the page to apply -- the layout it already rendered IS the answer.
-    const saveOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
-        unsavedRef.current = true
-        fetchNui("qbhud:saveLayout", next)
-            .then(() => {
-                unsavedRef.current = false
-            })
-            .catch((error) => {
-                console.error("[qbhud] qbhud:saveLayout failed:", error)
-            })
-    }, [])
-
-    // The WHOLE map goes over, not just the section that moved: Lua stores
-    // one JSON blob per player and overwrites it outright, so a partial
-    // submission would delete every other section's saved position.
     const commitOffset = useCallback(
         (section: string, offset: HudLayoutOffset) => {
             const next = { ...offsetsRef.current, [section]: offset }
             applyOffsets(next)
-            saveOffsets(next)
         },
-        [applyOffsets, saveOffsets],
+        [applyOffsets],
     )
+
+    const confirm = useCallback(() => {
+        // The WHOLE map goes over: Lua stores one JSON blob per player and
+        // overwrites it outright, so a partial submission would delete every
+        // other section's saved position.
+        fetchNui("qbhud:finishLayout", { confirmed: true, offsets: offsetsRef.current }).catch((error) => {
+            console.error("[qbhud] qbhud:finishLayout failed:", error)
+        })
+    }, [])
+
+    const cancel = useCallback(() => {
+        fetchNui("qbhud:finishLayout", { confirmed: false })
+            .then(() => applyOffsets(initialOffsetsRef.current))
+            .catch((error) => {
+                console.error("[qbhud] qbhud:finishLayout failed:", error)
+            })
+    }, [applyOffsets])
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (!payload) return
@@ -209,13 +213,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
 
     useNuiEvent<HudLayoutModePayload>("qbhud:layoutMode", (payload) => {
         if (typeof payload !== "boolean") return
+        if (payload) initialOffsetsRef.current = offsetsRef.current
         setLayoutEditing(payload)
-        // Second chance at the save, not a duplicate of it: the drag-end post
-        // is fire-and-forget, so one that failed (or that the player closed
-        // the editor on top of) would otherwise lose the move without saying
-        // so. Closing the editor is the last moment the page can resend, and
-        // re-sending an already-stored layout is a no-op in Lua.
-        if (!payload && unsavedRef.current) saveOffsets(offsetsRef.current)
     })
 
     useNuiEvent<HudLayoutResetPayload>("qbhud:layoutReset", () => {
@@ -223,7 +222,6 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         // post anything back -- it only drops what the page is holding, which
         // leaving edit mode does not do. Ignores the payload value: the
         // message arriving at all is the event.
-        unsavedRef.current = false
         applyOffsets({})
     })
 
@@ -251,8 +249,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             editing: layoutEditing,
             offsets,
             commitOffset,
+            confirm,
+            cancel,
         }),
-        [config.layout, layoutEditing, offsets, commitOffset],
+        [config.layout, layoutEditing, offsets, commitOffset, confirm, cancel],
     )
 
     // Each provider is handed the state value itself -- no useMemo wrapper

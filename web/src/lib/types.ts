@@ -89,8 +89,8 @@ export interface HudLayoutConfig {
     offsets: Record<string, HudLayoutOffset>
 }
 
-// action: "qbhud:layoutMode" -- the player toggled layout edit mode with
-// Config.layout.command. Lua owns NUI focus either side of this (see the
+// action: "qbhud:layoutMode" -- the player entered layout edit mode with
+// Config.layout.command or left through Confirm/Cancel. Lua owns NUI focus (see the
 // SetNuiFocus call beside the send), so the NUI only reacts visually and
 // starts accepting drags; it never asks for focus itself.
 export type HudLayoutModePayload = boolean
@@ -99,11 +99,6 @@ export type HudLayoutModePayload = boolean
 // Separate from "qbhud:layoutMode" because a reset also has to discard
 // offsets the NUI is holding in memory, which leaving edit mode does not.
 export type HudLayoutResetPayload = boolean
-
-// action: "qbhud:theme" -- QB.theme.tokens() from qblib, forwarded verbatim.
-// Keys are CSS custom-property names (no leading "--"); values are ready-to-
-// apply HSL-triplet strings. See qblib's modules/theme/docs.md.
-export type HudThemePayload = Record<string, string>
 
 // action: "qbhud:visibility" -- sent once on resource start (reflecting
 // whatever the bridge adapter's initial login state is) and again on every
@@ -157,6 +152,15 @@ export interface HudVitalsPayload {
     armour: number
     stamina: number
     talking: boolean
+    /** Current proximity voice mode. Missing/null when the voice resource does not expose it. */
+    voiceMode?: HudVoiceMode | null
+}
+
+export interface HudVoiceMode {
+    index: number
+    name: string
+    label: string
+    range: number
 }
 
 // action: "qbhud:update" -- the slow, framework-sourced half of the player

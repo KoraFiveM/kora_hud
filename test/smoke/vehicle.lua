@@ -11,7 +11,7 @@ local speedCalls, fuelCalls, engineCalls, lightsCalls = 0, 0, 0, 0
 _G.QB = { cache = { vehicle = function() return vehicle end } }
 _G.GetEntitySpeed = function() speedCalls = speedCalls + 1; return 10 end
 _G.GetVehicleFuelLevel = function() fuelCalls = fuelCalls + 1; return 55 end
-_G.IsVehicleEngineRunning = function() engineCalls = engineCalls + 1; return true end
+_G.GetIsVehicleEngineRunning = function() engineCalls = engineCalls + 1; return true end
 _G.GetVehicleLightsState = function() lightsCalls = lightsCalls + 1; return true, true, false end
 
 dofile(repoRoot .. 'client/vehicle.lua')

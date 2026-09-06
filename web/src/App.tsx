@@ -1,4 +1,3 @@
-import { HudThemeSynchronizer } from "@/components/theme/HudThemeSynchronizer"
 import { CashBank } from "@/components/hud/CashBank"
 import { HealthArmour } from "@/components/hud/HealthArmour"
 import { HungerThirst } from "@/components/hud/HungerThirst"
@@ -84,15 +83,10 @@ function HudContent() {
     )
 }
 
-/**
- * Headless root. HudThemeSynchronizer stays mounted regardless of visibility
- * (it renders nothing itself, just keeps CSS variables in sync) so the theme
- * is already correct the instant the HUD becomes visible.
- */
+/** Headless root; qbtheme's shared loader remains mounted outside React. */
 export default function App() {
     return (
         <HudStateProvider>
-            <HudThemeSynchronizer />
             <HudContent />
         </HudStateProvider>
     )

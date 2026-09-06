@@ -42,7 +42,8 @@
 -- https://qbhud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
 -- a permanent 404 that leaves the HUD stuck on DEFAULT_VISIBLE=false. Same
 -- reasoning and same fix as qbloading/client.lua and qbinventory/client/ui.lua.
--- QB.cache/QB.theme/QB.status stay on the proxy: pure Lua, no NUI natives.
+-- QB.cache/QB.status stay on the proxy; qbtheme's imported bridge owns theme
+-- delivery for this frame.
 local function send(action, data)
     SendNUIMessage({ action = action, data = data })
 end
@@ -191,12 +192,6 @@ local function writeLayout(payload)
     return true
 end
 
-RegisterNUICallback('qbhud:saveLayout', function(payload, cb)
-    -- Answer first and unconditionally, same reasoning as qbhud:ready above.
-    cb({})
-    pcall(writeLayout, payload)
-end)
-
 -- Layout edit mode is an explicit mode, entered by command, rather than the HUD
 -- being draggable all the time. The HUD is pointer-transparent during play and
 -- has to stay that way -- a permanently grabbable HUD would eat the clicks the
@@ -207,10 +202,33 @@ RegisterCommand(LAYOUT.command or 'hudlayout', function()
         return
     end
 
-    layoutEditing = not layoutEditing
-    SetNuiFocus(layoutEditing, layoutEditing)
-    send('qbhud:layoutMode', layoutEditing)
+    -- Once open, the editor owns its exit path: the player must explicitly
+    -- confirm or cancel in the NUI. Running the command again must not silently
+    -- commit or discard a layout whose result is still being reviewed.
+    if layoutEditing then return end
+
+    layoutEditing = true
+    SetNuiFocus(true, true)
+    send('qbhud:layoutMode', true)
 end, false)
+
+-- Confirm and Cancel are deliberately one callback. Both release NUI focus;
+-- only Confirm supplies geometry to persist. Until this callback arrives all
+-- dragging is merely a browser-side preview, so Cancel never needs a rollback
+-- write and cannot briefly persist a layout the player rejected.
+RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
+    -- Answer first and unconditionally, same reasoning as qbhud:ready above.
+    cb({})
+    if not layoutEditing then return end
+
+    if type(payload) == 'table' and payload.confirmed == true then
+        pcall(writeLayout, payload.offsets)
+    end
+
+    layoutEditing = false
+    SetNuiFocus(false, false)
+    send('qbhud:layoutMode', false)
+end)
 
 -- `reset` is separate from the editor rather than a button inside it: a player
 -- whose layout put a section somewhere unreachable needs a way out that does
@@ -398,6 +416,7 @@ local vitals = {
     armour = 0,
     stamina = 100,
     talking = false,
+    voiceMode = nil,
 }
 
 local function round(value)
@@ -413,6 +432,7 @@ local function flushVitals()
         armour = vitals.armour,
         stamina = vitals.stamina,
         talking = vitals.talking,
+        voiceMode = vitals.voiceMode,
     })
 end
 
@@ -653,6 +673,7 @@ end
 QB.cache.onChange("health", function(value) setVital('health', round(value)) end)
 QB.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
 Voice.onChange(function(value) setVital('talking', value == true) end)
+Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 
 -- Stamina moves continuously while sprinting -- it belongs to no framework
 -- delta and no adapter can announce it -- which makes it far and away the
@@ -828,13 +849,6 @@ sendInitialState = function()
             offsets = readLayout(),
         },
     })
-
-    -- QB.theme.tokens() is a cross-resource call into qblib; a qblib restart
-    -- must not abort the visibility send that follows it (that used to be
-    -- swallowed by QB.nui.registerCallback's own pcall). A missing theme just
-    -- leaves the NUI on the defaults in web/src/styles/globals.css.
-    local ok, tokens = pcall(function() return QB.theme.tokens() end)
-    if ok and type(tokens) == 'table' then send("qbhud:theme", tokens) end
 
     send("qbhud:visibility", visible)
 

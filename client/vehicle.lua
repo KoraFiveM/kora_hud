@@ -23,10 +23,10 @@ function Vehicle.getSnapshot(vehicle)
     if vehicle == nil then vehicle = QB.cache.vehicle() end
     if not vehicle then return nil end
 
-    -- GetVehicleFuelLevel and IsVehicleEngineRunning are not guaranteed on all
+    -- GetVehicleFuelLevel and GetIsVehicleEngineRunning are not guaranteed on all
     -- FiveM builds; degrade each optional value instead of losing the entire HUD.
     local fuelOk, fuel = pcall(GetVehicleFuelLevel, vehicle)
-    local engineOk, engineOn = pcall(IsVehicleEngineRunning, vehicle)
+    local engineOk, engineOn = pcall(GetIsVehicleEngineRunning, vehicle)
     local lightsOk, _, lightsOn, highbeamsOn = pcall(GetVehicleLightsState, vehicle)
     -- qbfuel is the one authoritative classifier for standard and addon EVs.
     -- Its export is pcall'd so a transient resource restart only makes this

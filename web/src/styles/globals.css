@@ -2,55 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Static defaults, overwritten at runtime by HudThemeSynchronizer once
- * qb-hud:theme arrives (see components/theme/HudThemeSynchronizer.tsx) --
- * same neutral-charcoal QBCore palette as qblib's own web/src/styles/globals.css,
- * so the HUD looks right even before that first message lands.
- */
-@layer base {
-  :root {
-    --background: 0 0% 6.3%;
-    --foreground: 0 0% 96.1%;
-
-    --primary: 348 83.3% 47.1%;
-    --primary-foreground: 0 0% 100%;
-
-    --muted: 0 0% 14.1%;
-    --muted-foreground: 0 0% 58%;
-
-    --destructive: 0 85.1% 60.4%;
-    --destructive-foreground: 0 0% 6.3%;
-
-    --border: 0 0% 20.4%;
-    --input: 0 0% 40%;
-    --ring: 348 83.3% 47.1%;
-
-    --radius: 0.625rem;
-
-    --brand-hover: 348 83.2% 42%;
-    --brand-pressed: 347.9 82.8% 36.5%;
-    --brand-soft: 348 83.3% 47.1% / 0.14;
-    --brand-border: 348 83.3% 47.1% / 0.45;
-    /* HUD surfaces sit over live gameplay: enough charcoal for reliable text,
-       but deliberately translucent so they do not read as black UI blocks. */
-    --hud: 0 0% 8% / 0.64;
-    /* Armour is deliberately blue: it represents protection, not the
-       good/bad health banding used by the other radial gauges. */
-    --armour: 210 100% 62%;
-    --success: 142.1 70.6% 45.3%;
-    --warning: 37.7 92.1% 50.2%;
-    --info: 0 0% 83.1%;
-  }
-}
-
-@layer base {
-  body {
-    color: hsl(var(--foreground));
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-}
-
 @layer utilities {
   /* Gameplay overlays need legibility over changing scenes, not a backdrop. */
   .overlay-text {

@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactNode } from "react"
-import { Move } from "lucide-react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Check, Move, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useHudLayout } from "@/lib/hudState"
@@ -176,13 +176,21 @@ export function MovableSection({
 }
 
 /**
- * The editor's backdrop and hint. Rendered only while the editor is open, and
- * pointer-transparent throughout: Lua already took NUI focus for this mode, so
- * nothing here needs to catch a click, and a full-screen click target would
- * swallow the mousedown that starts a drag near a section's edge.
+ * The editor's backdrop and controls. The backdrop remains pointer-transparent
+ * so it cannot swallow a drag; only the two explicit exit buttons take clicks.
  */
 export function LayoutEditorOverlay() {
     const layout = useHudLayout()
+
+    useEffect(() => {
+        if (!layout.editing) return
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") layout.cancel()
+        }
+        window.addEventListener("keydown", onKeyDown)
+        return () => window.removeEventListener("keydown", onKeyDown)
+    }, [layout.editing, layout.cancel])
+
     if (!layout.editing) return null
 
     return (
@@ -190,9 +198,27 @@ export function LayoutEditorOverlay() {
             <div className="hud-panel absolute left-1/2 top-8 -translate-x-1/2 rounded-2xl px-5 py-3 text-center overlay-text">
                 <p className="text-sm font-medium text-foreground">Drag any HUD section to move it</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                    <span className="font-mono text-foreground">/{layout.command}</span> to finish ·{" "}
-                    <span className="font-mono text-foreground">/hudlayoutreset</span> to restore the defaults
+                    Confirm to save your changes, or cancel to keep your previous layout.
                 </p>
+                <div className="pointer-events-auto mt-3 flex items-center justify-center gap-2">
+                    <button
+                        type="button"
+                        onClick={layout.cancel}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/80"
+                    >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={layout.confirm}
+                        className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                    >
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                        Confirm
+                    </button>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">Esc cancels · /hudlayoutreset restores defaults</p>
             </div>
         </div>
     )

@@ -3,7 +3,7 @@ layout: default
 title: qbhud
 ---
 
-Configurable HUD for FiveM, built on qblib's cache/theme/nui primitives. All
+Configurable HUD for FiveM, built on qblib's cache primitives and qbtheme. All
 player data (job, gang, cash, bank, hunger/thirst, stress, seatbelt) comes
 through a single adapter interface (`HudBridge`, documented in
 `shared/bridge.lua`) rather than framework calls scattered through the render
@@ -107,7 +107,7 @@ else in the panel moves.
 
 ### Let players move HUD sections
 ```
-/hudlayout        -- toggle layout edit mode
+/hudlayout        -- enter layout edit mode; Confirm or Cancel to leave
 /hudlayoutreset   -- forget the saved layout, back to the shipped positions
 ```
 ```lua
@@ -125,9 +125,10 @@ effects).
 
 `/hudlayout` is an explicit **mode**, not an always-on affordance: the HUD is a
 click-through overlay during play and has to stay that way, so it takes NUI
-focus, dims the screen and puts a drag handle on each section, then hands
-focus back and returns to pointer-transparent when toggled off. Positions are
-saved on drag end.
+focus, dims the screen and puts a drag handle on each section. **Confirm** saves
+the new positions and **Cancel** (or Escape) restores the positions from when
+the editor opened; either action hands focus back to the game. Dragging itself
+only previews the layout and does not write it.
 
 Offsets are stored as **fractions of the viewport**, not pixels, and clamped
 to ±0.45 on both axes — a layout arranged on a 3440×1440 ultrawide still lands
@@ -166,14 +167,18 @@ real seatbelt system is wired into a vehicle resource.
 -- config.lua
 Config.voice = {
     enabled  = true,
-    resource = "pma-voice",
+    resource = "qbvoice",
 }
 ```
 `client/voice.lua` reads FiveM's own `NetworkIsPlayerTalking` native, which
 reflects whichever Mumble-backed voice resource is running (pma-voice,
-saltychat, mumble-voip all work without extra integration) — `Config.voice.resource`
-just documents which one is expected to be installed; `enabled = false` is a
-master kill switch for the mic element and its sampling thread.
+saltychat, mumble-voip all work without extra integration). The configured
+resource may additionally expose `getTalkingMode() -> { index, name, label,
+range }`; when it does, the mic pill shows the current mode, signal level and
+range in metres. `qbvoice` provides that export. If it is absent or temporarily
+unavailable, the HUD safely falls back to the original mic-only indicator.
+`enabled = false` is a master kill switch for the whole indicator and its
+shared-scheduler sampling task.
 
 ## API reference
 
@@ -243,7 +248,7 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
 - `Config.bridge.adapter` — documents which adapter is loaded (`"qbcore"` by
   default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
 - `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and
-  the expected Mumble-backed voice resource.
+  the voice resource used for optional `getTalkingMode()` range details.
 - `Config.voice.interval` (200ms) — mic sampling cadence. The sample task is
   skipped entirely unless the HUD is visible and the `mic` element is on.
 - `Config.poll.*` — see "Update cadences" below.
