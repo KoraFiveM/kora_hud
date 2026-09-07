@@ -267,13 +267,19 @@ local function writeLayout(payload)
     return true
 end
 
----Pushes the saved chat composer position to qbchat when it is available.
+---Pushes the saved chat composer layout to qbchat when it is available.
 ---qbchat also reads this through getLayout when it starts after qbhud, so
 ---there is no ordering dependency between the two resources.
 local function syncChatInputLayout()
     if type(GetResourceState) ~= 'function' or GetResourceState('qbchat') ~= 'started' then return end
     if type(TriggerEvent) ~= 'function' then return end
-    TriggerEvent('qbchat:setInputLayout', readLayout().offsets.chatInput)
+    local layout = readLayout()
+    local offset = layout.offsets.chatInput or {}
+    TriggerEvent('qbchat:setInputLayout', {
+        x = offset.x or 0,
+        y = offset.y or 0,
+        scale = layout.scales.chatInput,
+    })
 end
 
 -- Layout edit mode is an explicit mode, entered by command, rather than the HUD

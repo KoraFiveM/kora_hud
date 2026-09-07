@@ -121,9 +121,9 @@ Config.layout = {
 Four HUD sections can be repositioned and resized (75%–150%), each persisted under a stable id: `gauges`
 (bottom-centre — the gauge row), `vehicle` (bottom-centre — vehicle telemetry), `identity`
 (bottom-right — mic, job/gang, money) and `status` (top-right — active status
-effects), plus `chatInput` (the qbchat composer), which can be repositioned.
+effects), plus `chatInput` (the qbchat composer), which can be repositioned and resized.
 The chat preview in the
-editor moves only the input and its command suggestions; received messages
+editor moves and scales only the input and its command suggestions; received messages
 stay in their normal position.
 
 `/hudlayout` is an explicit **mode**, not an always-on affordance: the HUD is a
@@ -142,12 +142,12 @@ for the elements inside it; the component itself stays where it was placed.
 A compact three-icon container in the centre of the screen confirms the preview,
 closes without saving, or resets to the shipped layout.
 
-Offsets are stored as **fractions of the viewport**, not pixels. Their bounds
-are aware of each section's shipped anchor, so every section can travel across
-the screen while retaining a small recovery margin at its far edge — a layout
-arranged on a 3440×1440 ultrawide still lands on screen on a 1920×1080 monitor.
-Each section's shipped corner remains its zero
-point, so a player with nothing saved sees exactly the default layout.
+Offsets are stored as **fractions of the viewport**, not pixels. The editor
+keeps each section's rendered box on screen, so a status stack can be placed
+flush with the bottom edge without its controls becoming unreachable. This also
+works correctly on scaled high-resolution displays. Each section's shipped
+corner remains its zero point, so a player with nothing saved sees exactly the
+default layout.
 
 Storage is a client-side FiveM KVP key (`Config.layout.kvpKey`), so a layout is
 per player *and per machine*: no database column, no server round trip, and

@@ -66,9 +66,9 @@ export interface HudMoneyConfig {
 /**
  * One section's position, as a FRACTION of the viewport rather than pixels: a
  * layout saved on a 3440x1440 ultrawide would put half the HUD off screen on
- * a 1920x1080 monitor otherwise. client/hud.lua clamps both axes to +/-0.45
- * on read AND on write, and the NUI clamps to the same limit while dragging
- * so a section can never be dropped somewhere it cannot be dragged back from.
+ * a 1920x1080 monitor otherwise. client/hud.lua validates each section against
+ * its anchor-aware bounds on read and write, while the editor also keeps the
+ * rendered section inside the viewport during a drag.
  */
 export interface HudLayoutOffset {
     x: number

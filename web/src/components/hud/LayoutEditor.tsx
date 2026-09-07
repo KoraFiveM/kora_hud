@@ -59,10 +59,31 @@ function clamp(section: string, axis: "x" | "y", value: number): number {
 }
 
 /**
- * Offsets are viewport FRACTIONS, so they translate in vw/vh -- a percentage
- * would resolve against the section's own width instead, making the same
- * saved layout land somewhere different for a two-row money panel than for a
- * one-row one.
+ * main.tsx renders the HUD in a smaller coordinate space and scales it up on
+ * displays above 1920×1080. Fixed children live in that coordinate space, so
+ * layout translations must be converted back to its unscaled pixels.  Without
+ * this conversion, a 50% drag on a 4K display becomes a 100% on-screen move
+ * after the root is scaled, which makes the lower and far-edge positions
+ * unreachable.
+ */
+function nuiScale(): number {
+    return Math.min(2, Math.max(0.5, Math.min(window.innerWidth / 1920, window.innerHeight / 1080)))
+}
+
+function layoutViewport(): { width: number; height: number } {
+    const scale = nuiScale()
+    return { width: window.innerWidth / scale, height: window.innerHeight / scale }
+}
+
+function clampDelta(value: number, minimum: number, maximum: number): number {
+    return Math.max(minimum, Math.min(maximum, value))
+}
+
+/**
+ * Offsets are viewport FRACTIONS. They are converted to pixels in the HUD's
+ * own coordinate space rather than CSS percentages, which would resolve
+ * against the section's own width and make the same saved layout land
+ * differently for a two-row money panel than for a one-row one.
  *
  * Centre alignment folds the cluster's own -50% shift into the same
  * transform rather than leaving it on an inner element. That keeps the
@@ -70,8 +91,10 @@ function clamp(section: string, axis: "x" | "y", value: number): number {
  * editor's outline and label are positioned against.
  */
 function sectionTransform(offset: HudLayoutOffset, centered: boolean): string {
-    const x = `${offset.x * 100}vw`
-    return `translate(${centered ? `calc(-50% + ${x})` : x}, ${offset.y * 100}vh)`
+    const viewport = layoutViewport()
+    const x = `${offset.x * viewport.width}px`
+    const y = `${offset.y * viewport.height}px`
+    return `translate(${centered ? `calc(-50% + ${x})` : x}, ${y})`
 }
 
 function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: number): string {
@@ -93,6 +116,8 @@ interface MovableSectionProps {
     position: string
     /** Classes positioning the handle so it can't overlap the screen edge. */
     handlePosition: string
+    /** Handle position once this section crosses to the opposite screen half. */
+    flippedHandlePosition?: string
     /** Layout classes for the section's own contents. */
     inner?: string
     /** True for the bottom-centre cluster; see sectionTransform. */
@@ -118,6 +143,7 @@ export function MovableSection({
     label,
     position,
     handlePosition,
+    flippedHandlePosition,
     inner,
     centerX = false,
     scaleOrigin = "center",
@@ -133,6 +159,11 @@ export function MovableSection({
     const justification = layout.justifications[id] ?? DEFAULT_JUSTIFICATIONS[id] ?? "right"
     const AlignmentIcon = justification === "left" ? AlignLeft : justification === "center" ? AlignCenter : AlignRight
     const draggable = layout.editing && layout.movable
+    const handleShouldFlip = (handlePosition.includes("top-full") && offset.y > 0.5)
+        || (handlePosition.includes("bottom-full") && offset.y < -0.5)
+    const activeHandlePosition = handleShouldFlip && flippedHandlePosition
+        ? flippedHandlePosition
+        : handlePosition
 
     function handleMoveMouseDown(event: React.MouseEvent<HTMLElement>) {
         if (!draggable) return
@@ -145,15 +176,32 @@ export function MovableSection({
         const startX = event.clientX
         const startY = event.clientY
         const base = offset
+        const startRect = node.getBoundingClientRect()
         let latest = base
 
         // Arrow consts, not function declarations: a hoisted declaration is
         // callable before the `node` null-check above, so TypeScript will not
         // carry that check into it.
         const onMove = (moveEvent: MouseEvent) => {
+            // Keep the visible section inside the real browser viewport. This
+            // is deliberately measured from its rendered box rather than a
+            // fixed fraction: status effects, money rows and scaled sections
+            // all have different dimensions. It lets a status stack sit at
+            // the bottom edge without letting its controls disappear beyond
+            // it.
+            const deltaX = clampDelta(
+                moveEvent.clientX - startX,
+                -startRect.left,
+                window.innerWidth - startRect.right,
+            )
+            const deltaY = clampDelta(
+                moveEvent.clientY - startY,
+                -startRect.top,
+                window.innerHeight - startRect.bottom,
+            )
             latest = {
-                x: clamp(id, "x", base.x + (moveEvent.clientX - startX) / window.innerWidth),
-                y: clamp(id, "y", base.y + (moveEvent.clientY - startY) / window.innerHeight),
+                x: clamp(id, "x", base.x + deltaX / window.innerWidth),
+                y: clamp(id, "y", base.y + deltaY / window.innerHeight),
             }
             // Written straight to the node instead of through state: a drag
             // fires a mousemove per frame, and routing each one through React
@@ -246,7 +294,7 @@ export function MovableSection({
                     <div
                         className={cn(
                             "hud-panel absolute flex items-center gap-1 rounded-full p-1 overlay-text",
-                            handlePosition,
+                            activeHandlePosition,
                         )}
                     >
                         <button
@@ -258,17 +306,17 @@ export function MovableSection({
                         >
                             <Move className="h-3.5 w-3.5" aria-hidden />
                         </button>
+                        <button
+                            type="button"
+                            aria-label={`Resize ${label}; drag left or right`}
+                            title="Drag left or right to resize"
+                            onMouseDown={handleResizeMouseDown}
+                            className="flex h-7 w-7 cursor-ew-resize items-center justify-center rounded-full text-primary"
+                        >
+                            <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                        </button>
                         {!editorOnly && (
                             <>
-                                <button
-                                    type="button"
-                                    aria-label={`Resize ${label}; drag left or right`}
-                                    title="Drag left or right to resize"
-                                    onMouseDown={handleResizeMouseDown}
-                                    className="flex h-7 w-7 cursor-ew-resize items-center justify-center rounded-full text-primary"
-                                >
-                                    <Maximize2 className="h-3.5 w-3.5" aria-hidden />
-                                </button>
                                 <button
                                     type="button"
                                     aria-label={`Content alignment: ${justification}. Click to cycle alignment.`}

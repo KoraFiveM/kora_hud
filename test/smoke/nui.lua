@@ -864,13 +864,14 @@ harness.test('a component can be resized without moving it', function()
     harness.assertEqual(config.layout.offsets.status.y, 0, 'resizing alone keeps the shipped vertical position')
 end)
 
-harness.test('the chat input position is saved with the HUD layout', function()
+harness.test('the chat input layout is saved with the HUD layout', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
     hud.callbacks['qbhud:finishLayout']({
         confirmed = true,
         offsets = { chatInput = { x = 9, y = -9 } },
+        scales = { chatInput = 1.25 },
     }, function() end)
 
     local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
@@ -878,6 +879,8 @@ harness.test('the chat input position is saved with the HUD layout', function()
         'the chat composer can reach the far right of the viewport')
     harness.assertEqual(config.layout.offsets.chatInput.y, -0.95,
         'and the top edge while retaining a recovery margin')
+    harness.assertEqual(config.layout.scales.chatInput, 1.25,
+        'and its size is retained for qbchat to apply')
 end)
 
 harness.test('a submitted layout is re-validated, never merely stored', function()

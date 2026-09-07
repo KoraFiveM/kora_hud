@@ -46,8 +46,9 @@ function HudContent() {
             <MovableSection
                 id={HUD_SECTIONS.gauges}
                 label="Gauges"
-                position="bottom-20 left-1/2"
+                position="bottom-20 left-1/2 max-[520px]:bottom-16"
                 handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
+                flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
                 inner="gap-2"
                 centerX
                 scaleOrigin="center bottom"
@@ -66,8 +67,9 @@ function HudContent() {
             <MovableSection
                 id={HUD_SECTIONS.vehicle}
                 label="Vehicle"
-                position="bottom-4 left-1/2"
+                position="bottom-4 left-1/2 max-[520px]:bottom-2"
                 handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
+                flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
                 centerX
                 scaleOrigin="center bottom"
             >
@@ -76,8 +78,9 @@ function HudContent() {
             <MovableSection
                 id={HUD_SECTIONS.identity}
                 label="Player"
-                position="bottom-4 right-4"
+                position="bottom-4 right-4 max-[520px]:bottom-2 max-[520px]:right-2"
                 handlePosition="bottom-full right-0 mb-3"
+                flippedHandlePosition="top-full right-0 mt-3"
                 inner="gap-2"
                 scaleOrigin="right bottom"
             >
@@ -85,13 +88,14 @@ function HudContent() {
                 <JobGang />
                 <CashBank />
             </MovableSection>
-            {/* Handle BELOW this one: the section is pinned to the top of the
-                screen, so a handle above it would render off the top edge. */}
+            {/* The editor moves this handle to the inward-facing side after
+                the section crosses the screen, so it always remains usable. */}
             <MovableSection
                 id={HUD_SECTIONS.status}
                 label="Status"
-                position="right-4 top-4"
+                position="right-4 top-4 max-[520px]:right-2 max-[520px]:top-2"
                 handlePosition="top-full right-0 mt-3"
+                flippedHandlePosition="bottom-full right-0 mb-3"
                 inner="gap-1.5"
                 scaleOrigin="right top"
             >
@@ -99,16 +103,17 @@ function HudContent() {
             </MovableSection>
             {/* qbchat owns the live composer in a separate NUI frame. This
                 preview is only mounted while editing, but writes the shared
-                offset that qbchat applies after Confirm. */}
+                position and scale that qbchat applies after Confirm. */}
             <MovableSection
                 id={HUD_SECTIONS.chatInput}
                 label="Chat input"
-                position="left-4 top-4"
+                position="left-4 top-4 max-[520px]:left-2 max-[520px]:top-2"
                 handlePosition="top-full left-0 mt-3"
+                flippedHandlePosition="bottom-full left-0 mb-3"
                 scaleOrigin="left top"
                 editorOnly
             >
-                <div className="h-10 w-[min(480px,38vw)] rounded-[10px] border border-input bg-background/95 px-3 text-sm leading-10 text-muted-foreground">
+                <div className="h-10 w-[min(480px,38vw)] max-[520px]:w-[calc(100vw-1rem)] rounded-[10px] border border-input bg-background/95 px-3 text-sm leading-10 text-muted-foreground">
                     Type a message or /command
                 </div>
             </MovableSection>
