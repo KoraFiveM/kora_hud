@@ -113,7 +113,7 @@ function HudContent() {
                 scaleOrigin="left top"
                 editorOnly
             >
-                <div className="h-10 w-[min(480px,38vw)] max-[520px]:w-[calc(100vw-1rem)] rounded-[10px] border border-input bg-background/95 px-3 text-sm leading-10 text-muted-foreground">
+                <div className="h-12 w-[min(480px,38vw)] max-[520px]:w-[calc(100vw-1rem)] rounded-[10px] bg-background/95 px-3 text-sm leading-[3rem] text-muted-foreground">
                     Type a message or /command
                 </div>
             </MovableSection>

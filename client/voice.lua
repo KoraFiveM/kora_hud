@@ -132,11 +132,11 @@ end
 ---Registers `handler(talking)` to run whenever the talking state flips.
 ---@param handler fun(talking: boolean)
 function Voice.onChange(handler)
-    table.insert(listeners, handler)
+    listeners[#listeners + 1] = handler
 end
 
 ---Registers `handler(mode)` to run whenever the proximity mode changes.
 ---@param handler fun(mode: table|nil)
 function Voice.onModeChange(handler)
-    table.insert(modeListeners, handler)
+    modeListeners[#modeListeners + 1] = handler
 end
