@@ -183,15 +183,16 @@ end
 ---or hand-edited KVP value must cost the player their layout, not their HUD.
 ---@return table
 local function readLayout()
-    if LAYOUT.movable == false then return { offsets = {}, scales = {}, justifications = {} } end
+    if LAYOUT.movable == false then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
 
     local raw = GetResourceKvpString(LAYOUT_KVP)
-    if type(raw) ~= 'string' or raw == '' then return { offsets = {}, scales = {}, justifications = {} } end
+    if type(raw) ~= 'string' or raw == '' then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
 
     local ok, decoded = pcall(json.decode, raw)
-    if not ok or type(decoded) ~= 'table' then return { offsets = {}, scales = {}, justifications = {} } end
+    if not ok or type(decoded) ~= 'table' then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
 
     local offsets, scales, justifications = {}, {}, {}
+    local gaugesBottomAnchored = not (type(decoded.gauges) == 'table' and decoded.gauges.bottomAnchored == false)
     for section, entry in pairs(decoded) do
         if type(section) == 'string' and type(entry) == 'table' then
             local justification = layoutJustification(entry.justification)
@@ -202,7 +203,7 @@ local function readLayout()
             if justification then justifications[section] = justification end
         end
     end
-    return { offsets = offsets, scales = scales, justifications = justifications }
+    return { offsets = offsets, scales = scales, justifications = justifications, gaugesBottomAnchored = gaugesBottomAnchored }
 end
 
 ---Persists a layout the NUI submitted. Re-validated here, not merely stored:
@@ -217,6 +218,7 @@ local function writeLayout(payload)
     local offsets = type(payload.offsets) == 'table' and payload.offsets or {}
     local scales = type(payload.scales) == 'table' and payload.scales or {}
     local requestedJustifications = type(payload.justifications) == 'table' and payload.justifications or {}
+    local gaugesBottomAnchored = payload.gaugesBottomAnchored ~= false
     local clean = {}
     local count = 0
     for section, offset in pairs(offsets) do
@@ -261,6 +263,18 @@ local function writeLayout(payload)
                 if entry then entry.scale = scale end
             end
         end
+    end
+
+    -- Bottom anchoring is opt-out, so old KVPs retain the improved default.
+    -- Keep it beside the gauges' other saved settings rather than introducing
+    -- a second preference blob for one Boolean.
+    if not gaugesBottomAnchored then
+        local entry = clean.gauges
+        if not entry and count < 16 then
+            entry = { x = 0, y = 0 }
+            clean.gauges = entry
+        end
+        if entry then entry.bottomAnchored = false end
     end
 
     SetResourceKvp(LAYOUT_KVP, json.encode(clean))
@@ -332,6 +346,24 @@ RegisterCommand('hudlayoutreset', function()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
     QB.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
+end, false)
+
+-- Kept as a local, session-only choice: /id is a quick way to identify
+-- yourself to another player or staff member, not a layout preference that
+-- should unexpectedly reappear after reconnecting.
+local playerIdVisible = false
+RegisterCommand('id', function()
+    if playerIdVisible then
+        playerIdVisible = false
+        send('qbhud:playerId')
+        return
+    end
+
+    local serverId = GetPlayerServerId(PlayerId())
+    if type(serverId) ~= 'number' or serverId <= 0 then return end
+
+    playerIdVisible = true
+    send('qbhud:playerId', serverId)
 end, false)
 
 -- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
@@ -947,6 +979,7 @@ sendInitialState = function()
             offsets = savedLayout.offsets,
             scales = savedLayout.scales,
             justifications = savedLayout.justifications,
+            gaugesBottomAnchored = savedLayout.gaugesBottomAnchored,
         },
     })
 

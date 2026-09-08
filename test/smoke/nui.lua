@@ -84,6 +84,11 @@ local function loadHud(opts)
     _G.exports = setmetatable({}, { __call = function(_, name, fn) exported[name] = fn end })
     _G.GetEntityMaxHealth = function() return opts.maxHealth or 200 end
     _G.GetPlayerStamina = function() return 100 end
+    _G.PlayerId = function() return 3 end
+    _G.GetPlayerServerId = function(playerId)
+        harness.assertEqual(playerId, 3, 'the ID command must resolve the local player only')
+        return opts.serverId or 17
+    end
 
     -- client/hud.lua requests the minimap scaleform at load time (to suppress
     -- the engine's own health/armour cluster via SETUP_HEALTH_ARMOUR) and then
@@ -806,6 +811,20 @@ harness.test('the layout editor requires an explicit confirm or cancel to releas
     harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'cancel persists none of the previewed layout')
 end)
 
+harness.test('the id command toggles the local player ID badge', function()
+    local hud = loadHud({ bridgePush = true, serverId = 42 })
+    hud.reset()
+
+    hud.commands.id()
+    harness.assertTrue(hud.contains('qbhud:playerId'), 'the first use tells the NUI to show an ID badge')
+    harness.assertEqual(hud.sent[#hud.sent].data, 42, 'the badge receives this player\'s server ID')
+
+    hud.reset()
+    hud.commands.id()
+    harness.assertTrue(hud.contains('qbhud:playerId'), 'the second use tells the NUI to hide the badge')
+    harness.assertEqual(hud.sent[#hud.sent].data, nil, 'hiding deliberately sends no ID value')
+end)
+
 harness.test('a submitted layout is persisted as viewport fractions', function()
     local hud = loadHud({ bridgePush = true })
 
@@ -830,6 +849,23 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     harness.assertEqual(config.layout.offsets.gauges.y, -0.2, 'on both axes')
     harness.assertEqual(config.layout.scales.gauges, 1.25, 'and its resized scale is seeded too')
     harness.assertEqual(config.layout.justifications.gauges, 'left', 'and its chosen alignment is seeded too')
+end)
+
+harness.test('gauge bottom anchoring defaults on and can be disabled per player', function()
+    local hud = loadHud({ bridgePush = true })
+    harness.assertTrue(configPayload(hud).layout.gaugesBottomAnchored,
+        'a player with no saved layout gets the bottom-anchored gauge row')
+
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = {},
+        gaugesBottomAnchored = false,
+    }, function() end)
+
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertFalse(config.layout.gaugesBottomAnchored,
+        'turning off the anchor survives a reconnect')
 end)
 
 harness.test('layout alignment is validated without changing component placement', function()

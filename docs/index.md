@@ -109,6 +109,7 @@ else in the panel moves.
 ```
 /hudlayout        -- enter layout edit mode; Confirm or Cancel to leave
 /hudlayoutreset   -- forget the saved layout, back to the shipped positions
+/id               -- show or hide your local server ID in the player HUD
 ```
 ```lua
 -- config.lua
@@ -136,9 +137,12 @@ the editor opened; either action hands focus back to the game. Dragging itself
 only previews the layout and does not write it.
 
 There is no editor panel across the top of the HUD. Each resizable section has
-its own attached Move, Resize and Align icons: drag Move to reposition, drag
-Resize left or right to scale, and click Align to cycle Left, Centre and Right
+its own attached Move, Resize and Align icons: drag Move to reposition (hold
+Control to snap to a 5% viewport grid; hold Shift to snap to 45° angles), drag Resize left or right to scale, and click Align to cycle Left, Centre and Right
 for the elements inside it; the component itself stays where it was placed.
+The gauge row also has an Anchor toggle. It is on by default, keeping gauges
+near the bottom of the screen while on foot, then moving them above the vehicle
+panel as it slides in. Turn it off to keep gauges at their fixed layout position.
 A compact three-icon container in the centre of the screen confirms the preview,
 closes without saving, or resets to the shipped layout.
 

@@ -6,6 +6,7 @@ import type {
     HudLayoutModePayload,
     HudLayoutOffset,
     HudLayoutResetPayload,
+    HudPlayerIdPayload,
     HudUpdatePayload,
     HudVehiclePayload,
     HudVisibilityPayload,
@@ -34,7 +35,7 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     // pre-existing behaviour, so defaulting to them means the pre-config
     // window looks like the HUD rather than like a different one.
     money: { scrollAccounts: false, scrollAccountsTime: 5000 },
-    layout: { movable: true, command: "hudlayout", offsets: {}, scales: {}, justifications: {} },
+    layout: { movable: true, command: "hudlayout", offsets: {}, scales: {}, justifications: {}, gaugesBottomAnchored: true },
 }
 
 const DEFAULT_VITALS: HudVitalsPayload = {
@@ -61,6 +62,7 @@ const DEFAULT_UPDATE: HudUpdatePayload = {
 // client/hud.lua's pushVehicleUpdate) so vehicle telemetry can refresh on its
 // own faster cadence without dragging the rest of the HUD along with it.
 const DEFAULT_VEHICLE: HudVehiclePayload = null
+const DEFAULT_PLAYER_ID: HudPlayerIdPayload = null
 
 // Hidden until Lua says otherwise: client/hud.lua sends "qbhud:visibility"
 // synchronously on resource start regardless of adapter (true immediately for
@@ -86,6 +88,8 @@ export interface HudLayoutState {
     offsets: Record<string, HudLayoutOffset>
     scales: Record<string, number>
     justifications: Record<string, "left" | "center" | "right">
+    /** Whether gauges share the bottom anchor with the vehicle panel. */
+    gaugesBottomAnchored: boolean
     /**
      * Called once per finished drag with that section's new offset. Updates
      * the page preview only; the NUI holds no authority over persistence until
@@ -96,6 +100,8 @@ export interface HudLayoutState {
     commitScale: (section: string, scale: number) => void
     /** Preview alignment of a component's contents until confirmation. */
     commitJustification: (section: string, justification: "left" | "center" | "right") => void
+    /** Preview the gauges' bottom-anchor preference until confirmation. */
+    setGaugesBottomAnchored: (bottomAnchored: boolean) => void
     /** Preview the shipped layout until the player confirms it. */
     resetToDefaults: () => void
     /** Persist the preview and leave edit mode. */
@@ -111,9 +117,11 @@ const DEFAULT_LAYOUT: HudLayoutState = {
     offsets: {},
     scales: {},
     justifications: {},
+    gaugesBottomAnchored: true,
     commitOffset: () => {},
     commitScale: () => {},
     commitJustification: () => {},
+    setGaugesBottomAnchored: () => {},
     resetToDefaults: () => {},
     confirm: () => {},
     cancel: () => {},
@@ -133,6 +141,7 @@ const HudConfigContext = createContext<HudConfigPayload>(DEFAULT_CONFIG)
 const HudVitalsContext = createContext<HudVitalsPayload>(DEFAULT_VITALS)
 const HudUpdateContext = createContext<HudUpdatePayload>(DEFAULT_UPDATE)
 const HudVehicleContext = createContext<HudVehiclePayload>(DEFAULT_VEHICLE)
+const HudPlayerIdContext = createContext<HudPlayerIdPayload>(DEFAULT_PLAYER_ID)
 const HudVisibleContext = createContext<boolean>(DEFAULT_VISIBLE)
 const HudLayoutContext = createContext<HudLayoutState>(DEFAULT_LAYOUT)
 
@@ -151,11 +160,13 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const [vitals, setVitals] = useState<HudVitalsPayload>(DEFAULT_VITALS)
     const [update, setUpdate] = useState<HudUpdatePayload>(DEFAULT_UPDATE)
     const [vehicle, setVehicle] = useState<HudVehiclePayload>(DEFAULT_VEHICLE)
+    const [playerId, setPlayerId] = useState<HudPlayerIdPayload>(DEFAULT_PLAYER_ID)
     const [visible, setVisible] = useState<boolean>(DEFAULT_VISIBLE)
     const [layoutEditing, setLayoutEditing] = useState(false)
     const [offsets, setOffsets] = useState<Record<string, HudLayoutOffset>>(DEFAULT_LAYOUT.offsets)
     const [scales, setScales] = useState<Record<string, number>>(DEFAULT_LAYOUT.scales)
     const [justifications, setJustifications] = useState<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
+    const [gaugesBottomAnchored, setGaugesBottomAnchoredState] = useState(DEFAULT_LAYOUT.gaugesBottomAnchored)
 
     // Mirrors `offsets` for the callbacks below, which run from a mouseup
     // listener and from a wire handler rather than from a render -- both need
@@ -169,6 +180,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const initialScalesRef = useRef<Record<string, number>>(DEFAULT_LAYOUT.scales)
     const justificationsRef = useRef(justifications)
     const initialJustificationsRef = useRef<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
+    const gaugesBottomAnchoredRef = useRef(gaugesBottomAnchored)
+    const initialGaugesBottomAnchoredRef = useRef(DEFAULT_LAYOUT.gaugesBottomAnchored)
 
     const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
         offsetsRef.current = next
@@ -204,11 +217,17 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         [applyJustifications],
     )
 
+    const setGaugesBottomAnchored = useCallback((bottomAnchored: boolean) => {
+        gaugesBottomAnchoredRef.current = bottomAnchored
+        setGaugesBottomAnchoredState(bottomAnchored)
+    }, [])
+
     const resetToDefaults = useCallback(() => {
         applyOffsets({})
         applyScales({})
         applyJustifications({})
-    }, [applyOffsets, applyScales, applyJustifications])
+        setGaugesBottomAnchored(true)
+    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored])
 
     const confirm = useCallback(() => {
         // The WHOLE map goes over: Lua stores one JSON blob per player and
@@ -219,6 +238,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             offsets: offsetsRef.current,
             scales: scalesRef.current,
             justifications: justificationsRef.current,
+            gaugesBottomAnchored: gaugesBottomAnchoredRef.current,
         }).catch((error) => {
             console.error("[qbhud] qbhud:finishLayout failed:", error)
         })
@@ -230,11 +250,12 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 applyOffsets(initialOffsetsRef.current)
                 applyScales(initialScalesRef.current)
                 applyJustifications(initialJustificationsRef.current)
+                setGaugesBottomAnchored(initialGaugesBottomAnchoredRef.current)
             })
             .catch((error) => {
                 console.error("[qbhud] qbhud:finishLayout failed:", error)
             })
-    }, [applyOffsets, applyScales, applyJustifications])
+    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored])
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (!payload) return
@@ -249,6 +270,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         applyScales(seededScales && typeof seededScales === "object" ? seededScales : {})
         const seededJustifications = payload.layout?.justifications
         applyJustifications(seededJustifications && typeof seededJustifications === "object" ? seededJustifications : {})
+        setGaugesBottomAnchored(payload.layout?.gaugesBottomAnchored !== false)
     })
 
     useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
@@ -266,6 +288,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         setVehicle(payload ?? null)
     })
 
+    useNuiEvent<HudPlayerIdPayload>("qbhud:playerId", (payload) => {
+        setPlayerId(typeof payload === "number" && payload > 0 ? payload : null)
+    })
+
     useNuiEvent<HudVisibilityPayload>("qbhud:visibility", (payload) => {
         if (typeof payload === "boolean") setVisible(payload)
     })
@@ -276,6 +302,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             initialOffsetsRef.current = offsetsRef.current
             initialScalesRef.current = scalesRef.current
             initialJustificationsRef.current = justificationsRef.current
+            initialGaugesBottomAnchoredRef.current = gaugesBottomAnchoredRef.current
         }
         setLayoutEditing(payload)
     })
@@ -288,6 +315,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         applyOffsets({})
         applyScales({})
         applyJustifications({})
+        setGaugesBottomAnchored(true)
     })
 
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
@@ -315,14 +343,16 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             offsets,
             scales,
             justifications,
+            gaugesBottomAnchored,
             commitOffset,
             commitScale,
             commitJustification,
+            setGaugesBottomAnchored,
             resetToDefaults,
             confirm,
             cancel,
         }),
-        [config.layout, layoutEditing, offsets, scales, justifications, commitOffset, commitScale, commitJustification, resetToDefaults, confirm, cancel],
+        [config.layout, layoutEditing, offsets, scales, justifications, gaugesBottomAnchored, commitOffset, commitScale, commitJustification, setGaugesBottomAnchored, resetToDefaults, confirm, cancel],
     )
 
     // Each provider is handed the state value itself -- no useMemo wrapper
@@ -334,7 +364,9 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 <HudVisibleContext.Provider value={visible}>
                     <HudVitalsContext.Provider value={vitals}>
                         <HudUpdateContext.Provider value={update}>
-                            <HudVehicleContext.Provider value={vehicle}>{children}</HudVehicleContext.Provider>
+                            <HudVehicleContext.Provider value={vehicle}>
+                                <HudPlayerIdContext.Provider value={playerId}>{children}</HudPlayerIdContext.Provider>
+                            </HudVehicleContext.Provider>
                         </HudUpdateContext.Provider>
                     </HudVitalsContext.Provider>
                 </HudVisibleContext.Provider>
@@ -361,6 +393,11 @@ export function useHudUpdate() {
 /** Vehicle telemetry, or null on foot. */
 export function useHudVehicle() {
     return useContext(HudVehicleContext)
+}
+
+/** Local server ID shown only after the player runs `/id`. */
+export function useHudPlayerId() {
+    return useContext(HudPlayerIdContext)
 }
 
 /** Whether the HUD should render at all (login state and the show/hide exports). */

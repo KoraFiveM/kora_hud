@@ -1,23 +1,24 @@
 import { BatteryCharging, Fuel, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
 import { useHudConfig, useHudVehicle } from "@/lib/hudState"
+import { cn } from "@/lib/cn"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
 
-// Only rendered while `vehicle` (from the separate "qbhud:vehicle" message,
-// sent faster than "qbhud:update" -- see client/hud.lua's pushVehicleUpdate)
-// is present -- client/hud.lua sends null on foot -- and the vehicle element
-// is enabled.
+// The panel retains its geometry while hidden so it can translate in from the
+// bottom instead of popping into existence when client/hud.lua sends a vehicle
+// snapshot. It remains visually and accessibly absent while on foot.
 export function VehicleInfo() {
     const config = useHudConfig()
     const vehicle = useHudVehicle()
-    if (!config.elements.vehicle || !vehicle) return null
+    if (!config.elements.vehicle) return null
 
-    const { speed, fuel, fuelKind, engineOn, headlights, seatbelt } = vehicle
+    const active = vehicle !== null
+    const { speed = 0, fuel = null, fuelKind = "fuel", engineOn = false, headlights = "off", seatbelt = false } = vehicle ?? {}
     const electric = fuelKind === "charge"
 
     return (
-        <div className="flex items-center gap-3">
+        <div className={cn("flex items-center gap-3 transition-[opacity,transform] duration-200 ease-out", active ? "translate-y-0 opacity-100" : "translate-y-[calc(100%+1rem)] opacity-0")} aria-hidden={!active}>
             {fuel !== null && (
                 <RadialGauge icon={electric ? BatteryCharging : Fuel} value={fuel} defaultValue={100} label={electric ? "Charge" : "Fuel"} color={statColor(fuel)} size={36} stroke={3} />
             )}

@@ -93,6 +93,8 @@ export interface HudLayoutConfig {
     scales: Record<string, number>
     /** Per-section alignment for the elements inside that section. */
     justifications: Record<string, HudLayoutJustification>
+    /** True keeps gauges at the screen bottom until vehicle telemetry appears. */
+    gaugesBottomAnchored: boolean
 }
 
 // action: "qbhud:layoutMode" -- the player entered layout edit mode with
@@ -111,6 +113,10 @@ export type HudLayoutResetPayload = boolean
 // login/logout transition. Absent an adapter with a login concept, this is
 // always true. See shared/bridge.lua's HudBridge.isLoggedIn/onLoginChange.
 export type HudVisibilityPayload = boolean
+
+// action: "qbhud:playerId" -- emitted by the local `/id` command. A missing
+// data value means the badge should be hidden.
+export type HudPlayerIdPayload = number | null
 
 export interface HudJob {
     name: string

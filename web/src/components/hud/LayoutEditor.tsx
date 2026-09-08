@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { AlignCenter, AlignLeft, AlignRight, Check, Maximize2, Move, RotateCcw, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Maximize2, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useHudLayout } from "@/lib/hudState"
@@ -38,6 +38,8 @@ const SECTION_BOUNDS: Record<string, { minX: number; maxX: number; minY: number;
 const FALLBACK_LAYOUT_LIMIT = 0.45
 const SCALE_MIN = 0.75
 const SCALE_MAX = 1.5
+const ANGLE_SNAP_RADIANS = Math.PI / 4
+const GRID_SNAP_INCREMENT = 0.05
 
 const DEFAULT_JUSTIFICATIONS: Record<string, HudLayoutJustification> = {
     [HUD_SECTIONS.gauges]: "center",
@@ -77,6 +79,28 @@ function layoutViewport(): { width: number; height: number } {
 
 function clampDelta(value: number, minimum: number, maximum: number): number {
     return Math.max(minimum, Math.min(maximum, value))
+}
+
+/**
+ * Constrains a drag to one of the eight cardinal/diagonal directions. Keeping
+ * this in pixels preserves the apparent angle on non-square viewports before
+ * the offset is converted to independent x/y viewport fractions.
+ */
+function snapDragAngle(deltaX: number, deltaY: number): { x: number; y: number } {
+    const distance = Math.hypot(deltaX, deltaY)
+    if (distance === 0) return { x: 0, y: 0 }
+
+    const angle = Math.atan2(deltaY, deltaX)
+    const snappedAngle = Math.round(angle / ANGLE_SNAP_RADIANS) * ANGLE_SNAP_RADIANS
+    return {
+        x: Math.cos(snappedAngle) * distance,
+        y: Math.sin(snappedAngle) * distance,
+    }
+}
+
+/** Snaps a viewport-fraction offset to the layout editor's 5% grid. */
+function snapOffsetToGrid(value: number): number {
+    return Math.round(value / GRID_SNAP_INCREMENT) * GRID_SNAP_INCREMENT
 }
 
 /**
@@ -126,6 +150,8 @@ interface MovableSectionProps {
     scaleOrigin?: string
     /** A layout-editor proxy for a component rendered by another NUI. */
     editorOnly?: boolean
+    /** Shows the gauges-only bottom-anchor toggle in the layout controls. */
+    bottomAnchored?: boolean
     children: ReactNode
 }
 
@@ -148,6 +174,7 @@ export function MovableSection({
     centerX = false,
     scaleOrigin = "center",
     editorOnly = false,
+    bottomAnchored,
     children,
 }: MovableSectionProps) {
     const layout = useHudLayout()
@@ -189,20 +216,31 @@ export function MovableSection({
             // all have different dimensions. It lets a status stack sit at
             // the bottom edge without letting its controls disappear beyond
             // it.
-            const deltaX = clampDelta(
+            let deltaX = clampDelta(
                 moveEvent.clientX - startX,
                 -startRect.left,
                 window.innerWidth - startRect.right,
             )
-            const deltaY = clampDelta(
+            let deltaY = clampDelta(
                 moveEvent.clientY - startY,
                 -startRect.top,
                 window.innerHeight - startRect.bottom,
             )
-            latest = {
+            if (moveEvent.shiftKey) {
+                const snappedDelta = snapDragAngle(deltaX, deltaY)
+                deltaX = snappedDelta.x
+                deltaY = snappedDelta.y
+            }
+            const nextOffset = {
                 x: clamp(id, "x", base.x + deltaX / window.innerWidth),
                 y: clamp(id, "y", base.y + deltaY / window.innerHeight),
             }
+            latest = moveEvent.ctrlKey
+                ? {
+                    x: clamp(id, "x", snapOffsetToGrid(nextOffset.x)),
+                    y: clamp(id, "y", snapOffsetToGrid(nextOffset.y)),
+                }
+                : nextOffset
             // Written straight to the node instead of through state: a drag
             // fires a mousemove per frame, and routing each one through React
             // would re-render this section (and re-run every gauge inside it)
@@ -266,6 +304,10 @@ export function MovableSection({
         layout.commitJustification(id, justification === "left" ? "center" : justification === "center" ? "right" : "left")
     }
 
+    function toggleBottomAnchor() {
+        layout.setGaugesBottomAnchored(!bottomAnchored)
+    }
+
     // qbhud draws a proxy for qbchat's composer only while arranging the
     // layout; qbchat continues to own the real input during normal play.
     if (editorOnly && !layout.editing) return null
@@ -277,7 +319,7 @@ export function MovableSection({
             // click-through overlay over live gameplay the rest of the time
             // (see globals.css) and has to stay that way -- only the explicit
             // control icons take pointer input while editing.
-            className={cn("fixed", position, draggable && "pointer-events-auto")}
+            className={cn("fixed transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto")}
             style={{
                 transform: scaleTransform(offset, centerX, scale),
                 transformOrigin: scaleOrigin,
@@ -300,12 +342,23 @@ export function MovableSection({
                         <button
                             type="button"
                             aria-label={`Move ${label}`}
-                            title="Drag to move"
+                            title="Drag to move. Hold Ctrl to snap to the grid; hold Shift to snap to 45° angles"
                             onMouseDown={handleMoveMouseDown}
                             className={cn("flex h-7 w-7 items-center justify-center rounded-full text-primary", dragging ? "cursor-grabbing" : "cursor-grab")}
                         >
                             <Move className="h-3.5 w-3.5" aria-hidden />
                         </button>
+                        {bottomAnchored !== undefined && (
+                            <button
+                                type="button"
+                                aria-label={bottomAnchored ? "Gauges are anchored to the bottom. Click to use a fixed position." : "Gauges use a fixed position. Click to anchor them to the bottom."}
+                                title={bottomAnchored ? "Bottom anchored: move above the vehicle HUD automatically" : "Fixed position: do not move for the vehicle HUD"}
+                                onClick={toggleBottomAnchor}
+                                className={cn("flex h-7 w-7 items-center justify-center rounded-full transition-colors", bottomAnchored ? "bg-primary text-primary-foreground" : "text-primary hover:bg-muted")}
+                            >
+                                <Anchor className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                        )}
                         <button
                             type="button"
                             aria-label={`Resize ${label}; drag left or right`}

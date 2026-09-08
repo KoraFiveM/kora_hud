@@ -5,11 +5,13 @@ import { JobGang } from "@/components/hud/JobGang"
 import { GaugesPreview, StatusPreview, VehiclePreview } from "@/components/hud/LayoutPreviews"
 import { HUD_SECTIONS, LayoutEditorOverlay, MovableSection } from "@/components/hud/LayoutEditor"
 import { MicIndicator } from "@/components/hud/MicIndicator"
+import { PlayerId } from "@/components/hud/PlayerId"
 import { Stamina } from "@/components/hud/Stamina"
 import { StatusEffects } from "@/components/hud/StatusEffects"
 import { Stress } from "@/components/hud/Stress"
 import { VehicleInfo } from "@/components/hud/VehicleInfo"
-import { HudStateProvider, useHudLayout, useHudVisible } from "@/lib/hudState"
+import { HudStateProvider, useHudLayout, useHudVehicle, useHudVisible } from "@/lib/hudState"
+import { memo } from "react"
 
 /**
  * The actual HUD layout, gated on login state. Each element is otherwise
@@ -27,14 +29,78 @@ import { HudStateProvider, useHudLayout, useHudVisible } from "@/lib/hudState"
  * changes a handful of times per session.
  *
  * The glanceable gauges and vehicle telemetry have independent bottom-centre
- * sections. The vehicle panel sits below the status gauges by default, but
- * can be positioned and scaled separately in the layout editor.
+ * sections. By default the standalone gauge row is bottom-anchored; when the
+ * vehicle panel appears it takes the bottom slot and the gauges glide above
+ * it. Players can turn this arrangement off from the gauges' editor controls.
  *
  * Those four clusters are exactly the four movable sections: each one is
  * wrapped in a MovableSection carrying its own persisted id, and the position
  * classes below stay that section's zero point (see MovableSection's own
  * comment), so a player with nothing saved sees this layout unchanged.
  */
+const GaugesSection = memo(function GaugesSection({ position, bottomAnchored }: { position: string; bottomAnchored: boolean }) {
+    const layout = useHudLayout()
+    return (
+        <MovableSection
+            id={HUD_SECTIONS.gauges}
+            label="Gauges"
+            position={position}
+            handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
+            flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
+            inner="gap-2"
+            centerX
+            scaleOrigin="center bottom"
+            bottomAnchored={bottomAnchored}
+        >
+            {layout.editing ? (
+                <GaugesPreview />
+            ) : (
+                <div className="flex items-center gap-2">
+                    <HealthArmour />
+                    <Stamina />
+                    <HungerThirst />
+                    <Stress />
+                </div>
+            )}
+        </MovableSection>
+    )
+})
+
+const VehicleSection = memo(function VehicleSection() {
+    const layout = useHudLayout()
+    return (
+        <MovableSection
+            id={HUD_SECTIONS.vehicle}
+            label="Vehicle"
+            position="bottom-4 left-1/2 max-[520px]:bottom-2"
+            handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
+            flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
+            centerX
+            scaleOrigin="center bottom"
+        >
+            {layout.editing ? <VehiclePreview /> : <VehicleInfo />}
+        </MovableSection>
+    )
+})
+
+function BottomHud() {
+    const layout = useHudLayout()
+    const vehicle = useHudVehicle()
+    // Layout mode always shows the vehicle preview, so reserve its bottom
+    // slot there too instead of letting the two editor previews overlap.
+    const vehicleActive = vehicle !== null || layout.editing
+    const gaugesPosition = layout.gaugesBottomAnchored
+        ? vehicleActive ? "bottom-20 left-1/2 max-[520px]:bottom-16" : "bottom-4 left-1/2 max-[520px]:bottom-2"
+        : "bottom-20 left-1/2 max-[520px]:bottom-16"
+
+    return (
+        <>
+            <GaugesSection position={gaugesPosition} bottomAnchored={layout.gaugesBottomAnchored} />
+            <VehicleSection />
+        </>
+    )
+}
+
 function HudContent() {
     const visible = useHudVisible()
     const layout = useHudLayout()
@@ -43,38 +109,7 @@ function HudContent() {
     return (
         <div className="pointer-events-none fixed inset-0 z-hud">
             <LayoutEditorOverlay />
-            <MovableSection
-                id={HUD_SECTIONS.gauges}
-                label="Gauges"
-                position="bottom-20 left-1/2 max-[520px]:bottom-16"
-                handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
-                flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
-                inner="gap-2"
-                centerX
-                scaleOrigin="center bottom"
-            >
-                {layout.editing ? (
-                    <GaugesPreview />
-                ) : (
-                    <div className="flex items-center gap-2">
-                        <HealthArmour />
-                        <Stamina />
-                        <HungerThirst />
-                        <Stress />
-                    </div>
-                )}
-            </MovableSection>
-            <MovableSection
-                id={HUD_SECTIONS.vehicle}
-                label="Vehicle"
-                position="bottom-4 left-1/2 max-[520px]:bottom-2"
-                handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
-                flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
-                centerX
-                scaleOrigin="center bottom"
-            >
-                {layout.editing ? <VehiclePreview /> : <VehicleInfo />}
-            </MovableSection>
+            <BottomHud />
             <MovableSection
                 id={HUD_SECTIONS.identity}
                 label="Player"
@@ -87,6 +122,7 @@ function HudContent() {
                 <MicIndicator />
                 <JobGang />
                 <CashBank />
+                <PlayerId />
             </MovableSection>
             {/* The editor moves this handle to the inward-facing side after
                 the section crosses the screen, so it always remains usable. */}
