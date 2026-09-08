@@ -105,6 +105,16 @@ there's nothing to alternate with, so the enabled account is simply shown
 permanently. The swap is a short fade/slide on the money row only, nothing
 else in the panel moves.
 
+### Choose vehicle speed units
+
+```lua
+-- config.lua
+Config.hud.speedUnit = 'kmh' -- kilometres per hour (default)
+Config.hud.speedUnit = 'mph' -- miles per hour
+```
+The selected unit controls both the speedometer value and its label. Unknown
+values safely fall back to `kmh`.
+
 ### Let players move HUD sections
 ```
 /hudlayout        -- enter layout edit mode; Confirm or Cancel to leave
@@ -260,6 +270,8 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   applies while both the `cash` and `bank` elements are enabled.
 - `Config.hud.minimap` — `'always'` (never touch `DisplayRadar`), `'vehicle'`,
   or `'never'`.
+- `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
+  `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD
   sections, saved client-side in KVP. See "Let players move HUD sections".
 - `Config.bridge.adapter` — documents which adapter is loaded (`"qbcore"` by

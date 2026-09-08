@@ -99,6 +99,8 @@ local VEHICLE_INTERVAL = POLL.vehicleInterval or 250
 local BRIDGE_INTERVAL = POLL.bridgeInterval or 500
 local MINIMAP_INTERVAL = POLL.minimapInterval or 250
 local VOICE_INTERVAL = (Config.voice and Config.voice.interval) or 200
+local SPEED_UNIT = Config.hud.speedUnit == 'mph' and 'mph' or 'kmh'
+local SPEED_MULTIPLIER = SPEED_UNIT == 'mph' and 0.621371 or 1
 
 -- Element toggles decide what this resource SUBSCRIBES TO and SAMPLES, not
 -- merely what the NUI paints. A server with the stamina ring switched off has
@@ -626,7 +628,10 @@ local function buildVehiclePayload()
     -- with no visible effect. It also makes fuel's "neutral" 100 exact, which
     -- is what Config.hud.dynamic compares against to hide a full gauge.
     return {
-        speed = round(snapshot.speed),
+        -- Vehicle snapshots use km/h as their canonical unit. Convert before
+        -- rounding so the wire only changes when the displayed whole number
+        -- changes, regardless of the configured unit.
+        speed = round(snapshot.speed * SPEED_MULTIPLIER),
         fuel = snapshot.fuel and round(snapshot.fuel) or nil,
         fuelKind = snapshot.fuelKind or 'fuel',
         engineOn = snapshot.engineOn,
@@ -964,6 +969,7 @@ sendInitialState = function()
     send("qbhud:config", {
         dynamic = Config.hud.dynamic == true,
         elements = Config.hud.elements,
+        speedUnit = SPEED_UNIT,
         -- The NUI matches its gauge animation to this so the rings interpolate
         -- exactly between samples. That is what makes the cadence a pure cost
         -- knob: raising it cuts the message rate and costs nothing visually.

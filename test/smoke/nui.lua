@@ -48,7 +48,7 @@ _G.json = {
     end,
 }
 
----@param opts table|nil  -- { snapshotError, bridgePush, inVehicle, dynamicHud, maxHealth }
+---@param opts table|nil  -- { snapshotError, bridgePush, inVehicle, dynamicHud, maxHealth, speedUnit }
 local function loadHud(opts)
     opts = opts or {}
     local sent, callbacks, threads = {}, {}, {}
@@ -132,6 +132,7 @@ local function loadHud(opts)
                 stamina = true, stress = true, vehicle = true,
             },
             money = opts.money or { scrollAccounts = false, scrollAccountsTime = 5000 },
+            speedUnit = opts.speedUnit,
             -- 'always' means client/hud.lua never touches DisplayRadar at all,
             -- which is the shipped default and the only mode where no radar
             -- native is called; the modes that DO take control are covered by
@@ -367,6 +368,34 @@ harness.test('the HUD forwards the dynamic gauge option to the NUI', function()
 
     harness.assertTrue(config ~= nil, 'initial state should include the HUD config')
     harness.assertTrue(config.dynamic, 'Config.hud.dynamic should reach the gauge components')
+end)
+
+harness.test('the HUD applies and forwards the configured speed unit', function()
+    local cases = {
+        { configured = 'kmh', expectedUnit = 'kmh', expectedSpeed = 60 },
+        { configured = 'mph', expectedUnit = 'mph', expectedSpeed = 37 },
+        { configured = 'invalid', expectedUnit = 'kmh', expectedSpeed = 60 },
+    }
+
+    for _, case in ipairs(cases) do
+        local hud = loadHud({
+            bridgePush = true,
+            inVehicle = true,
+            staticVehicle = true,
+            speedUnit = case.configured,
+        })
+        local config
+        local vehicle
+        for _, message in ipairs(hud.sent) do
+            if message.action == 'qbhud:config' then config = message.data end
+            if message.action == 'qbhud:vehicle' then vehicle = message.data end
+        end
+
+        harness.assertEqual(config.speedUnit, case.expectedUnit,
+            'the NUI must receive the validated speed unit')
+        harness.assertEqual(vehicle.speed, case.expectedSpeed,
+            'vehicle speed must be rounded in the selected display unit')
+    end
 end)
 
 harness.test('HUD startup no longer depends on qblib theme derivation', function()

@@ -30,6 +30,8 @@ export interface HudConfigPayload {
         stress: boolean
         vehicle: boolean
     }
+    /** Unit used by the vehicle speedometer. Missing payloads default to km/h. */
+    speedUnit?: HudSpeedUnit
     /**
      * Config.poll.vitalsInterval, in ms -- how often Lua can send a
      * "qbhud:vitals" message at most. The gauges animate over exactly this
@@ -50,6 +52,8 @@ export interface HudConfigPayload {
     /** Config.layout plus this player's own saved section offsets. */
     layout?: HudLayoutConfig
 }
+
+export type HudSpeedUnit = "kmh" | "mph"
 
 export interface HudMoneyConfig {
     /**
@@ -134,6 +138,7 @@ export interface HudGang {
 }
 
 export interface HudVehicleInfo {
+    /** Whole-number speed in the unit selected by HudConfigPayload.speedUnit. */
     speed: number
     fuel: number | null
     /** `charge` for a vehicle qbfuel classifies as electric; otherwise fuel. */

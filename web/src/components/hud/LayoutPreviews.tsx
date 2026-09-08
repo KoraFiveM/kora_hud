@@ -1,7 +1,7 @@
 import { BatteryCharging, Brain, Droplets, Heart, Lightbulb, Power, Shield, ShieldCheck, Utensils, Zap, AlertTriangle } from "lucide-react"
 
 import { RadialGauge } from "./RadialGauge"
-import { useHudLayout } from "@/lib/hudState"
+import { useHudConfig, useHudLayout } from "@/lib/hudState"
 
 // These are shown only while /hudlayout is open. They deliberately use the
 // real HUD building blocks and representative values, so an element that is
@@ -21,13 +21,16 @@ export function GaugesPreview() {
 }
 
 export function VehiclePreview() {
+    const config = useHudConfig()
+    const mph = config.speedUnit === "mph"
+
     return (
         <div className="flex items-center gap-3">
             <RadialGauge icon={BatteryCharging} value={62} defaultValue={100} label="Fuel" color="hsl(var(--warning))" size={36} stroke={3} />
             <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
                 <div className="flex items-baseline gap-1.5 text-foreground">
-                    <span className="w-[4ch] text-right text-2xl font-bold leading-none tabular-nums">86</span>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">km/h</span>
+                    <span className="w-[4ch] text-right text-2xl font-bold leading-none tabular-nums">{mph ? 53 : 86}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{mph ? "mph" : "km/h"}</span>
                 </div>
                 <div className="h-8 w-px bg-border" />
                 <div className="flex items-center gap-2.5">
