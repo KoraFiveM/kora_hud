@@ -52,7 +52,7 @@ _G.json = {
 local function loadHud(opts)
     opts = opts or {}
     local sent, callbacks, threads = {}, {}, {}
-    local cacheHandlers, bridgeHandlers, loginHandlers = {}, {}, {}
+    local cacheHandlers, bridgeHandlers, loginHandlers, configBindings = {}, {}, {}, {}
     local snapshots, vehicle = 0, opts.inVehicle and 42 or nil
     local seatbelt = false
     local loggedIn = opts.loggedIn ~= false
@@ -210,6 +210,11 @@ local function loadHud(opts)
         theme = { tokens = function() return { bg = '0 0% 0%' } end },
         status = { onChange = function() end, getActive = function() return {} end },
         notify = { send = function(payload) notices[#notices + 1] = payload end },
+        config = {
+            bind = function(resource, path, handler)
+                configBindings[resource] = { path = path, handler = handler }
+            end,
+        },
     }
 
     local ok, err = pcall(dofile, repoRoot .. 'client/hud.lua')
@@ -286,6 +291,11 @@ local function loadHud(opts)
         setLoggedIn = function(value)
             loggedIn = value
             for _, handler in ipairs(loginHandlers) do handler(value) end
+        end,
+        applyConfig = function(resource, settings)
+            local binding = configBindings[resource]
+            harness.assertTrue(binding ~= nil, 'missing qblib config binding for ' .. resource)
+            binding.handler(settings)
         end,
         -- The most recent qbhud:visibility payload, or nil if none was sent.
         lastVisibility = function()
@@ -396,6 +406,31 @@ harness.test('the HUD applies and forwards the configured speed unit', function(
         harness.assertEqual(vehicle.speed, case.expectedSpeed,
             'vehicle speed must be rounded in the selected display unit')
     end
+end)
+
+harness.test('a live qblib config update refreshes the speedometer without a HUD restart', function()
+    local hud = loadHud({ bridgePush = true, inVehicle = true, staticVehicle = true, speedUnit = 'kmh' })
+    hud.reset()
+    hud.applyConfig('qbhud', {
+        hud = {
+            dynamic = false,
+            elements = { mic = true, vehicle = true },
+            money = { scrollAccounts = false },
+            minimap = 'vehicle',
+            speedUnit = 'mph',
+        },
+        voice = { enabled = true, interval = 300 },
+        poll = { vitalsInterval = 200, playerInterval = 200, vehicleInterval = 400, bridgeInterval = 500, minimapInterval = 400 },
+        layout = { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
+    })
+
+    local config, vehicle
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:config' then config = message.data end
+        if message.action == 'qbhud:vehicle' then vehicle = message.data end
+    end
+    harness.assertEqual(config.speedUnit, 'mph', 'the replacement active config should reach the browser')
+    harness.assertEqual(vehicle.speed, 37, 'the current vehicle should use the new unit immediately')
 end)
 
 harness.test('HUD startup no longer depends on qblib theme derivation', function()

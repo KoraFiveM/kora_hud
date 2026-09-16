@@ -512,7 +512,7 @@ local function channel(interval, flush)
         end,
     })
 
-    return function()
+    local function request()
         if not visible then return end
 
         local now = GetGameTimer()
@@ -524,6 +524,8 @@ local function channel(interval, flush)
             startScheduler()
         end
     end
+
+    return request, task
 end
 
 -- --- vitals -----------------------------------------------------------------
@@ -562,7 +564,7 @@ local function flushVitals()
     })
 end
 
-local requestVitals = channel(VITALS_INTERVAL, flushVitals)
+local requestVitals, vitalsTask = channel(VITALS_INTERVAL, flushVitals)
 
 ---Writes one mirrored vital, requesting a push only if the value really moved.
 ---The mirror is kept current even while the HUD is hidden -- character select,
@@ -592,7 +594,7 @@ local function flushPlayer()
     })
 end
 
-local requestPlayer = channel(PLAYER_INTERVAL, flushPlayer)
+local requestPlayer, playerTask = channel(PLAYER_INTERVAL, flushPlayer)
 
 -- --- vehicle telemetry ------------------------------------------------------
 
@@ -708,8 +710,9 @@ end
 -- Always active, so while the HUD is visible this is what keeps the scheduler
 -- alive; the moment the HUD hides, refreshVisibility restores the engine
 -- default once and the whole thread exits.
+local minimapHealthTask
 if minimapScaleform then
-    addTask({
+    minimapHealthTask = addTask({
         interval = MINIMAP_INTERVAL,
         active = function() return true end,
         run = function() setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end,
@@ -735,6 +738,7 @@ local function minimapShouldShow()
     return nil
 end
 
+local minimapVisibilityTask
 if MINIMAP_MODE ~= 'always' then
     -- Tracked so the radar is only touched when the answer CHANGES. A resource
     -- that legitimately hid the radar for its own reasons then keeps working
@@ -749,9 +753,9 @@ if MINIMAP_MODE ~= 'always' then
         DisplayRadar(shouldShow)
     end
 
-    addTask({
+    minimapVisibilityTask = addTask({
         interval = MINIMAP_INTERVAL,
-        active = function() return true end,
+        active = function() return MINIMAP_MODE ~= 'always' end,
         run = applyMinimap,
     })
 
@@ -772,8 +776,9 @@ end
 -- stack, so it is genuinely sampled -- but on the shared thread, and only
 -- while the element is on AND the HUD is visible (Voice.setActive owns that
 -- second half). client/voice.lua deliberately owns no thread of its own.
+local voiceTask
 if ELEMENTS.mic and Config.voice.enabled ~= false then
-    addTask({
+    voiceTask = addTask({
         interval = VOICE_INTERVAL,
         active = Voice.isActive,
         run = Voice.sample,
@@ -784,10 +789,11 @@ end
 -- task goes inactive the moment the player is out of a vehicle, which is what
 -- makes on-foot vehicle telemetry cost exactly nothing. Not registered at all
 -- when the panel is switched off.
+local vehicleTask
 if ELEMENTS.vehicle then
-    addTask({
+    vehicleTask = addTask({
         interval = VEHICLE_INTERVAL,
-        active = function() return currentVehicle ~= false end,
+        active = function() return ELEMENTS.vehicle == true and currentVehicle ~= false end,
         run = pushVehicleUpdate,
     })
 end
@@ -1049,3 +1055,60 @@ CreateThread(function()
     syncVoiceSampling()
     startScheduler()
 end)
+
+local function interval(value, fallback)
+    value = math.floor(tonumber(value) or fallback)
+    return value >= 0 and value or fallback
+end
+
+---Applies qblib's active HUD snapshot without restarting the resource. The
+---scheduler tasks keep their identity, so changing an interval cannot create
+---a duplicate polling loop.
+---@param settings table
+local function applyConfig(settings)
+    if type(settings) ~= 'table' then return end
+
+    Config.hud = type(settings.hud) == 'table' and settings.hud or Config.hud
+    Config.voice = type(settings.voice) == 'table' and settings.voice or Config.voice
+    Config.poll = type(settings.poll) == 'table' and settings.poll or Config.poll
+    Config.layout = type(settings.layout) == 'table' and settings.layout or Config.layout
+
+    POLL = Config.poll or {}
+    VITALS_INTERVAL = interval(POLL.vitalsInterval, VITALS_INTERVAL)
+    PLAYER_INTERVAL = interval(POLL.playerInterval, PLAYER_INTERVAL)
+    VEHICLE_INTERVAL = interval(POLL.vehicleInterval, VEHICLE_INTERVAL)
+    BRIDGE_INTERVAL = interval(POLL.bridgeInterval, BRIDGE_INTERVAL)
+    MINIMAP_INTERVAL = interval(POLL.minimapInterval, MINIMAP_INTERVAL)
+    VOICE_INTERVAL = interval(Config.voice.interval, VOICE_INTERVAL)
+    SPEED_UNIT = Config.hud.speedUnit == 'mph' and 'mph' or 'kmh'
+    SPEED_MULTIPLIER = SPEED_UNIT == 'mph' and 0.621371 or 1
+    ELEMENTS = Config.hud.elements or {}
+    LAYOUT = Config.layout or {}
+
+    vitalsTask.interval = VITALS_INTERVAL
+    playerTask.interval = PLAYER_INTERVAL
+    if vehicleTask then vehicleTask.interval = VEHICLE_INTERVAL end
+    if voiceTask then voiceTask.interval = VOICE_INTERVAL end
+    if minimapHealthTask then minimapHealthTask.interval = MINIMAP_INTERVAL end
+    if minimapVisibilityTask then minimapVisibilityTask.interval = MINIMAP_INTERVAL end
+
+    local previousMinimapMode = MINIMAP_MODE
+    MINIMAP_MODE = type(Config.hud.minimap) == 'string' and Config.hud.minimap or 'always'
+    if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' and minimapRelease then
+        minimapRelease()
+    end
+
+    syncVoiceSampling()
+    if visible then
+        sendInitialState()
+        pushVehicleUpdate(true)
+        startScheduler()
+    end
+end
+
+-- A qblib binding supplies the initial active snapshot after database
+-- hydration and subsequent live updates. Older qblib versions keep the
+-- file-backed configuration behaviour because this registration is optional.
+if QB.config and QB.config.bind then
+    QB.config.bind('qbhud', {}, applyConfig)
+end
