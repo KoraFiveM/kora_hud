@@ -142,7 +142,7 @@ local function loadHud(opts)
         layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
         voice = { enabled = true, interval = 200 },
         poll = {
-            vitalsInterval = 100,
+            vitalsInterval = opts.vitalsInterval or 100,
             playerInterval = 100,
             vehicleInterval = 250,
             bridgeInterval = 500,
@@ -435,6 +435,60 @@ harness.test('a live qblib config update refreshes the speedometer without a HUD
     harness.assertEqual(vehicle.speed, 37, 'the current vehicle should use the new unit immediately')
     harness.assertEqual(vehicle.speedUnit, 'mph', 'the live vehicle payload must carry the new label')
 end)
+
+for _, channelCase in ipairs({
+    { name = 'vitals', action = 'qbhud:vitals', field = 'stamina', startupInterval = 150 },
+    { name = 'player', action = 'qbhud:update', field = 'cash', startupInterval = 100 },
+}) do
+    harness.test('live poll changes update the ' .. channelCase.name .. ' channel cooldown', function()
+        local hud = loadHud({ bridgePush = true, vitalsInterval = 150 })
+        harness.assertTrue(hud.loaded, tostring(hud.loadError))
+        local threadsBefore = hud.threadCount()
+
+        local function pushValue(value)
+            if channelCase.name == 'vitals' then
+                hud.pushCache('stamina', value)
+            else
+                hud.pushBridge({ job = {}, cash = value, bank = 0, hunger = 100, thirst = 100, stress = 0 })
+            end
+        end
+
+        for _, intervalMs in ipairs({ 1000, 50 }) do
+            -- Let the previous cooldown expire before starting a new burst.
+            hud.tick(1000)
+            hud.applyConfig('qbhud', {
+                poll = { vitalsInterval = intervalMs, playerInterval = intervalMs },
+            })
+            hud.reset()
+
+            pushValue(80)
+            harness.assertEqual(hud.countAction(channelCase.action), 1, 'the leading change is immediate')
+            pushValue(70)
+            pushValue(60)
+            harness.assertEqual(hud.countAction(channelCase.action), 1, 'the burst must be coalesced')
+
+            local elapsed = 0
+            if intervalMs > channelCase.startupInterval then
+                hud.tick(channelCase.startupInterval)
+                elapsed = channelCase.startupInterval
+                harness.assertEqual(hud.countAction(channelCase.action), 1,
+                    'the startup interval must not release a burst after a live change to 1000ms')
+            end
+            hud.tick(intervalMs - elapsed - 1)
+            harness.assertEqual(hud.countAction(channelCase.action), 1, 'nothing sends before the new deadline')
+            hud.tick(1)
+            harness.assertEqual(hud.countAction(channelCase.action), 2, 'the burst flushes at the new deadline')
+            harness.assertEqual(hud.sent[#hud.sent].data[channelCase.field], 60, 'the latest burst value is sent')
+
+            pushValue(50)
+            hud.tick(intervalMs - 1)
+            harness.assertEqual(hud.countAction(channelCase.action), 2, 'the trailing flush starts a new cooldown')
+            hud.tick(1)
+            harness.assertEqual(hud.countAction(channelCase.action), 3, 'subsequent cooldowns use the live interval')
+            harness.assertEqual(hud.threadCount(), threadsBefore, 'live updates must reuse the scheduler')
+        end
+    end)
+end
 
 harness.test('a live config update refreshes the mounted HUD while it is hidden', function()
     local hud = loadHud({ bridgePush = true, loggedIn = false, speedUnit = 'kmh' })

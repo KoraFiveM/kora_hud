@@ -517,7 +517,7 @@ local function channel(interval, flush)
 
         local now = GetGameTimer()
         if now >= task.due then
-            task.due = now + interval
+            task.due = now + task.interval
             flush()
         else
             pending = true
