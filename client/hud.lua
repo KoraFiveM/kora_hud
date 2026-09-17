@@ -634,6 +634,10 @@ local function buildVehiclePayload()
         -- rounding so the wire only changes when the displayed whole number
         -- changes, regardless of the configured unit.
         speed = round(snapshot.speed * SPEED_MULTIPLIER),
+        -- Keep the rendered label in the same payload as the converted speed.
+        -- A delayed or dropped config message must never pair an mph value
+        -- with a km/h label (or vice versa).
+        speedUnit = SPEED_UNIT,
         fuel = snapshot.fuel and round(snapshot.fuel) or nil,
         fuelKind = snapshot.fuelKind or 'fuel',
         engineOn = snapshot.engineOn,
@@ -648,6 +652,7 @@ local function vehiclePayloadChanged(payload)
     end
 
     return payload.speed ~= lastVehiclePayload.speed
+        or payload.speedUnit ~= lastVehiclePayload.speedUnit
         or payload.fuel ~= lastVehiclePayload.fuel
         or payload.fuelKind ~= lastVehiclePayload.fuelKind
         or payload.engineOn ~= lastVehiclePayload.engineOn
@@ -1099,9 +1104,12 @@ local function applyConfig(settings)
     end
 
     syncVoiceSampling()
+    -- The NUI remains mounted while the HUD is hidden. Refresh its complete
+    -- configuration even then, so a live change made during character select
+    -- or another hidden state cannot leave the page showing its old unit when
+    -- it becomes visible again.
+    sendInitialState()
     if visible then
-        sendInitialState()
-        pushVehicleUpdate(true)
         startScheduler()
     end
 end

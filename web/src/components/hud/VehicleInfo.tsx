@@ -14,9 +14,9 @@ export function VehicleInfo() {
     if (!config.elements.vehicle) return null
 
     const active = vehicle !== null
-    const { speed = 0, fuel = null, fuelKind = "fuel", engineOn = false, headlights = "off", seatbelt = false } = vehicle ?? {}
+    const { speed = 0, speedUnit = config.speedUnit, fuel = null, fuelKind = "fuel", engineOn = false, headlights = "off", seatbelt = false } = vehicle ?? {}
     const electric = fuelKind === "charge"
-    const speedLabel = config.speedUnit === "mph" ? "mph" : "km/h"
+    const speedLabel = speedUnit === "mph" ? "mph" : "km/h"
 
     return (
         <div className={cn("flex items-center gap-3 transition-[opacity,transform] duration-200 ease-out", active ? "translate-y-0 opacity-100" : "translate-y-[calc(100%+1rem)] opacity-0")} aria-hidden={!active}>

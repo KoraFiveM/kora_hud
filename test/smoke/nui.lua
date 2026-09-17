@@ -405,6 +405,8 @@ harness.test('the HUD applies and forwards the configured speed unit', function(
             'the NUI must receive the validated speed unit')
         harness.assertEqual(vehicle.speed, case.expectedSpeed,
             'vehicle speed must be rounded in the selected display unit')
+        harness.assertEqual(vehicle.speedUnit, case.expectedUnit,
+            'the converted speed and its rendered unit must travel together')
     end
 end)
 
@@ -431,6 +433,35 @@ harness.test('a live qblib config update refreshes the speedometer without a HUD
     end
     harness.assertEqual(config.speedUnit, 'mph', 'the replacement active config should reach the browser')
     harness.assertEqual(vehicle.speed, 37, 'the current vehicle should use the new unit immediately')
+    harness.assertEqual(vehicle.speedUnit, 'mph', 'the live vehicle payload must carry the new label')
+end)
+
+harness.test('a live config update refreshes the mounted HUD while it is hidden', function()
+    local hud = loadHud({ bridgePush = true, loggedIn = false, speedUnit = 'kmh' })
+    hud.reset()
+
+    hud.applyConfig('qbhud', {
+        hud = {
+            dynamic = false,
+            elements = { mic = true, vehicle = true },
+            money = { scrollAccounts = false },
+            minimap = 'vehicle',
+            speedUnit = 'mph',
+        },
+        voice = { enabled = true, interval = 300 },
+        poll = { vitalsInterval = 200, playerInterval = 200, vehicleInterval = 400, bridgeInterval = 500, minimapInterval = 400 },
+        layout = { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
+    })
+
+    local config
+    for _, message in ipairs(hud.sent) do
+        if message.action == 'qbhud:config' then config = message.data end
+    end
+
+    harness.assertTrue(config ~= nil,
+        'a mounted-but-hidden HUD must receive its updated configuration')
+    harness.assertEqual(config.speedUnit, 'mph',
+        'the next visible HUD frame must use the newly selected speed unit')
 end)
 
 harness.test('HUD startup no longer depends on qblib theme derivation', function()

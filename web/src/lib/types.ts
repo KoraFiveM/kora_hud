@@ -138,8 +138,10 @@ export interface HudGang {
 }
 
 export interface HudVehicleInfo {
-    /** Whole-number speed in the unit selected by HudConfigPayload.speedUnit. */
+    /** Whole-number speed in the unit carried atomically beside it. */
     speed: number
+    /** Repeated here so a speed value can never render with a stale label. */
+    speedUnit: HudSpeedUnit
     fuel: number | null
     /** `charge` for a vehicle qbfuel classifies as electric; otherwise fuel. */
     fuelKind: "fuel" | "charge"

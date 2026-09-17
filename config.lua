@@ -53,6 +53,7 @@ Config.hud = {
     --   'mph' -- miles per hour
     speedUnit = configEnum and configEnum('kmh', {
         label = 'Speed unit',
+        description = 'Selects the unit displayed by the live vehicle speedometer. Kilometres per hour uses the game speed multiplied by 3.6, while miles per hour uses 2.236936; saving updates the active HUD immediately.',
         options = { 'kmh', 'mph' },
         live = true,
     }) or 'kmh',
@@ -118,19 +119,35 @@ Config.poll = {
     -- rate and the visible result is identical. What it does trade is the
     -- worst-case age of a value -- and only for a SECOND change inside one
     -- interval, since the first of any burst is sent on the frame it happens.
-    vitalsInterval  = configInteger and configInteger(150, { label = 'Vitals update interval', min = 50, max = 5000, step = 50, live = true }) or 150,
+    vitalsInterval  = configInteger and configInteger(150, {
+        label = 'Vitals update interval',
+        description = 'Sets the minimum interval, in milliseconds, between burst updates for health, armour, stamina, and voice state. The first change is immediate; later changes inside the interval are coalesced to reduce NUI traffic.',
+        min = 50, max = 5000, step = 50, live = true,
+    }) or 150,
 
     -- Job/gang/cash/bank/hunger/thirst/stress/status. These are event-driven
     -- (the qbcore adapter pushes off qbcore's delta stream), so this interval
     -- only ever collapses a burst -- e.g. a full resync firing the adapter's
     -- money/job/gang/metadata subscriptions back-to-back within one frame.
-    playerInterval  = configInteger and configInteger(100, { label = 'Player update interval', min = 50, max = 5000, step = 50, live = true }) or 100,
+    playerInterval  = configInteger and configInteger(100, {
+        label = 'Player update interval',
+        description = 'Sets the minimum interval, in milliseconds, used to coalesce bursts of event-driven job, gang, money, hunger, thirst, stress, and status updates before they reach the HUD.',
+        min = 50, max = 5000, step = 50, live = true,
+    }) or 100,
 
     -- Four updates per second keeps the numeric speedometer responsive without
     -- making vehicle natives and Lua-to-NUI messages a hot 10Hz path.
-    vehicleInterval = configInteger and configInteger(250, { label = 'Vehicle update interval', min = 50, max = 5000, step = 50, live = true }) or 250, -- ms between speed/fuel/engine/headlight refreshes while in a vehicle
+    vehicleInterval = configInteger and configInteger(250, {
+        label = 'Vehicle update interval',
+        description = 'Sets the minimum interval, in milliseconds, between speed, fuel, engine, and headlight refreshes while the player is in a vehicle. Lower values feel more immediate but increase native and NUI work.',
+        min = 50, max = 5000, step = 50, live = true,
+    }) or 250, -- ms between speed/fuel/engine/headlight refreshes while in a vehicle
 
-    bridgeInterval  = configInteger and configInteger(500, { label = 'Bridge update interval', min = 50, max = 10000, step = 50, live = true }) or 500, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
+    bridgeInterval  = configInteger and configInteger(500, {
+        label = 'Bridge update interval',
+        description = 'Sets the minimum interval, in milliseconds, between framework bridge snapshots for job, gang, money, and related player data. These values do not need per-frame polling, so larger values reduce background work.',
+        min = 50, max = 10000, step = 50, live = true,
+    }) or 500, -- ms between HudBridge.getSnapshot() polls -- job/gang/cash/etc. don't need per-frame freshness
 
     -- How often SETUP_HEALTH_ARMOUR is re-issued to the minimap scaleform to
     -- keep the engine's own health/armour cluster suppressed (this resource's
