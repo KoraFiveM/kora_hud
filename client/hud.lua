@@ -124,7 +124,15 @@ local LAYOUT = Config.layout or {}
 -- Whether the player currently has the layout editor open. The NUI holds focus
 -- only in this state.
 local layoutEditing = false
+local visible
 local LAYOUT_KVP = LAYOUT.kvpKey or 'qbhud:layout'
+
+local function closeLayout()
+    if not layoutEditing then return end
+    layoutEditing = false
+    SetNuiFocus(false, false)
+    send('qbhud:layoutMode', false)
+end
 
 -- Offsets are stored as FRACTIONS of the viewport, not pixels: a layout saved
 -- on a 3440x1440 ultrawide would put half the HUD off screen on a 1920x1080
@@ -308,10 +316,10 @@ RegisterCommand(LAYOUT.command or 'hudlayout', function()
         return
     end
 
-    -- Once open, the editor owns its exit path: the player must explicitly
-    -- confirm or cancel in the NUI. Running the command again must not silently
+    -- While visible, the player confirms or cancels in the NUI. Running the
+    -- command again must not silently
     -- commit or discard a layout whose result is still being reviewed.
-    if layoutEditing then return end
+    if not visible or layoutEditing then return end
 
     layoutEditing = true
     SetNuiFocus(true, true)
@@ -332,9 +340,7 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
         syncChatInputLayout()
     end
 
-    layoutEditing = false
-    SetNuiFocus(false, false)
-    send('qbhud:layoutMode', false)
+    closeLayout()
 end)
 
 -- `reset` is separate from the editor rather than a button inside it: a player
@@ -342,9 +348,7 @@ end)
 -- not require clicking on the HUD.
 RegisterCommand('hudlayoutreset', function()
     DeleteResourceKvp(LAYOUT_KVP)
-    layoutEditing = false
-    SetNuiFocus(false, false)
-    send('qbhud:layoutMode', false)
+    closeLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
     QB.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
@@ -413,7 +417,7 @@ end
 -- deliberate hide.
 local loggedIn = currentlyLoggedIn()
 local forcedHidden = false
-local visible = loggedIn and not forcedHidden
+visible = loggedIn and not forcedHidden
 
 -- --- the scheduler ----------------------------------------------------------
 --
@@ -918,6 +922,7 @@ end
 -- otherwise defer it.
 local function refreshVisibility()
     local newVisible = loggedIn and not forcedHidden
+    if not newVisible then closeLayout() end
     if newVisible == visible then return end
     visible = newVisible
     syncVoiceSampling()
@@ -940,6 +945,16 @@ local function refreshVisibility()
         if minimapRelease then minimapRelease() end
     end
 end
+
+AddEventHandler('onResourceStop', function(resource)
+    if resource ~= GetCurrentResourceName() then return end
+    forcedHidden = true
+    refreshVisibility()
+    if minimapScaleform then
+        SetScaleformMovieAsNoLongerNeeded(minimapScaleform)
+        minimapScaleform = nil
+    end
+end)
 
 if HudBridge.onLoginChange then
     HudBridge.onLoginChange(function(value)

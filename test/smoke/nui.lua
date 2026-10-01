@@ -14,6 +14,7 @@ local repoRoot = testDir .. '../'
 package.path = testDir .. '?.lua;' .. package.path
 
 local harness = require('harness')
+local hudSource = arg[1] or repoRoot .. 'client/hud.lua'
 
 -- Any QB.nui.<anything> access explodes with an explanatory message, so a
 -- reintroduced QB.nui.send/registerCallback fails this suite loudly rather
@@ -76,6 +77,8 @@ local function loadHud(opts)
     -- driven and asserted rather than merely loaded.
     local commands, kvp, radar, notices = {}, opts.kvp or {}, {}, {}
     local nuiFocus = { keyboard = false, mouse = false }
+    local nativeCalls, eventHandlers = {}, {}
+    local healthHandle, stopPhase
 
     _G.SendNUIMessage = function(message) sent[#sent + 1] = message end
     _G.RegisterNUICallback = function(name, handler) callbacks[name] = handler end
@@ -100,15 +103,37 @@ local function loadHud(opts)
     -- the saved layout is HUD geometry read back on the next boot, so "it was
     -- persisted" is the interesting part, not "SetResourceKvp was called".
     _G.RegisterCommand = function(name, handler) commands[name] = handler end
-    _G.SetNuiFocus = function(keyboard, mouse) nuiFocus = { keyboard = keyboard, mouse = mouse } end
+    _G.SetNuiFocus = function(keyboard, mouse)
+        nativeCalls[#nativeCalls + 1] = { kind = 'focus', keyboard = keyboard, mouse = mouse }
+        nuiFocus = { keyboard = keyboard, mouse = mouse }
+    end
     _G.GetResourceKvpString = function(key) return kvp[key] end
     _G.SetResourceKvp = function(key, value) kvp[key] = value end
     _G.DeleteResourceKvp = function(key) kvp[key] = nil end
-    _G.DisplayRadar = function(show) radar[#radar + 1] = show end
-
-    _G.RequestScaleformMovie = function(movie) return 'scaleform:' .. tostring(movie) end
-    _G.BeginScaleformMovieMethod = function() end
-    _G.ScaleformMovieMethodAddParamInt = function() end
+    _G.DisplayRadar = function(show)
+        radar[#radar + 1] = show
+        nativeCalls[#nativeCalls + 1] = { kind = 'radar', value = show }
+    end
+    _G.GetCurrentResourceName = function() return 'qbhud' end
+    _G.AddEventHandler = function(name, handler)
+        eventHandlers[name] = eventHandlers[name] or {}
+        table.insert(eventHandlers[name], handler)
+    end
+    _G.RequestScaleformMovie = function(movie)
+        nativeCalls[#nativeCalls + 1] = { kind = 'request', value = movie }
+        if opts.scaleformError then error('scaleform request unavailable', 0) end
+        return 'scaleform:' .. tostring(movie)
+    end
+    _G.BeginScaleformMovieMethod = function(handle, method)
+        harness.assertEqual(method, 'SETUP_HEALTH_ARMOUR', 'the HUD owns only the existing minimap method')
+        healthHandle = handle
+    end
+    _G.ScaleformMovieMethodAddParamInt = function(mode)
+        nativeCalls[#nativeCalls + 1] = { kind = 'health', value = mode, handle = healthHandle }
+    end
+    _G.SetScaleformMovieAsNoLongerNeeded = function(handle)
+        nativeCalls[#nativeCalls + 1] = { kind = 'release', value = handle, phase = stopPhase }
+    end
     _G.EndScaleformMovieMethod = function() end
     _G.CreateThread = function(callback)
         local thread = coroutine.create(callback)
@@ -217,7 +242,7 @@ local function loadHud(opts)
         },
     }
 
-    local ok, err = pcall(dofile, repoRoot .. 'client/hud.lua')
+    local ok, err = pcall(dofile, hudSource)
 
     local function actions()
         local names = {}
@@ -288,6 +313,18 @@ local function loadHud(opts)
         radar = radar,
         notices = notices,
         nuiFocus = function() return nuiFocus end,
+        nativeCalls = nativeCalls,
+        takeOtherFocus = function() SetNuiFocus(true, true) end,
+        stopResource = function(resource)
+            -- Cfx fires the shared event before retiring this resource's
+            -- handlers, then delivers the queued client event to survivors.
+            stopPhase = 'onResourceStop'
+            for _, handler in ipairs(eventHandlers.onResourceStop or {}) do handler(resource) end
+            if resource == 'qbhud' then eventHandlers = {} end
+            stopPhase = 'onClientResourceStop'
+            for _, handler in ipairs(eventHandlers.onClientResourceStop or {}) do handler(resource) end
+            stopPhase = nil
+        end,
         setLoggedIn = function(value)
             loggedIn = value
             for _, handler in ipairs(loginHandlers) do handler(value) end
@@ -1192,6 +1229,129 @@ harness.test('hiding the HUD hands the radar back', function()
     hud.setLoggedIn(false)
     harness.assertEqual(hud.radar[#hud.radar], true,
         'the scheduler stops with the HUD, so a hidden HUD must not leave the radar off with nothing left to restore it')
+end)
+
+
+harness.test('hiding or logging out closes the owned editor without saving its preview', function()
+    for _, action in ipairs({ 'hide', 'logout' }) do
+        local saved = json.encode({ offsets = { identity = { x = 0.1, y = 0.2 } } })
+        local hud = loadHud({ bridgePush = true, kvp = { ['qbhud:layout'] = saved } })
+        harness.assertTrue(hud.loaded, tostring(hud.loadError))
+        hud.commands.hudlayout()
+        hud.reset()
+        if action == 'hide' then hud.exported.hide() else hud.setLoggedIn(false) end
+        harness.assertFalse(hud.nuiFocus().keyboard, action .. ' releases editor keyboard focus')
+        harness.assertFalse(hud.nuiFocus().mouse, action .. ' releases editor mouse focus')
+        harness.assertEqual(hud.sent[1].action, 'qbhud:layoutMode', 'close editing before hiding the page')
+        harness.assertEqual(hud.sent[1].data, false, 'the editor exits its mode')
+        harness.assertEqual(hud.sent[2].action, 'qbhud:visibility', 'existing visibility wire follows the close')
+        harness.assertEqual(hud.exported.isVisible(), false, 'the HUD is hidden')
+        local replies = 0
+        hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { identity = { x = 0.4, y = 0.3 } } },
+            function() replies = replies + 1 end)
+        harness.assertEqual(replies, 1, 'a late finish callback still receives its normal reply')
+        harness.assertEqual(hud.kvp['qbhud:layout'], saved, 'a closed editor cannot overwrite saved geometry')
+        hud.exported.show()
+        if action == 'logout' then hud.setLoggedIn(true) end
+        hud.commands.hudlayout()
+        harness.assertTrue(hud.nuiFocus().keyboard, 'the visible HUD can reopen its editor')
+        hud.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+        harness.assertFalse(hud.nuiFocus().keyboard, 'the normal cancel path still closes focus')
+        harness.assertEqual(hud.kvp['qbhud:layout'], saved, 'cancel still preserves the saved layout')
+    end
+end)
+
+harness.test('a hidden HUD cannot acquire editing focus or clear another resource focus', function()
+    _G.visible = true
+    local hud = loadHud({ bridgePush = true, loggedIn = false })
+    harness.assertTrue(hud.loaded, tostring(hud.loadError))
+    harness.assertEqual(_G.visible, true, 'HUD visibility remains private and never overwrites a global')
+    _G.visible = nil
+    hud.takeOtherFocus()
+    hud.reset()
+    local before = #hud.nativeCalls
+    hud.commands.hudlayout()
+    hud.exported.hide()
+    hud.exported.hide()
+    hud.setLoggedIn(false)
+    harness.assertEqual(#hud.nativeCalls, before, 'already-hidden operations do not change unrelated native state')
+    harness.assertEqual(hud.countAction('qbhud:layoutMode'), 0, 'a hidden command never opens an invisible editor')
+    harness.assertTrue(hud.nuiFocus().keyboard, 'another resource keeps keyboard focus')
+    harness.assertTrue(hud.nuiFocus().mouse, 'another resource keeps mouse focus')
+    hud.kvp['qbhud:layout'] = 'old layout'
+    hud.commands.hudlayoutreset()
+    harness.assertEqual(#hud.nativeCalls, before, 'reset clears focus only if this HUD owns an editor')
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'reset still clears the saved layout')
+    harness.assertTrue(hud.contains('qbhud:layoutReset'), 'reset still sends the existing reset message')
+    harness.assertEqual(hud.notices[#hud.notices].type, 'success', 'reset still reports success')
+end)
+
+harness.test('own stop restores the owned minimap state before releasing its scaleform once', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle', inVehicle = false })
+    harness.assertTrue(hud.loaded, tostring(hud.loadError))
+    harness.assertEqual(hud.nativeCalls[1].kind, 'request', 'the existing load requests one minimap handle')
+    harness.assertEqual(hud.nativeCalls[1].value, 'minimap', 'only the HUD minimap scaleform is requested')
+    harness.assertEqual(hud.radar[#hud.radar], false, 'the HUD currently owns a hidden radar')
+    hud.commands.hudlayout()
+    hud.reset()
+    local before = #hud.nativeCalls
+    local clientStops = 0
+    AddEventHandler('onClientResourceStop', function() clientStops = clientStops + 1 end)
+    hud.stopResource('another-resource')
+    harness.assertEqual(clientStops, 1, 'a surviving HUD VM observes another resource post-stop')
+    harness.assertEqual(#hud.nativeCalls, before, 'a foreign stop changes none of the HUD native state')
+    harness.assertEqual(#hud.sent, 0, 'a foreign stop sends no HUD messages')
+    harness.assertTrue(hud.nuiFocus().keyboard, 'a foreign stop leaves the editor open')
+    hud.stopResource('qbhud')
+    harness.assertEqual(clientStops, 1, 'retired HUD handlers cannot receive their queued own post-stop')
+    harness.assertEqual(hud.exported.isVisible(), false, 'own stop hides the HUD and stops its scheduler')
+    harness.assertEqual(#hud.nativeCalls, before + 4, 'stop closes focus, restores health/radar, then releases the handle')
+    harness.assertEqual(hud.nativeCalls[before + 1].kind, 'focus', 'release owned focus first')
+    harness.assertEqual(hud.nativeCalls[before + 1].keyboard, false, 'released keyboard focus')
+    harness.assertEqual(hud.nativeCalls[before + 2].kind, 'health', 'restore health while the handle is valid')
+    harness.assertEqual(hud.nativeCalls[before + 2].value, 0, 'restore the existing engine health mode')
+    harness.assertEqual(hud.nativeCalls[before + 2].handle, 'scaleform:minimap', 'restore the requested handle')
+    harness.assertEqual(hud.nativeCalls[before + 3].kind, 'radar', 'restore the HUD-owned hidden radar')
+    harness.assertEqual(hud.nativeCalls[before + 3].value, true, 'existing release returns radar display')
+    harness.assertEqual(hud.nativeCalls[before + 4].kind, 'release', 'release after restoring consumers')
+    harness.assertEqual(hud.nativeCalls[before + 4].phase, 'onResourceStop', 'release during synchronous pre-stop')
+    harness.assertEqual(hud.nativeCalls[before + 4].value, 'scaleform:minimap', 'release exactly the requested handle')
+    harness.assertEqual(hud.sent[1].action, 'qbhud:layoutMode', 'stop closes the existing editor wire')
+    harness.assertEqual(hud.sent[1].data, false, 'stop exits editing mode')
+    harness.assertEqual(hud.lastVisibility(), false, 'stop sends the existing hidden state')
+    local stopped = #hud.nativeCalls
+    local sampled = hud.voiceSamples()
+    hud.stopResource('qbhud')
+    hud.tick(1000)
+    harness.assertEqual(#hud.nativeCalls, stopped, 'repeat stop and the parked scheduler never reuse the released handle')
+    harness.assertEqual(hud.voiceSamples(), sampled, 'the hidden scheduler no longer samples voice')
+    harness.assertEqual(hud.liveThreads(), 0, 'the existing scheduler exits at its next controlled wake')
+end)
+
+harness.test('stop releases only acquired HUD assets and preserves unowned focus and radar', function()
+    for _, mode in ipairs({ 'always', 'vehicle', 'never' }) do
+        local hud = loadHud({ bridgePush = true, minimap = mode, inVehicle = true })
+        harness.assertTrue(hud.loaded, tostring(hud.loadError))
+        hud.exported.hide()
+        hud.takeOtherFocus()
+        local before, radarBefore = #hud.nativeCalls, #hud.radar
+        hud.stopResource('qbhud')
+        harness.assertEqual(#hud.nativeCalls, before + 1, 'an already-hidden HUD releases only its scaleform')
+        harness.assertEqual(hud.nativeCalls[#hud.nativeCalls].kind, 'release', 'own stop releases the acquired handle')
+        harness.assertEqual(#hud.radar, radarBefore, 'a handed-back or untouched radar is not changed again')
+        harness.assertTrue(hud.nuiFocus().keyboard, 'stop preserves unowned keyboard focus')
+        harness.assertTrue(hud.nuiFocus().mouse, 'stop preserves unowned mouse focus')
+        hud.stopResource('qbhud')
+        harness.assertEqual(#hud.nativeCalls, before + 1, 'the handle is not released twice')
+    end
+    local hud = loadHud({ bridgePush = true, minimap = 'always', scaleformError = true })
+    harness.assertTrue(hud.loaded, 'an existing protected request failure still permits HUD startup')
+    hud.takeOtherFocus()
+    local before = #hud.nativeCalls
+    hud.stopResource('qbhud')
+    harness.assertEqual(#hud.nativeCalls, before, 'a failed acquisition produces no release or unowned focus changes')
+    harness.assertEqual(#hud.radar, 0, 'always mode continues to leave radar ownership alone')
+    harness.assertEqual(hud.exported.isVisible(), false, 'the HUD still closes on own stop')
 end)
 
 harness.report('nui')
