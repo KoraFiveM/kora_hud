@@ -743,7 +743,10 @@ local MINIMAP_MODE = (type(Config.hud.minimap) == 'string' and Config.hud.minima
 ---@return boolean|nil
 local function minimapShouldShow()
     if MINIMAP_MODE == 'never' then return false end
-    if MINIMAP_MODE == 'vehicle' then return QB.cache.vehicle() ~= nil and QB.cache.vehicle() ~= 0 end
+    if MINIMAP_MODE == 'vehicle' then
+        local vehicle = QB.cache.vehicle()
+        return vehicle ~= nil and vehicle ~= 0
+    end
     return nil
 end
 
