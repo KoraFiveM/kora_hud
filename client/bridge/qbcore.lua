@@ -236,19 +236,15 @@ function HudBridge.onLoginChange(handler)
     loginHandlers[#loginHandlers + 1] = handler
 end
 
--- Seatbelt is still a placeholder: qbcore's default metadata has no seatbelt
--- state (it's a vehicle-script mechanic), so this adapter owns the same keybind
--- the stub did until a seatbelt system is wired into a vehicle resource.
-local seatbelt = false
-local function toggleSeatbelt() seatbelt = not seatbelt end
-RegisterCommand('hud_toggleseatbelt', toggleSeatbelt, false)
-QB.keybind.add({
-    name = 'hud_toggleseatbelt',
-    description = 'Toggle seatbelt (qbcore adapter)',
-    defaultMapper = 'keyboard',
-    defaultKey = 'B',
-    onPressed = toggleSeatbelt,
-})
+-- Seatbelt gameplay is owned by qbsmallresources. The old HUD command remains
+-- a forwarding entry point, and the B key is registered by that owner once.
+local seatbelt = LocalPlayer.state.seatbelt == true
+RegisterNetEvent('seatbelt:client:ToggleSeatbelt', function(enabled)
+    seatbelt = enabled == true
+end)
+RegisterCommand('hud_toggleseatbelt', function()
+    TriggerEvent('qbsmallresources:client:toggleSeatbelt')
+end, false)
 
 -- Cheap hot-path accessor for the vehicle sampler. Keeping this separate from
 -- getSnapshot avoids framework and status exports on every telemetry tick.
@@ -293,7 +289,7 @@ local function snapshotFrom(data)
         hunger = meta.hunger or 100,
         thirst = meta.thirst or 100,
         stress = meta.stress or 0,
-        seatbelt = seatbelt,
+        seatbelt = HudBridge.getSeatbelt(),
         status = activeStatus(),
     }
 end

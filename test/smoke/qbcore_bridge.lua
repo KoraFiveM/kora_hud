@@ -36,7 +36,7 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
     }
     _G.RegisterCommand = function() end
     _G.RegisterKeyMapping = function() end
-    _G.RegisterNetEvent = function(name) registeredEvents[name] = true end
+    _G.RegisterNetEvent = function(name, fn) registeredEvents[name] = fn or true end
     _G.AddStateBagChangeHandler = function(key, bagName, callback)
         handlers[#handlers + 1] = { key = key, bagName = bagName, callback = callback }
         return #handlers
@@ -319,6 +319,15 @@ harness.test('an authoritative cash change still reaches the HUD, one frame late
 
     harness.assertTrue(latest ~= nil, 'the cash bag handler must push a snapshot')
     harness.assertEqual(latest.cash, 250, 'and it must carry the COMMITTED balance, not the pre-change one')
+end)
+
+harness.test('seatbelt presentation follows the gameplay owner rather than a HUD-only toggle', function()
+    local fixture = loadBridge(true, {citizenid='TEST'})
+    harness.assertFalse(fixture.bridge.getSeatbelt())
+    fixture.events['seatbelt:client:ToggleSeatbelt'](true)
+    harness.assertTrue(fixture.bridge.getSeatbelt())
+    fixture.events['seatbelt:client:ToggleSeatbelt'](false)
+    harness.assertFalse(fixture.bridge.getSeatbelt())
 end)
 
 harness.report('qbcore_bridge')
