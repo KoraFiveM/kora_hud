@@ -236,7 +236,7 @@ function HudBridge.onLoginChange(handler)
     loginHandlers[#loginHandlers + 1] = handler
 end
 
--- Seatbelt gameplay is owned by kora_smallresources. The old HUD command remains
+-- Seatbelt gameplay is owned by kora_utils. The old HUD command remains
 -- a forwarding entry point, and the B key is registered by that owner once.
 local seatbelt = LocalPlayer.state.seatbelt == true
 RegisterNetEvent('seatbelt:client:ToggleSeatbelt', function(enabled)
