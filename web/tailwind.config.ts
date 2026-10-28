@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss"
 
-// Token contract mirrors qblib's own web/tailwind.config.ts -- see
-// qblib/web/AGENTS.md, the shared design-system reference. No darkMode/class
+// Token contract mirrors kora_lib's own web/tailwind.config.ts -- see
+// kora_lib/web/AGENTS.md, the shared design-system reference. No darkMode/class
 // toggle -- this is a fixed game overlay with exactly one permanent theme.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],

@@ -150,8 +150,8 @@ export interface HudVehicleInfo {
     seatbelt: boolean
 }
 
-// One entry per active qblib QB.status effect (e.g. "bleeding", "limping",
-// "high_weed") -- see qblib's modules/status. `severity` is whatever the
+// One entry per active kora_lib QB.status effect (e.g. "bleeding", "limping",
+// "high_weed") -- see kora_lib's modules/status. `severity` is whatever the
 // effect definition's severityLevels scale means for that specific effect;
 // the HUD doesn't interpret it beyond passing it to a per-name icon/style
 // lookup the effect's own consumer resource owns.
@@ -162,7 +162,7 @@ export interface HudStatusEffect {
 
 // action: "qbhud:vitals" -- the continuously-moving player stats, rate-limited
 // to Config.poll.vitalsInterval (see client/hud.lua's `throttle`). This is the
-// HUD's fastest non-vehicle channel: stamina alone changes on every qblib
+// HUD's fastest non-vehicle channel: stamina alone changes on every kora_lib
 // cache tick while sprinting. Every number here is already rounded to a whole
 // unit in Lua, so a value arriving at all means it moved by at least one unit.
 export interface HudVitalsPayload {

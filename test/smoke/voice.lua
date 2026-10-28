@@ -7,7 +7,7 @@ local harness = require('harness')
 
 local calls, threads = 0, {}
 local playerIdReads = 0
-_G.Config = { voice = { enabled = true, interval = 200, resource = 'qbvoice' } }
+_G.Config = { voice = { enabled = true, interval = 200, resource = 'kora_voice' } }
 -- The local player index is a session constant; voice.lua resolves it once
 -- from the native rather than paying for a QB.cache export call every sample.
 _G.PlayerId = function()
@@ -22,7 +22,7 @@ end
 local exportedMode = { index = 2, name = 'normal', label = 'Normal', range = 12.0 }
 _G.exports = setmetatable({}, {
     __index = function(_, resource)
-        harness.assertEqual(resource, 'qbvoice', 'the configured voice resource supplies range state')
+        harness.assertEqual(resource, 'kora_voice', 'the configured voice resource supplies range state')
         return {
             getTalkingMode = function() return exportedMode end,
         }

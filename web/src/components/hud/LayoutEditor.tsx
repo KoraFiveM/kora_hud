@@ -308,8 +308,8 @@ export function MovableSection({
         layout.setGaugesBottomAnchored(!bottomAnchored)
     }
 
-    // qbhud draws a proxy for qbchat's composer only while arranging the
-    // layout; qbchat continues to own the real input during normal play.
+    // kora_hud draws a proxy for kora_chat's composer only while arranging the
+    // layout; kora_chat continues to own the real input during normal play.
     if (editorOnly && !layout.editing) return null
 
     return (

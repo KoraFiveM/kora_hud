@@ -3,21 +3,23 @@ game 'gta5'
 lua54 'yes'
 use_experimental_fxv2_oal 'yes'
 
-name 'qbhud'
+name 'kora_hud'
+-- Keep the legacy resource name resolvable for exports['qbhud'] callers.
+provide 'qbhud'
 author 'Jamie'
 version '0.1.0'
 description 'Configurable HUD built on qblib and qbtheme'
 
-dependency 'qbtheme'
-dependency 'qblib'
--- The HUD now sources real player data from qbcore via client/bridge/qbcore.lua
--- (Config.bridge.adapter = 'qbcore'). Revert to the stub by flipping both.
-dependency 'qbcore'
-dependency 'qbfuel'
+dependency 'kora_theme'
+dependency 'kora_lib'
+-- The HUD now sources real player data from kora_core via client/bridge/qbcore.lua
+-- (Config.bridge.adapter = 'kora_core'). Revert to the stub by flipping both.
+dependency 'kora_core'
+dependency 'kora_fuel'
 
--- Required to reach QB.cache -- see qblib's own AGENTS.md for
+-- Required to reach QB.cache -- see kora_lib's own AGENTS.md for
 -- why this is how a consumer resource pulls in the QB proxy (init.lua).
-shared_script '@qblib/init.lua'
+shared_script '@kora_lib/init.lua'
 
 shared_scripts {
     'config.lua',
@@ -25,23 +27,23 @@ shared_scripts {
 }
 
 -- bridge/stub.lua must load before hud.lua/vehicle.lua/voice.lua reference
--- HudBridge -- listed explicitly rather than globbed, same reasoning qblib's
+-- HudBridge -- listed explicitly rather than globbed, same reasoning kora_lib's
 -- own fxmanifest.lua uses for local/**.
 client_scripts {
-    '@qbtheme/client/bridge.lua',
+    '@kora_theme/client/bridge.lua',
     'client/bridge/qbcore.lua',
     'client/voice.lua',
     'client/vehicle.lua',
     'client/hud.lua'
 }
 
--- web/build is committed (see qblib's AGENTS.md "UI (web/) layout" -- same
+-- web/build is committed (see kora_lib's AGENTS.md "UI (web/) layout" -- same
 -- convention here). FiveM serves it statically, there's no build step at
 -- resource-start time.
 ui_page 'web/build/index.html'
 
 -- A bare trailing '**' does NOT match files in FiveM's resource globber --
--- see qblib/fxmanifest.lua's comment. Needs the explicit '/*'.
+-- see kora_lib/fxmanifest.lua's comment. Needs the explicit '/*'.
 files {
     'web/build/index.html',
     'web/build/assets/**/*'

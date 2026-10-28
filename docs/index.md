@@ -1,20 +1,20 @@
 ---
 layout: default
-title: qbhud
+title: kora_hud
 ---
 
-Configurable HUD for FiveM, built on qblib's cache primitives and qbtheme. All
+Configurable HUD for FiveM, built on kora_lib's cache primitives and kora_theme. All
 player data (job, gang, cash, bank, hunger/thirst, stress, seatbelt) comes
 through a single adapter interface (`HudBridge`, documented in
 `shared/bridge.lua`) rather than framework calls scattered through the render
 code — `client/hud.lua` only ever calls `HudBridge.getSnapshot()` /
 `HudBridge.onChange()` / `HudBridge.isLoggedIn()`, so swapping the adapter
-never touches HUD logic. The qbcore adapter also observes the server-owned
+never touches HUD logic. The kora_core adapter also observes the server-owned
 `LocalPlayer.state['qbmultichar:mode']` key: selection, mandatory spawning,
 and the scene studio remain hidden even after `qbcore:loggedIn` becomes true,
 until that cinematic mode clears. Two adapters ship today:
 `client/bridge/qbcore.lua`
-sources live data from qbcore's replicated player mirror (delta-pushed, not
+sources live data from kora_core's replicated player mirror (delta-pushed, not
 polled), and `client/bridge/stub.lua` fabricates normalized mock data with no
 framework installed at all, for standalone use or UI development. Which one
 loads is a `fxmanifest.lua` `client_scripts` choice, documented by
@@ -22,25 +22,25 @@ loads is a `fxmanifest.lua` `client_scripts` choice, documented by
 
 ## Requirements
 
-- [qblib](https://qbcore2.github.io/qblib/)
-- qbcore — **optional**. Only needed if you keep the shipped `qbcore` bridge
+- [qblib](https://qbcore2.github.io/kora_lib/)
+- kora_core — **optional**. Only needed if you keep the shipped `kora_core` bridge
   adapter (`client/bridge/qbcore.lua`) loaded. Swap `fxmanifest.lua`'s
-  `client_scripts` to `client/bridge/stub.lua` instead and qbhud runs
+  `client_scripts` to `client/bridge/stub.lua` instead and kora_hud runs
   standalone with mock player data, no framework required.
 
 ## Installation
 
 `server.cfg`, in this order:
 ```
-ensure qblib
-ensure qbcore
-ensure qbhud
+ensure kora_lib
+ensure kora_core
+ensure kora_hud
 ```
-(Drop `ensure qbcore` if you're running the stub adapter instead — see below.)
+(Drop `ensure kora_core` if you're running the stub adapter instead — see below.)
 
 By default `fxmanifest.lua` lists `client/bridge/qbcore.lua` in
 `client_scripts`, and `config.lua`'s `Config.bridge.adapter` is set to
-`"qbcore"` to match. To run without qbcore, edit `fxmanifest.lua` to load
+`"qbcore"` to match. To run without kora_core, edit `fxmanifest.lua` to load
 `client/bridge/stub.lua` in its place and set `Config.bridge.adapter =
 "stub"` for consistency — `Config.bridge.adapter` itself is a documentation
 field (every adapter file's header comment references it), the actual load
@@ -49,7 +49,7 @@ changes either way.
 
 ## Usage examples
 
-### Switch the bridge adapter (qbcore -> standalone stub)
+### Switch the bridge adapter (kora_core -> standalone stub)
 ```lua
 -- fxmanifest.lua
 client_scripts {
@@ -132,7 +132,7 @@ Config.layout = {
 Four HUD sections can be repositioned and resized (75%–150%), each persisted under a stable id: `gauges`
 (bottom-centre — the gauge row), `vehicle` (bottom-centre — vehicle telemetry), `identity`
 (bottom-right — mic, job/gang, money) and `status` (top-right — active status
-effects), plus `chatInput` (the qbchat composer), which can be repositioned and resized.
+effects), plus `chatInput` (the kora_chat composer), which can be repositioned and resized.
 The chat preview in the
 editor moves and scales only the input and its command suggestions; received messages
 stay in their normal position.
@@ -178,8 +178,8 @@ sections is disabled instead of opening the editor.
 /hudtest_stress 40
 ```
 These commands are registered by `client/bridge/stub.lua` only — they don't
-exist when the qbcore adapter is loaded, since job/cash/etc. there come from
-qbcore itself (`exports.qbcore:addMoney`, `exports.qbcore:setJob`, ...).
+exist when the kora_core adapter is loaded, since job/cash/etc. there come from
+kora_core itself (`exports.kora_core:addMoney`, `exports.kora_core:setJob`, ...).
 
 ### Toggle the seatbelt placeholder
 ```
@@ -202,20 +202,20 @@ reflects whichever Mumble-backed voice resource is running (pma-voice,
 saltychat, mumble-voip all work without extra integration). The configured
 resource may additionally expose `getTalkingMode() -> { index, name, label,
 range }`; when it does, the mic pill shows the current mode, signal level and
-range in metres. `qbvoice` provides that export. If it is absent or temporarily
+range in metres. `kora_voice` provides that export. If it is absent or temporarily
 unavailable, the HUD safely falls back to the original mic-only indicator.
 `enabled = false` is a master kill switch for the whole indicator and its
 shared-scheduler sampling task.
 
 ## API reference
 
-qbhud exposes three client exports for other resources that need to take the
+kora_hud exposes three client exports for other resources that need to take the
 HUD off screen (cutscenes, cameras, custom pause menus):
 
 ```lua
-exports.qbhud:hide()      -- force-hide the HUD regardless of login state
-exports.qbhud:show()      -- clear the forced hide; login state still gates
-exports.qbhud:isVisible() -- boolean: what the NUI is currently showing
+exports.kora_hud:hide()      -- force-hide the HUD regardless of login state
+exports.kora_hud:show()      -- clear the forced hide; login state still gates
+exports.kora_hud:isVisible() -- boolean: what the NUI is currently showing
 ```
 
 `hide()` is an override, not a toggle of the login gate: logging in while
@@ -250,7 +250,7 @@ internals:
 ---@field thirst number     -- 0-100
 ---@field stress number     -- 0-100
 ---@field seatbelt boolean
----@field status { name, severity }[] | nil   -- qblib QB.status.getActive(), adapter-independent
+---@field status { name, severity }[] | nil   -- kora_lib QB.status.getActive(), adapter-independent
 ```
 Writing a new adapter (ESX, ox_core, ...) means implementing this table in a
 new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
@@ -296,7 +296,7 @@ The HUD is written against a per-frame budget. Three rules hold everywhere in
    themselves rather than being a fixed tick. `client/voice.lua` deliberately
    owns no thread of its own.
 2. **Nothing polls a value something else can announce.** Health, armour,
-   stamina, ped and vehicle lifecycle arrive as qblib cache notifications;
+   stamina, ped and vehicle lifecycle arrive as kora_lib cache notifications;
    job/money/needs arrive on the adapter's push path. Only vehicle telemetry
    and mic state are genuinely sampled, because nothing in the stack can
    announce them.
@@ -327,13 +327,13 @@ interval is deferred to the scheduler's trailing pass.
   message rate and the HUD looks exactly the same.
 - `Config.poll.playerInterval` (100ms) — job/gang/money/needs/status
   (`qbhud:update`). Event-driven, so this only ever collapses a burst — e.g. a
-  qbcore resync firing the adapter's four root subscriptions in one frame.
+  kora_core resync firing the adapter's four root subscriptions in one frame.
 - `Config.poll.vehicleInterval` (250ms) — speed/fuel/engine/headlight refresh
   while in a vehicle (`qbhud:vehicle`). The sampling task is inactive while on
   foot, both edges (getting in, getting out) push immediately, and an unchanged
   reading — idling at a light — is sampled but not sent.
 - `Config.poll.bridgeInterval` (500ms) — fallback poll cadence for adapters
-  with no `onChange` push path (the qbcore adapter pushes instead and never
+  with no `onChange` push path (the kora_core adapter pushes instead and never
   uses this).
 - `Config.poll.minimapInterval` (250ms) — how often `SETUP_HEALTH_ARMOUR` is
   re-issued to suppress the minimap's own health/armour cluster, which would
@@ -346,10 +346,10 @@ interval is deferred to the scheduler's trailing pass.
 
 Part of the [qbcore2](https://github.com/qbcore2) resource set:
 
-- [qblib](https://qbcore2.github.io/qblib/) — shared helper library
-- [qbsql](https://qbcore2.github.io/qbsql/) — database driver
-- [qbcore](https://qbcore2.github.io/qbcore/) — framework core
-- [qbinventory](https://qbcore2.github.io/qbinventory/) — headless inventory
-- [qbtarget](https://qbcore2.github.io/qbtarget/) — targeting/interaction
-- [qbclothing](https://qbcore2.github.io/qbclothing/) — clothing/wardrobe
+- [qblib](https://qbcore2.github.io/kora_lib/) — shared helper library
+- [qbsql](https://qbcore2.github.io/kora_sql/) — database driver
+- [qbcore](https://qbcore2.github.io/kora_core/) — framework core
+- [qbinventory](https://qbcore2.github.io/kora_inventory/) — headless inventory
+- [qbtarget](https://qbcore2.github.io/kora_target/) — targeting/interaction
+- [qbclothing](https://qbcore2.github.io/kora_clothing/) — clothing/wardrobe
 - [full resource list ↗](https://github.com/orgs/qbcore2/repositories)

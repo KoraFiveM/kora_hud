@@ -5,8 +5,8 @@
 -- assigns the same HudBridge.getSnapshot -- client/hud.lua never changes.
 HudBridge = HudBridge or {}
 
--- Status effects enrich the standalone bridge when qblib provides them, but
--- they must never make the HUD unavailable during a staggered qblib update.
+-- Status effects enrich the standalone bridge when kora_lib provides them, but
+-- they must never make the HUD unavailable during a staggered kora_lib update.
 local function activeStatus()
     local ok, status = pcall(function() return QB.status.getActive() end)
     if ok and type(status) == 'table' then return status end
@@ -58,7 +58,7 @@ function HudBridge.getSeatbelt()
     return state.seatbelt
 end
 
--- Manual-test commands, mirroring qblib-playground's command-driven style --
+-- Manual-test commands, mirroring kora_lib-playground's command-driven style --
 -- dev convenience only.
 RegisterCommand("hudtest_cash", function(_, args)
     state.cash = tonumber(args[1]) or state.cash

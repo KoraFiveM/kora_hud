@@ -7,11 +7,11 @@ declare global {
 
 // True when running outside the CEF NUI frame (e.g. `pnpm dev` in a normal
 // browser) -- lets components render/develop without a game to talk to.
-// Same convention as qblib's own web/src/lib/fetchNui.ts.
+// Same convention as kora_lib's own web/src/lib/fetchNui.ts.
 export const isBrowserEnv = typeof window.invokeNative !== "function"
 
 function resourceName(): string {
-    return window.GetParentResourceName ? window.GetParentResourceName() : "qbhud"
+    return window.GetParentResourceName ? window.GetParentResourceName() : "kora_hud"
 }
 
 /**

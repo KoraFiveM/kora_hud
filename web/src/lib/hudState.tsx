@@ -322,7 +322,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
     // FiveM drops them if this page hasn't mounted (and attached its
     // "message" listener) yet, which is common for a player already logged
-    // in when qbhud (re)starts. This ping is the guaranteed half of the fix:
+    // in when kora_hud (re)starts. This ping is the guaranteed half of the fix:
     // once mounted, ask Lua for a fresh push instead of hoping the first one
     // landed. See client/hud.lua's "qbhud:ready" callback for the other half.
     useEffect(() => {

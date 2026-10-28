@@ -1,10 +1,10 @@
 -- Guards the NUI transport contract in client/hud.lua.
 --
--- qbhud owns its own ui_page, so its NUI I/O MUST use the raw natives. Going
--- through QB.nui.* routes the call into qblib's Lua VM (every QB.* access is a
--- cross-resource export call), which posts messages into qblib's frame and
--- publishes callbacks at https://qblib/<name> while this resource's page
--- fetches https://qbhud/<name> -- a permanent 404 that leaves the HUD stuck on
+-- kora_hud owns its own ui_page, so its NUI I/O MUST use the raw natives. Going
+-- through QB.nui.* routes the call into kora_lib's Lua VM (every QB.* access is a
+-- cross-resource export call), which posts messages into kora_lib's frame and
+-- publishes callbacks at https://kora_lib/<name> while this resource's page
+-- fetches https://kora_hud/<name> -- a permanent 404 that leaves the HUD stuck on
 -- DEFAULT_VISIBLE=false. That regression is invisible in-game until someone
 -- restarts the resource, so it is pinned here instead.
 
@@ -114,7 +114,7 @@ local function loadHud(opts)
         radar[#radar + 1] = show
         nativeCalls[#nativeCalls + 1] = { kind = 'radar', value = show }
     end
-    _G.GetCurrentResourceName = function() return 'qbhud' end
+    _G.GetCurrentResourceName = function() return 'kora_hud' end
     _G.AddEventHandler = function(name, handler)
         eventHandlers[name] = eventHandlers[name] or {}
         table.insert(eventHandlers[name], handler)
@@ -302,7 +302,7 @@ local function loadHud(opts)
         waits = function() return waits end,
         cacheReads = function() return cacheReads end,
         vehicleHandles = function() return vehicleHandles end,
-        -- Drives one qblib cache change notification, exactly as qblib's own
+        -- Drives one kora_lib cache change notification, exactly as kora_lib's own
         -- modules/cache setValue does: handler(newValue, oldValue).
         pushCache = function(key, value, old)
             for _, handler in ipairs(cacheHandlers[key] or {}) do handler(value, old) end
@@ -320,7 +320,7 @@ local function loadHud(opts)
             -- handlers, then delivers the queued client event to survivors.
             stopPhase = 'onResourceStop'
             for _, handler in ipairs(eventHandlers.onResourceStop or {}) do handler(resource) end
-            if resource == 'qbhud' then eventHandlers = {} end
+            if resource == 'kora_hud' then eventHandlers = {} end
             stopPhase = 'onClientResourceStop'
             for _, handler in ipairs(eventHandlers.onClientResourceStop or {}) do handler(resource) end
             stopPhase = nil
@@ -357,7 +357,7 @@ harness.test('qbhud registers qbhud:ready on the raw native, not through the qbl
     local hud = loadHud()
     harness.assertTrue(hud.loaded, 'client/hud.lua should load cleanly: ' .. tostring(hud.loadError))
     harness.assertEqual(type(hud.callbacks['qbhud:ready']), 'function',
-        'qbhud:ready must be registered via the raw RegisterNUICallback so it resolves at https://qbhud/')
+        'qbhud:ready must be registered via the raw RegisterNUICallback so it resolves at https://kora_hud/')
 end)
 
 harness.test('qbhud never routes NUI through QB.nui (which targets qblib\'s frame)', function()
@@ -369,7 +369,7 @@ end)
 
 harness.test('a bridge that throws at load cannot take the HUD down with it', function()
     -- Every bridge read in the chunk (initial snapshot, the polling fallback)
-    -- is pcall-guarded, so a mid-restart qbcore degrades to default data
+    -- is pcall-guarded, so a mid-restart kora_core degrades to default data
     -- instead of aborting the chunk -- and the qbhud:ready callback (kept
     -- FIRST in the chunk as a last line of defence) still answers, so the
     -- page can never 404 forever on its ready ping.
@@ -450,7 +450,7 @@ end)
 harness.test('a live qblib config update refreshes the speedometer without a HUD restart', function()
     local hud = loadHud({ bridgePush = true, inVehicle = true, staticVehicle = true, speedUnit = 'kmh' })
     hud.reset()
-    hud.applyConfig('qbhud', {
+    hud.applyConfig('kora_hud', {
         hud = {
             dynamic = false,
             elements = { mic = true, vehicle = true },
@@ -493,7 +493,7 @@ for _, channelCase in ipairs({
         for _, intervalMs in ipairs({ 1000, 50 }) do
             -- Let the previous cooldown expire before starting a new burst.
             hud.tick(1000)
-            hud.applyConfig('qbhud', {
+            hud.applyConfig('kora_hud', {
                 poll = { vitalsInterval = intervalMs, playerInterval = intervalMs },
             })
             hud.reset()
@@ -531,7 +531,7 @@ harness.test('a live config update refreshes the mounted HUD while it is hidden'
     local hud = loadHud({ bridgePush = true, loggedIn = false, speedUnit = 'kmh' })
     hud.reset()
 
-    hud.applyConfig('qbhud', {
+    hud.applyConfig('kora_hud', {
         hud = {
             dynamic = false,
             elements = { mic = true, vehicle = true },
@@ -657,7 +657,7 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
 end)
 
 harness.test('a player already in a vehicle at resource start gets telemetry', function()
-    -- QB.cache.onChange only observes FUTURE transitions, so `ensure qbhud`
+    -- QB.cache.onChange only observes FUTURE transitions, so `ensure kora_hud`
     -- mid-drive needs an explicit arm at startup.
     local hud = loadHud({ bridgePush = true, inVehicle = true })
     hud.reset()
@@ -686,8 +686,8 @@ end)
 
 harness.test('the hide export force-hides the HUD and show restores it', function()
     local hud = loadHud()
-    harness.assertEqual(type(hud.exported.hide), 'function', 'exports.qbhud:hide must be registered')
-    harness.assertEqual(type(hud.exported.show), 'function', 'exports.qbhud:show must be registered')
+    harness.assertEqual(type(hud.exported.hide), 'function', 'exports.kora_hud:hide must be registered')
+    harness.assertEqual(type(hud.exported.show), 'function', 'exports.kora_hud:show must be registered')
     hud.reset()
 
     hud.exported.hide()
@@ -877,7 +877,7 @@ harness.test('a burst of changes inside one interval collapses into a single mes
 end)
 
 harness.test('sub-unit drift never reaches the wire', function()
-    -- GetPedArmour/GetPlayerStamina are floats, so qblib's cache reports a
+    -- GetPedArmour/GetPlayerStamina are floats, so kora_lib's cache reports a
     -- change for movement far below what a 44px ring can render. Rounding on
     -- the way in is what lets the throttle actually go idle.
     local hud = loadHud({ bridgePush = true })
@@ -1309,7 +1309,7 @@ harness.test('own stop restores the owned minimap state before releasing its sca
     harness.assertEqual(#hud.nativeCalls, before, 'a foreign stop changes none of the HUD native state')
     harness.assertEqual(#hud.sent, 0, 'a foreign stop sends no HUD messages')
     harness.assertTrue(hud.nuiFocus().keyboard, 'a foreign stop leaves the editor open')
-    hud.stopResource('qbhud')
+    hud.stopResource('kora_hud')
     harness.assertEqual(clientStops, 1, 'retired HUD handlers cannot receive their queued own post-stop')
     harness.assertEqual(hud.exported.isVisible(), false, 'own stop hides the HUD and stops its scheduler')
     harness.assertEqual(#hud.nativeCalls, before + 4, 'stop closes focus, restores health/radar, then releases the handle')
@@ -1328,7 +1328,7 @@ harness.test('own stop restores the owned minimap state before releasing its sca
     harness.assertEqual(hud.lastVisibility(), false, 'stop sends the existing hidden state')
     local stopped = #hud.nativeCalls
     local sampled = hud.voiceSamples()
-    hud.stopResource('qbhud')
+    hud.stopResource('kora_hud')
     hud.tick(1000)
     harness.assertEqual(#hud.nativeCalls, stopped, 'repeat stop and the parked scheduler never reuse the released handle')
     harness.assertEqual(hud.voiceSamples(), sampled, 'the hidden scheduler no longer samples voice')
@@ -1342,20 +1342,20 @@ harness.test('stop releases only acquired HUD assets and preserves unowned focus
         hud.exported.hide()
         hud.takeOtherFocus()
         local before, radarBefore = #hud.nativeCalls, #hud.radar
-        hud.stopResource('qbhud')
+        hud.stopResource('kora_hud')
         harness.assertEqual(#hud.nativeCalls, before + 1, 'an already-hidden HUD releases only its scaleform')
         harness.assertEqual(hud.nativeCalls[#hud.nativeCalls].kind, 'release', 'own stop releases the acquired handle')
         harness.assertEqual(#hud.radar, radarBefore, 'a handed-back or untouched radar is not changed again')
         harness.assertTrue(hud.nuiFocus().keyboard, 'stop preserves unowned keyboard focus')
         harness.assertTrue(hud.nuiFocus().mouse, 'stop preserves unowned mouse focus')
-        hud.stopResource('qbhud')
+        hud.stopResource('kora_hud')
         harness.assertEqual(#hud.nativeCalls, before + 1, 'the handle is not released twice')
     end
     local hud = loadHud({ bridgePush = true, minimap = 'always', scaleformError = true })
     harness.assertTrue(hud.loaded, 'an existing protected request failure still permits HUD startup')
     hud.takeOtherFocus()
     local before = #hud.nativeCalls
-    hud.stopResource('qbhud')
+    hud.stopResource('kora_hud')
     harness.assertEqual(#hud.nativeCalls, before, 'a failed acquisition produces no release or unowned focus changes')
     harness.assertEqual(#hud.radar, 0, 'always mode continues to leave radar ownership alone')
     harness.assertEqual(hud.exported.isVisible(), false, 'the HUD still closes on own stop')

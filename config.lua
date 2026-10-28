@@ -1,7 +1,7 @@
 Config = {}
 
 -- Descriptors are optional so the configuration remains compatible with an
--- older qblib during a rolling upgrade.
+-- older kora_lib during a rolling upgrade.
 local configEnum = QB and QB.config and QB.config.enum
 local configInteger = QB and QB.config and QB.config.integer
 
@@ -41,7 +41,7 @@ Config.hud = {
     },
 
     -- Minimap visibility.
-    --   'always'  -- leave the radar exactly as the game left it. qbhud does
+    --   'always'  -- leave the radar exactly as the game left it. kora_hud does
     --              not touch DisplayRadar at all in this mode, so another
     --              resource hiding the radar for a cutscene still works.
     --   'vehicle' -- only while the player is in a vehicle.
@@ -88,10 +88,10 @@ Config.bridge = {
 Config.voice = {
     enabled  = true,        -- master toggle for the mic indicator element
     -- Resource that describes the current proximity mode through
-    -- getTalkingMode() -> { index, name, label, range }. qbvoice exposes this
+    -- getTalkingMode() -> { index, name, label, range }. kora_voice exposes this
     -- directly; a replacement voice resource can implement the same small
     -- presentation-only contract without coupling the HUD to its internals.
-    resource = "qbvoice",
+    resource = "kora_voice",
     -- Mic state is a boolean with no change notification of its own, so it is
     -- the one input the HUD genuinely has to sample. 200ms is imperceptible
     -- on an indicator that only ever flips between two icons, and the sampler
@@ -109,7 +109,7 @@ Config.poll = {
     -- running thread and sends nothing at all.
 
     -- Health/armour/stamina/talking. Stamina is the one field that moves
-    -- continuously (every 100ms qblib cache tick for the whole length of a
+    -- continuously (every 100ms kora_lib cache tick for the whole length of a
     -- sprint), so this is the cadence that decides the resource's cost while
     -- the player is moving.
     --
@@ -126,7 +126,7 @@ Config.poll = {
     }) or 150,
 
     -- Job/gang/cash/bank/hunger/thirst/stress/status. These are event-driven
-    -- (the qbcore adapter pushes off qbcore's delta stream), so this interval
+    -- (the kora_core adapter pushes off kora_core's delta stream), so this interval
     -- only ever collapses a burst -- e.g. a full resync firing the adapter's
     -- money/job/gang/metadata subscriptions back-to-back within one frame.
     playerInterval  = configInteger and configInteger(100, {
@@ -164,7 +164,7 @@ Config.poll = {
     minimapInterval = 250,
 }
 
--- Registers this resource-owned configuration with qblib without changing its public Config table.
+-- Registers this resource-owned configuration with kora_lib without changing its public Config table.
 if QB and QB.config and QB.config.object then
     Config.poll = QB.config.object(Config.poll, { advanced = true })
 end

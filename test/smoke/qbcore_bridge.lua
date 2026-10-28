@@ -7,7 +7,7 @@ local harness = require('harness')
 
 local function loadBridge(initialState, initialData, initialMode, sessionStarted)
     local handlers, threads, registeredEvents = {}, {}, {}
-    -- One entry per root client/bridge/qbcore.lua subscribes to via qbcore's
+    -- One entry per root client/bridge/qbcore.lua subscribes to via kora_core's
     -- delta stream, so a test can fire several of them in one frame the way a
     -- server-side resync does.
     local dataChangeHandlers = {}
@@ -48,9 +48,9 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
     end
     _G.Wait = function() coroutine.yield() end
     _G.exports = {
-        qbcore = {
+        kora_core = {
             getPlayerData = function(...) snapshotBuilds = snapshotBuilds + 1; return getPlayerDataImpl(...) end,
-            -- Colon-called by the adapter (`exports.qbcore:onPlayerDataChange`),
+            -- Colon-called by the adapter (`exports.kora_core:onPlayerDataChange`),
             -- so the receiver arrives as the first argument ahead of the
             -- (paths, callback) pair.
             onPlayerDataChange = function(_, _paths, callback) dataChangeHandlers[#dataChangeHandlers + 1] = callback end,
@@ -67,7 +67,7 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
         setPlayerData = function(value) playerData = value end,
         -- Lets a test fully replace getPlayerData's behaviour, e.g. to return
         -- nil for longer than one 200-frame round, or to raise for the first
-        -- N calls before succeeding (simulating qbcore mid-restart).
+        -- N calls before succeeding (simulating kora_core mid-restart).
         setPlayerDataImpl = function(fn) getPlayerDataImpl = fn end,
         resyncCalls = function() return resyncCalls end,
         snapshotBuilds = function() return snapshotBuilds end,
@@ -151,11 +151,11 @@ harness.test('the cinematic mode state keeps the HUD hidden until spawn cleanup 
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'the scene studio hides the HUD too, and instantly')
 end)
 
--- qbmultichar publishes its cleared mode as `false` rather than deleting the
+-- kora_multichar publishes its cleared mode as `false` rather than deleting the
 -- key: a state bag DELETION does not replicate to the owning client, so a nil
 -- clear never reaches this bridge and the HUD stays hidden for the rest of the
 -- session. Both spellings of "cleared" must release the gate -- `false` from a
--- current qbmultichar, nil on a server that never ran one.
+-- current kora_multichar, nil on a server that never ran one.
 harness.test('an explicitly cleared cinematic mode (false, not a nil deletion) releases the HUD', function()
     local bridge = loadBridge(true, { money = {}, metadata = {} }, 'spawn')
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'the spawn carousel hides the HUD')
@@ -166,7 +166,7 @@ harness.test('an explicitly cleared cinematic mode (false, not a nil deletion) r
 end)
 
 -- The exact live login sequence, with the harness's fire-before-commit
--- ordering: qbcore flips the login bag true while qbmultichar's mode is still
+-- ordering: kora_core flips the login bag true while kora_multichar's mode is still
 -- truthy, and the LAST transition of the whole sequence is the mode clearing.
 -- A reconcile that reads the store synchronously from that final handler sees
 -- the stale mode, decides "still cinematic", and nothing ever fires again --
@@ -199,7 +199,7 @@ end)
 -- to the bag name it is given at registration time, so registering at chunk
 -- load subscribes to 'player:-1' forever: no login, cinematic-mode or cash
 -- change ever reaches the bridge and the HUD stays hidden for the entire
--- session. qbmultichar/client.lua defers its own login handler for this reason.
+-- session. kora_multichar/client.lua defers its own login handler for this reason.
 harness.test('state bag handlers are not registered against the pre-session -1 server id', function()
     local bridge = loadBridge(true, { money = {}, metadata = {} }, nil, false)
     harness.assertEqual(#bridge.handlers, 0, 'nothing may be registered before the session is live')
@@ -242,8 +242,8 @@ harness.test('a reconcile that times out its first 200-frame round retries via r
     local bridge = loadBridge(false, nil)
     local calls = 0
     -- Returns nil for the first 210 calls (past the 200-frame cap of a single
-    -- round), then starts returning real data -- simulating qbcore itself
-    -- still being mid-restart when qbhud's reconcile thread starts.
+    -- round), then starts returning real data -- simulating kora_core itself
+    -- still being mid-restart when kora_hud's reconcile thread starts.
     bridge.setPlayerDataImpl(function()
         calls = calls + 1
         if calls <= 210 then return nil end
@@ -268,7 +268,7 @@ harness.test('a pcall-guarded getPlayerData error does not kill the reconcile th
     local bridge = loadBridge(false, nil)
     local calls = 0
     -- Errors on the very first call (as a raw cross-resource export call
-    -- would if qbcore's resource wasn't fully started yet), then succeeds.
+    -- would if kora_core's resource wasn't fully started yet), then succeeds.
     bridge.setPlayerDataImpl(function()
         calls = calls + 1
         if calls == 1 then error('qbcore export not ready') end
@@ -283,7 +283,7 @@ harness.test('a pcall-guarded getPlayerData error does not kill the reconcile th
 end)
 
 harness.test('a burst of delta roots costs one snapshot rebuild, not one per root', function()
-    -- qbcore fires money/job/gang/metadata separately, and a resync touches all
+    -- kora_core fires money/job/gang/metadata separately, and a resync touches all
     -- four at once. Each rebuild is a getPlayerData export call plus a
     -- QB.status.getActive one, so re-snapshotting per root turns one logical
     -- update into four boundary crossings and four HUD pushes.

@@ -4,7 +4,7 @@ import { useHudVitals } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
 
-// GTA's death floor is commonly 100, not 0 (see qblib's modules/cache
+// GTA's death floor is commonly 100, not 0 (see kora_lib's modules/cache
 // docs.md) -- display health relative to that floor so an empty bar means
 // "close to death", not "at some arbitrary engine minimum".
 const HEALTH_FLOOR = 100

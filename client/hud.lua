@@ -1,4 +1,4 @@
--- Orchestrator: the only file that talks to the NUI. Combines qblib's cache
+-- Orchestrator: the only file that talks to the NUI. Combines kora_lib's cache
 -- (health/armour/stamina, push-driven via onChange), client/voice.lua,
 -- client/vehicle.lua, and HudBridge (the configured adapter) into three
 -- consolidated payloads -- qbhud:vitals (health/armour/stamina/talking),
@@ -19,13 +19,13 @@
 --     decide what to resume, so a sleeping thread is a cost paid every frame
 --     whether or not it had any work to do.
 --  2. NOTHING POLLS A VALUE SOMETHING ELSE CAN ANNOUNCE. Health, armour,
---     stamina, ped and vehicle lifecycle all arrive as qblib cache
+--     stamina, ped and vehicle lifecycle all arrive as kora_lib cache
 --     notifications; job/money/needs arrive on the adapter's push path. Only
 --     vehicle telemetry and mic state are genuinely sampled, because nothing
 --     in the stack can announce them.
 --  3. NO HOT PATH READS BACK ACROSS THE EXPORT BOUNDARY. Every
 --     QB.<module>.<fn> access is a cross-resource export call (see
---     qblib/init.lua's proxy metatable) -- a full boundary crossing with
+--     kora_lib/init.lua's proxy metatable) -- a full boundary crossing with
 --     argument marshalling, not a table lookup. Values are mirrored into
 --     plain locals once and kept current from the change handlers' own
 --     arguments.
@@ -37,12 +37,12 @@
 -- NOTE: this resource owns its own NUI frame (ui_page in fxmanifest.lua), so
 -- every NUI native below is called RAW rather than through QB.nui.*. Because
 -- the body of a QB.* call runs in QBLIB's Lua VM, SendNUIMessage would post
--- into qblib's frame and RegisterNUICallback would publish the callback at
--- https://qblib/<name> while this resource's page fetches
--- https://qbhud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
+-- into kora_lib's frame and RegisterNUICallback would publish the callback at
+-- https://kora_lib/<name> while this resource's page fetches
+-- https://kora_hud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
 -- a permanent 404 that leaves the HUD stuck on DEFAULT_VISIBLE=false. Same
--- reasoning and same fix as qbloading/client.lua and qbinventory/client/ui.lua.
--- QB.cache/QB.status stay on the proxy; qbtheme's imported bridge owns theme
+-- reasoning and same fix as kora_loading/client.lua and kora_inventory/client/ui.lua.
+-- QB.cache/QB.status stay on the proxy; kora_theme's imported bridge owns theme
 -- delivery for this frame.
 local function send(action, data)
     SendNUIMessage({ action = action, data = data })
@@ -51,7 +51,7 @@ end
 -- Forward-declared so the qbhud:ready callback can be registered as the very
 -- FIRST statement in this chunk, ahead of everything that can throw at load
 -- (HudBridge.getSnapshot below, QB.cache.onChange -- all cross-resource export
--- calls that fail if qbcore/qblib are mid-restart). A raised error aborts the
+-- calls that fail if kora_core/qblib are mid-restart). A raised error aborts the
 -- whole chunk; if that happened before registration, this resource's page would
 -- 404 on its ready ping forever with nothing left to retry it.
 local sendInitialState
@@ -65,7 +65,7 @@ local minimapRelease
 -- NUI page hasn't finished mounting (and attaching its "message" listener)
 -- yet, a send is lost, not queued. That's silent AND permanent for a player
 -- who's already logged in when this resource (re)starts -- e.g. every
--- `ensure qbhud` while testing -- because refreshVisibility() below only
+-- `ensure kora_hud` while testing -- because refreshVisibility() below only
 -- resends qbhud:visibility on a change from *Lua's* perspective, and Lua
 -- already believes it sent `visible` once. The NUI is left stuck on its
 -- DEFAULT_VISIBLE=false forever, with nothing left to nudge it. This callback
@@ -145,7 +145,7 @@ local LAYOUT_BOUNDS = {
     vehicle = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
     identity = { minX = -0.95, maxX = 0.00, minY = -0.95, maxY = 0.00 },
     status = { minX = -0.95, maxX = 0.00, minY = 0.00, maxY = 0.95 },
-    -- qbchat's composer has a top-left zero point. It is rendered by a
+    -- kora_chat's composer has a top-left zero point. It is rendered by a
     -- separate NUI, but shares this KVP so /hudlayout remains the one place a
     -- player arranges all of their on-screen interface.
     chatInput = { minX = -0.95, maxX = 0.95, minY = -0.95, maxY = 0.95 },
@@ -291,11 +291,11 @@ local function writeLayout(payload)
     return true
 end
 
----Pushes the saved chat composer layout to qbchat when it is available.
----qbchat also reads this through getLayout when it starts after qbhud, so
+---Pushes the saved chat composer layout to kora_chat when it is available.
+---qbchat also reads this through getLayout when it starts after kora_hud, so
 ---there is no ordering dependency between the two resources.
 local function syncChatInputLayout()
-    if type(GetResourceState) ~= 'function' or GetResourceState('qbchat') ~= 'started' then return end
+    if type(GetResourceState) ~= 'function' or GetResourceState('kora_chat') ~= 'started' then return end
     if type(TriggerEvent) ~= 'function' then return end
     local layout = readLayout()
     local offset = layout.offsets.chatInput or {}
@@ -372,14 +372,14 @@ RegisterCommand('id', function()
     send('qbhud:playerId', serverId)
 end, false)
 
--- Bare cross-resource call AT CHUNK LOAD (not inside any function): if qbcore
--- (or qblib, via the status export inside getSnapshot) is mid-restart right
+-- Bare cross-resource call AT CHUNK LOAD (not inside any function): if kora_core
+-- (or kora_lib, via the status export inside getSnapshot) is mid-restart right
 -- when this chunk loads, this would raise and abort the REST of this file's
 -- chunk -- meaning the qbhud:ready NUI callback registered above stays
 -- registered (that's why it's first), but `sendInitialState` below never gets
 -- assigned, so the ready-ping handler's existing nil-guard makes it silently
 -- no-op forever. pcall'd, falling back to the same shape snapshotFrom(nil)
--- produces in the qbcore adapter, so downstream field reads below
+-- produces in the kora_core adapter, so downstream field reads below
 -- (latestBridgeSnapshot.job/gang/cash/... ) stay structurally valid.
 local DEFAULT_BRIDGE_SNAPSHOT = {
     job = { name = 'unemployed', label = 'Civilian', grade = 0, gradeLabel = 'Civilian', onDuty = true },
@@ -538,7 +538,7 @@ end
 -- change notifications that already exist for them rather than re-read per
 -- push (cost model rule 3). Quantised to whole units on the way in, which is
 -- what actually makes the channel idle: raw GetPedArmour/GetPlayerStamina are
--- floats, so without rounding the qblib cache reports a "change" for
+-- floats, so without rounding the kora_lib cache reports a "change" for
 -- sub-display-resolution drift and the HUD sends a message nobody can see the
 -- effect of. The NUI renders these as a 44px ring, so one whole unit is
 -- already finer than one pixel of arc.
@@ -814,7 +814,7 @@ end
 
 -- Push-driven for anything that already has cheap change notification --
 -- these fire immediately instead of waiting for a tick. Each handler takes the
--- new value from its own ARGUMENT: qblib's cache passes (new, old), so there
+-- new value from its own ARGUMENT: kora_lib's cache passes (new, old), so there
 -- is no reason to call back across the export boundary to ask for what we
 -- were just handed.
 QB.cache.onChange("health", function(value) setVital('health', round(value)) end)
@@ -875,7 +875,7 @@ end
 -- because the qbhud:ready callback can fire first (a page that mounts before
 -- that thread is scheduled) and sendInitialState must never paint a HUD out of
 -- the zeroed defaults. pcall'd as a group -- these are cross-resource reads,
--- and qblib mid-restart must leave the HUD on its defaults, not abort the rest
+-- and kora_lib mid-restart must leave the HUD on its defaults, not abort the rest
 -- of this chunk; the start-up thread retries once if that happens.
 local seeded = false
 
@@ -891,7 +891,7 @@ end
 pcall(seedFromCache)
 
 -- QB.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
--- in spirit (it's read directly from qblib, not through HudBridge's own
+-- in spirit (it's read directly from kora_lib, not through HudBridge's own
 -- change notification), so a status effect applying/clearing needs its own
 -- push here rather than waiting up to Config.poll.bridgeInterval to show up.
 -- Treat it as optional: a rolling restart must not stop this script before it
@@ -913,7 +913,7 @@ end
 
 -- Recomputes `visible` from the two inputs and pushes the change to the NUI.
 -- Show/hide happen immediately on a login transition rather than waiting for
--- the next poll tick -- e.g. qbcore's adapter pushes this off its replicated
+-- the next poll tick -- e.g. kora_core's adapter pushes this off its replicated
 -- login state bag. Adapters with no login concept (the stub) don't implement
 -- onLoginChange, so for them only the exports below ever change visibility.
 --
@@ -933,7 +933,7 @@ local function refreshVisibility()
 
     if visible then
         -- pcall'd (via safeGetBridgeSnapshot): this runs inside the adapter's
-        -- login-notify loop, and a mid-restart qbcore export must not abort
+        -- login-notify loop, and a mid-restart kora_core export must not abort
         -- it after the visibility send already went out.
         latestBridgeSnapshot = safeGetBridgeSnapshot()
         flushVitals()
@@ -966,9 +966,9 @@ if HudBridge.onLoginChange then
     end)
 end
 
--- Cross-resource control surface: exports.qbhud:hide() force-hides the HUD
+-- Cross-resource control surface: exports.kora_hud:hide() force-hides the HUD
 -- regardless of login state (cutscenes, cameras, custom pause menus);
--- exports.qbhud:show() clears that override -- it does NOT force the HUD on,
+-- exports.kora_hud:show() clears that override -- it does NOT force the HUD on,
 -- login state still gates, so calling show() during character select stays a
 -- safe no-op. isVisible() reports the composed result the NUI currently has.
 exports('hide', function()
@@ -985,7 +985,7 @@ exports('isVisible', function()
     return visible
 end)
 
--- qbchat uses this small read-only surface at startup to pick up a layout
+-- kora_chat uses this small read-only surface at startup to pick up a layout
 -- saved before it (re)started. Returning the already validated shape means a
 -- consumer never has to read the KVP or trust its contents.
 exports('getLayout', readLayout)
@@ -1031,8 +1031,8 @@ sendInitialState = function()
 end
 
 -- Bridge-sourced fields (job/cash/hunger/etc.) are PUSHED when the adapter can
--- push them. The qbcore adapter drives this straight off qbcore's delta stream
--- (exports.qbcore:onPlayerDataChange), so the HUD updates the instant a delta
+-- push them. The kora_core adapter drives this straight off kora_core's delta stream
+-- (exports.kora_core:onPlayerDataChange), so the HUD updates the instant a delta
 -- lands instead of up to Config.poll.bridgeInterval later -- and nothing runs
 -- at all in between. onChange is optional in the contract (see
 -- shared/bridge.lua), so an adapter that only implements getSnapshot -- the
@@ -1046,7 +1046,7 @@ else
     -- The one loop that is NOT a scheduler task: it has to keep running while
     -- the HUD is hidden, because `latestBridgeSnapshot` must already be current
     -- the moment a login shows the HUD, and it must outlive the scheduler
-    -- exiting. Only adapters with no push path ever reach this (not qbcore's).
+    -- exiting. Only adapters with no push path ever reach this (not kora_core's).
     CreateThread(function()
         while true do
             -- Unlike safeGetBridgeSnapshot, a failed poll keeps the LAST good
@@ -1064,14 +1064,14 @@ else
 end
 
 CreateThread(function()
-    -- Only if the load-time attempt above lost the race with a qblib restart.
+    -- Only if the load-time attempt above lost the race with a kora_lib restart.
     if not seeded then pcall(seedFromCache) end
 
     -- Best-effort: lost if the page hasn't mounted yet (the qbhud:ready
     -- callback at the top of this file covers that). pcall'd so a failure here
     -- can't abort the thread before the scheduler below is armed.
     pcall(sendInitialState)
-    -- Covers the inverse startup order too: if qbchat was already running,
+    -- Covers the inverse startup order too: if kora_chat was already running,
     -- give it the saved composer position without waiting for the next layout
     -- confirmation. If it starts later it performs the same read itself.
     syncChatInputLayout()
@@ -1084,7 +1084,7 @@ local function interval(value, fallback)
     return value >= 0 and value or fallback
 end
 
----Applies qblib's active HUD snapshot without restarting the resource. The
+---Applies kora_lib's active HUD snapshot without restarting the resource. The
 ---scheduler tasks keep their identity, so changing an interval cannot create
 ---a duplicate polling loop.
 ---@param settings table
@@ -1132,9 +1132,9 @@ local function applyConfig(settings)
     end
 end
 
--- A qblib binding supplies the initial active snapshot after database
--- hydration and subsequent live updates. Older qblib versions keep the
+-- A kora_lib binding supplies the initial active snapshot after database
+-- hydration and subsequent live updates. Older kora_lib versions keep the
 -- file-backed configuration behaviour because this registration is optional.
 if QB.config and QB.config.bind then
-    QB.config.bind('qbhud', {}, applyConfig)
+    QB.config.bind('kora_hud', {}, applyConfig)
 end

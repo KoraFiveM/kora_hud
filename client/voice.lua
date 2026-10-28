@@ -82,7 +82,7 @@ local function sampleMode()
 end
 
 -- Resolved once, not per sample. The local player index is a session constant,
--- and QB.cache.playerId() is a cross-resource export call (see qblib/init.lua's
+-- and QB.cache.playerId() is a cross-resource export call (see kora_lib/init.lua's
 -- proxy metatable) -- a full boundary crossing to be handed back the same
 -- integer the native returns directly. The cache exists to avoid natives that
 -- are expensive or need a shared tick; PlayerId() is neither.

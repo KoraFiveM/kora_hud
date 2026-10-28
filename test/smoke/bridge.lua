@@ -11,7 +11,7 @@ local net = mocks.install()
 -- RegisterCommand/RegisterKeyMapping are specific to the stub bridge, so
 -- mocked here rather than in test/mocks.lua. `commands` captures every
 -- registered handler by name so tests can invoke them directly, the same way
--- qblib's own smoke tests capture NUI callbacks/net handlers.
+-- kora_lib's own smoke tests capture NUI callbacks/net handlers.
 local commands = {}
 _G.RegisterCommand = function(name, handler)
     commands[name] = handler

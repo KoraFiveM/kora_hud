@@ -1,4 +1,4 @@
--- Vehicle telemetry (speed/fuel/engine/headlights). qblib's modules/entities and
+-- Vehicle telemetry (speed/fuel/engine/headlights). kora_lib's modules/entities and
 -- modules/loops have no vehicle-telemetry helpers to build on, so this calls
 -- natives directly. Crucially, it never owns a polling thread: client/hud.lua
 -- is the single vehicle-only scheduler and calls getSnapshot only while
@@ -17,8 +17,8 @@ Vehicle = Vehicle or {}
 ---(and the standalone smoke test) still works unchanged.
 ---@return { speed: number, fuel: number | nil, fuelKind: 'fuel'|'charge', engineOn: boolean, headlights: 'off'|'low'|'high' } | nil
 function Vehicle.getSnapshot(vehicle)
-    -- The qblib cache is the single source of vehicle lifecycle truth. This
-    -- avoids a second IsPedInAnyVehicle loop in qbhud and guarantees no vehicle
+    -- The kora_lib cache is the single source of vehicle lifecycle truth. This
+    -- avoids a second IsPedInAnyVehicle loop in kora_hud and guarantees no vehicle
     -- native is touched while the player is on foot.
     if vehicle == nil then vehicle = QB.cache.vehicle() end
     if not vehicle then return nil end
@@ -28,11 +28,11 @@ function Vehicle.getSnapshot(vehicle)
     local fuelOk, fuel = pcall(GetVehicleFuelLevel, vehicle)
     local engineOk, engineOn = pcall(GetIsVehicleEngineRunning, vehicle)
     local lightsOk, _, lightsOn, highbeamsOn = pcall(GetVehicleLightsState, vehicle)
-    -- qbfuel is the one authoritative classifier for standard and addon EVs.
+    -- kora_fuel is the one authoritative classifier for standard and addon EVs.
     -- Its export is pcall'd so a transient resource restart only makes this
     -- one HUD sample fall back to Fuel; the entire vehicle panel keeps working.
     local electricOk, electric = pcall(function()
-        return exports.qbfuel:isElectricVehicle(vehicle)
+        return exports.kora_fuel:isElectricVehicle(vehicle)
     end)
 
     local headlights = 'off'

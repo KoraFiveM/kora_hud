@@ -4,7 +4,7 @@ import { useHudLayout, useHudUpdate } from "@/lib/hudState"
 
 /**
  * Renders one badge per active qblib QB.status effect (e.g. "bleeding",
- * "limping", a drug's "high_weed"). Deliberately generic -- qbhud has no
+ * "limping", a drug's "high_weed"). Deliberately generic -- kora_hud has no
  * dependency on, and no business knowing about, whichever job/drug resource
  * registered a given effect name, so this can't hardcode per-effect icons or
  * colors the way a screen vignette or ptfx (owned by that effect's own

@@ -1,16 +1,16 @@
--- Real QBHudBridge adapter, sourcing live player data from qbcore (see
--- shared/bridge.lua for the contract). This is the end-to-end proof that qbcore
--- + qbsql work against a consumer that already existed in this repo: the HUD
--- shows real job/gang/money/needs, driven by qbcore's DELTA replication rather
+-- Real QBHudBridge adapter, sourcing live player data from kora_core (see
+-- shared/bridge.lua for the contract). This is the end-to-end proof that kora_core
+-- + kora_sql work against a consumer that already existed in this repo: the HUD
+-- shows real job/gang/money/needs, driven by kora_core's DELTA replication rather
 -- than polling framework internals.
 --
 -- Swapped in by setting Config.bridge.adapter = "qbcore" and listing this file
--- (instead of stub.lua) in qbhud/fxmanifest.lua's client_scripts. client/hud.lua
+-- (instead of stub.lua) in kora_hud/fxmanifest.lua's client_scripts. client/hud.lua
 -- never changes -- it only ever calls HudBridge.getSnapshot()/onChange.
 --
--- Reads go through qbcore's client mirror (exports.qbcore:getPlayerData), which
+-- Reads go through kora_core's client mirror (exports.kora_core:getPlayerData), which
 -- is a plain local table lookup with zero per-read network cost. Changes are
--- PUSHED via exports.qbcore:onPlayerDataChange, so the HUD updates the instant a
+-- PUSHED via exports.kora_core:onPlayerDataChange, so the HUD updates the instant a
 -- delta lands rather than on a poll interval -- the whole point of the delta
 -- protocol.
 
@@ -18,13 +18,13 @@ HudBridge = HudBridge or {}
 
 -- Character-session state is server-owned.  Do not use the legacy load/unload
 -- events here: they are compatibility signals, not the HUD's authority.  The
--- state bag persists across qbhud restarts and is replicated to LocalPlayer.
+-- state bag persists across kora_hud restarts and is replicated to LocalPlayer.
 local LOGIN_STATE = 'qbcore:loggedIn'
 local CINEMATIC_MODE_STATE = 'qbmultichar:mode'
 
--- qbmultichar publishes a MODE STRING while a cinematic session is open and a
--- falsy value once cleanup has finished (`false` on a current qbmultichar, nil
--- on a server that never ran one -- see qbmultichar/server.lua's writeMode for
+-- kora_multichar publishes a MODE STRING while a cinematic session is open and a
+-- falsy value once cleanup has finished (`false` on a current kora_multichar, nil
+-- on a server that never ran one -- see kora_multichar/server.lua's writeMode for
 -- why the clear cannot be a nil deletion). Gate on truthiness so both spellings
 -- of "no cinematic mode" release the HUD.
 local function inCinematicMode()
@@ -37,7 +37,7 @@ local loginGeneration = 0
 local dataHandlers = {}
 
 -- Rebuilding the snapshot is not free -- it is a getPlayerData export call
--- plus a QB.status.getActive one -- and qbcore's delta stream routinely fires
+-- plus a QB.status.getActive one -- and kora_core's delta stream routinely fires
 -- several of the roots this adapter subscribes to for ONE logical update (a
 -- resync touches money, job, gang and metadata). Coalesce every notification
 -- landing in the same frame into a single rebuild and a single push.
@@ -61,10 +61,10 @@ local function schedulePush()
     end)
 end
 
--- Status effects are an optional qblib enhancement to the HUD, never a
--- prerequisite for the base player HUD.  In particular, this lets qbhud
--- start cleanly during a rolling update where qbhud has been updated before a
--- server has restarted qblib with the status exports.  A missing export must
+-- Status effects are an optional kora_lib enhancement to the HUD, never a
+-- prerequisite for the base player HUD.  In particular, this lets kora_hud
+-- start cleanly during a rolling update where kora_hud has been updated before a
+-- server has restarted kora_lib with the status exports.  A missing export must
 -- not prevent the NUI-ready callback below in client/hud.lua from registering.
 local function activeStatus()
     local ok, status = pcall(function() return QB.status.getActive() end)
@@ -81,15 +81,15 @@ end
 local RECONCILE_WAIT_FRAMES = 200
 local RECONCILE_MAX_ROUNDS = 3
 
--- pcall'd: qbcore may itself be mid-restart (its export table not yet
+-- pcall'd: kora_core may itself be mid-restart (its export table not yet
 -- published, or its own resource not fully started) at the exact moment this
--- thread runs -- e.g. a supervisor restarting qbcore and qbhud together. An
+-- thread runs -- e.g. a supervisor restarting kora_core and kora_hud together. An
 -- uncaught error from a cross-resource export call would otherwise silently
 -- kill this CreateThread body (standard Lua coroutine behaviour), leaving
 -- `loggedIn` stuck at whatever it last was. Treat a failed call the same as
 -- "no data yet" -- the retry loop below already handles that.
 local function tryGetPlayerData()
-    local ok, data = pcall(function() return exports.qbcore:getPlayerData() end)
+    local ok, data = pcall(function() return exports.kora_core:getPlayerData() end)
     if ok then return data end
     return nil
 end
@@ -103,19 +103,19 @@ local function reconcileLogin(value)
         return
     end
 
-    -- State bags and net events are independently replicated.  qbcore writes
+    -- State bags and net events are independently replicated.  kora_core writes
     -- this key after sending its snapshot, but wait defensively until the
     -- mirror is actually visible before letting the HUD render player data.
     -- Capped at 200 frames per round rather than an unbounded Wait(0) spin, so
     -- a mirror that never populates can't leave this thread running forever --
     -- not QB.loops.controlled, since this file must keep working even with QB
-    -- entirely absent (see the "missing optional qblib status export" test).
+    -- entirely absent (see the "missing optional kora_lib status export" test).
     --
     -- A single 200-frame timeout used to be treated as permanent failure: if
-    -- qbcore was ALSO restarting/still booting at that moment, `loggedIn`
+    -- kora_core was ALSO restarting/still booting at that moment, `loggedIn`
     -- would stay false forever with nothing left to re-arm this thread (the
     -- state bag only changes again on an actual login/logout). Instead, retry
-    -- up to RECONCILE_MAX_ROUNDS times, nudging qbcore for a fresh snapshot
+    -- up to RECONCILE_MAX_ROUNDS times, nudging kora_core for a fresh snapshot
     -- via its resync export between rounds -- bounded, so this still can't
     -- hang forever, but no longer gives up after one attempt.
     CreateThread(function()
@@ -142,7 +142,7 @@ local function reconcileLogin(value)
             end
 
             if round < RECONCILE_MAX_ROUNDS then
-                pcall(function() exports.qbcore:requestResync() end)
+                pcall(function() exports.kora_core:requestResync() end)
             end
         end
     end)
@@ -156,11 +156,11 @@ end
 -- registering here would permanently subscribe to `player:-1`, a bag nothing
 -- ever writes. Every login, cinematic-mode and cash change would then be
 -- invisible to this adapter: `loggedIn` stays false for the whole session and
--- the HUD never appears at all. qbmultichar/client.lua defers its own
+-- the HUD never appears at all. kora_multichar/client.lua defers its own
 -- `qbcore:loggedIn` handler for exactly this reason.
 --
 -- Waiting on the server id itself as well as the session flag: QB.cache
--- re-reads the native on qblib's shared tick (Config.cache.tickInterval), so
+-- re-reads the native on kora_lib's shared tick (Config.cache.tickInterval), so
 -- it can still be reporting the pre-session -1 for one tick after
 -- NetworkIsSessionStarted() flips.
 CreateThread(function()
@@ -201,8 +201,8 @@ CreateThread(function()
         end
     end)
 
-    -- qbcore marks the character logged in before the mandatory spawn carousel
-    -- ends. qbmultichar's replicated mode is the authoritative cinematic gate,
+    -- kora_core marks the character logged in before the mandatory spawn carousel
+    -- ends. kora_multichar's replicated mode is the authoritative cinematic gate,
     -- so the HUD stays hidden through selection, spawning, and scene-studio
     -- previews.
     AddStateBagChangeHandler(CINEMATIC_MODE_STATE, localPlayerBag, function(_, _, value)
@@ -219,7 +219,7 @@ CreateThread(function()
         schedulePush()
     end)
 
-    -- Reconcile immediately for `ensure qbhud` after a character is already
+    -- Reconcile immediately for `ensure kora_hud` after a character is already
     -- loaded; a bag-change handler only observes future transitions. Runs after
     -- the handlers are armed so a transition landing mid-reconcile is still
     -- observed rather than dropped.
@@ -236,7 +236,7 @@ function HudBridge.onLoginChange(handler)
     loginHandlers[#loginHandlers + 1] = handler
 end
 
--- Seatbelt gameplay is owned by qbsmallresources. The old HUD command remains
+-- Seatbelt gameplay is owned by kora_smallresources. The old HUD command remains
 -- a forwarding entry point, and the B key is registered by that owner once.
 local seatbelt = LocalPlayer.state.seatbelt == true
 RegisterNetEvent('seatbelt:client:ToggleSeatbelt', function(enabled)
@@ -253,7 +253,7 @@ function HudBridge.getSeatbelt()
     return seatbelt
 end
 
--- Map qbcore's PlayerData shape onto the HUD snapshot contract. Defensive about
+-- Map kora_core's PlayerData shape onto the HUD snapshot contract. Defensive about
 -- nils: the mirror may be empty for a moment right after join, before the first
 -- snapshot arrives.
 local function snapshotFrom(data)
@@ -296,7 +296,7 @@ end
 
 ---@return QBHudBridgeSnapshot
 function HudBridge.getSnapshot()
-    return snapshotFrom(exports.qbcore:getPlayerData())
+    return snapshotFrom(exports.kora_core:getPlayerData())
 end
 
 -- Optional push path: subscribe to the money/job/gang/metadata roots and hand
@@ -311,7 +311,7 @@ function HudBridge.onChange(handler)
     -- schedulePush, so four roots changing together cost one snapshot, not
     -- four.
     for _, root in ipairs({ 'money', 'job', 'gang', 'metadata' }) do
-        exports.qbcore:onPlayerDataChange({ root }, schedulePush)
+        exports.kora_core:onPlayerDataChange({ root }, schedulePush)
     end
 
     -- Push once immediately so the HUD reflects current state without waiting
@@ -319,7 +319,7 @@ function HudBridge.onChange(handler)
     -- reconcileLogin thread above for why this doesn't use QB.loops.controlled.
     CreateThread(function()
         local attempts = 0
-        while exports.qbcore:getPlayerData() == nil and attempts < 100 do
+        while exports.kora_core:getPlayerData() == nil and attempts < 100 do
             Wait(100)
             attempts = attempts + 1
         end

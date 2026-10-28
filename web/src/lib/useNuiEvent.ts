@@ -11,7 +11,7 @@ import type { NuiWireMessage } from "./types"
  * than being a dependency itself, so passing a fresh inline arrow every
  * render doesn't tear down and re-add the listener on every re-render.
  *
- * Deliberately no event.source/event.origin check -- see qblib's own
+ * Deliberately no event.source/event.origin check -- see kora_lib's own
  * web/src/lib/useNuiEvent.ts for why that's a trap, not a hardening measure:
  * FiveM posts SendNUIMessage from the game's own NUI window (origin
  * "nui://game"), not from this page, so any source/origin gate silently
