@@ -5,6 +5,7 @@ Config = {}
 local configEnum = QB and QB.config and QB.config.enum
 local configInteger = QB and QB.config and QB.config.integer
 local configBoolean = QB and QB.config and QB.config.boolean
+local configNumber = QB and QB.config and QB.config.number
 
 -- Per-element toggles. Health, armour, and job/gang are NOT here -- they're
 -- baseline "usual player data" rather than independently toggleable elements.
@@ -87,6 +88,43 @@ Config.layout = {
     -- FiveM KVP key the saved offsets are written to, as JSON. Client-side
     -- storage only -- nothing here ever reaches the server.
     kvpKey = 'qbhud:layout',
+}
+
+-- Seatbelt feedback. The seatbelt itself lives in kora_utils; kora_hud only
+-- plays the sound when that state changes. All values are read each time a
+-- sound plays, so edits apply without a restart.
+Config.seatbelt = {
+    sound = {
+        enabled = configBoolean and configBoolean(true, {
+            label = 'Seatbelt sounds',
+            description = 'Plays a buckle sound when the seatbelt goes on and a different unbuckle sound when it comes off, for the local player only. Turn off on servers that already play their own seatbelt audio.',
+            live = true,
+        }) or true,
+        volume = configNumber and configNumber(0.5, {
+            label = 'Seatbelt sound volume',
+            description = 'Volume of the buckle and unbuckle sounds from 0.0 (silent) to 1.0 (full). Only applies to the bundled NUI sounds; native frontend sounds cannot be scaled.',
+            min = 0.0, max = 1.0, step = 0.05, live = true,
+        }) or 0.5,
+        -- 'nui'    -- play the bundled files below from the HUD page. Needs no
+        --             other resource and honours `volume`.
+        -- 'native' -- GTA frontend sounds (PlaySoundFrontend), fixed volume. Use if
+        --             the NUI audio is unavailable on a client.
+        backend = configEnum and configEnum('nui', {
+            label = 'Seatbelt sound backend',
+            description = 'Chooses how seatbelt sounds are played. NUI plays the bundled audio files at the configured volume; native uses GTA frontend sounds at a fixed volume.',
+            options = { 'nui', 'native' },
+            live = true,
+        }) or 'nui',
+        -- File names inside web/build/sounds (source: web/public/sounds). Any
+        -- file you add there must also be listed in fxmanifest.lua `files`.
+        buckleFile = 'seatbelt_buckle.wav',
+        unbuckleFile = 'seatbelt_unbuckle.wav',
+        -- Backend 'native' only: { name = ..., set = ... } per sound.
+        native = {
+            buckle = { name = 'SELECT', set = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+            unbuckle = { name = 'BACK', set = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+        },
+    },
 }
 
 Config.bridge = {

@@ -40,6 +40,9 @@ end)
 -- owns a placeholder toggled by its own keybind.
 local function toggleSeatbelt()
     state.seatbelt = not state.seatbelt
+    -- Same event kora_utils raises, so the buckle sound and any other listener
+    -- see the stub's toggle exactly like the real seatbelt.
+    TriggerEvent('seatbelt:client:ToggleSeatbelt', state.seatbelt)
 end
 
 -- Retain the documented console command while QB.keybind owns the actual

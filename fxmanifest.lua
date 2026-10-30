@@ -34,6 +34,7 @@ client_scripts {
     'client/bridge/qbcore.lua',
     'client/voice.lua',
     'client/vehicle.lua',
+    'client/seatbelt_sound.lua',
     'client/hud.lua'
 }
 
@@ -46,5 +47,6 @@ ui_page 'web/build/index.html'
 -- see kora_lib/fxmanifest.lua's comment. Needs the explicit '/*'.
 files {
     'web/build/index.html',
-    'web/build/assets/**/*'
+    'web/build/assets/**/*',
+    'web/build/sounds/*.wav'
 }

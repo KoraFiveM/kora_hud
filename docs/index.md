@@ -181,6 +181,24 @@ These commands are registered by `client/bridge/stub.lua` only — they don't
 exist when the kora_core adapter is loaded, since job/cash/etc. there come from
 kora_core itself (`exports.kora_core:addMoney`, `exports.kora_core:setJob`, ...).
 
+### Seatbelt sounds
+
+kora_hud plays a buckle / unbuckle sound for the local player whenever the
+seatbelt state changes (the `seatbelt:client:ToggleSeatbelt` event raised by
+kora_utils, or by the stub bridge's toggle). Entering or leaving a vehicle is
+silent. Settings in `Config.seatbelt.sound`, all read when the sound plays:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Turn the sounds off entirely. |
+| `volume` | `0.5` | 0.0-1.0, `nui` backend only. |
+| `backend` | `'nui'` | `'nui'` plays the bundled WAVs from the HUD page; `'native'` uses GTA frontend sounds (fixed volume). |
+| `buckleFile` / `unbuckleFile` | `seatbelt_buckle.wav` / `seatbelt_unbuckle.wav` | Files in `web/build/sounds` (source `web/public/sounds`); list new ones in `fxmanifest.lua` `files`. |
+| `native` | see config | `{ name, set }` per sound for the `native` backend. |
+
+The two bundled sounds were synthesised for this resource (decaying sine and
+noise clicks) and carry no third-party licence.
+
 ### Toggle the seatbelt placeholder
 ```
 /hud_toggleseatbelt

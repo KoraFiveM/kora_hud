@@ -6,6 +6,7 @@ import { GaugesPreview, StatusPreview, VehiclePreview } from "@/components/hud/L
 import { HUD_SECTIONS, LayoutEditorOverlay, MovableSection } from "@/components/hud/LayoutEditor"
 import { MicIndicator } from "@/components/hud/MicIndicator"
 import { PlayerId } from "@/components/hud/PlayerId"
+import { SeatbeltSound } from "@/components/SeatbeltSound"
 import { Stamina } from "@/components/hud/Stamina"
 import { StatusEffects } from "@/components/hud/StatusEffects"
 import { Stress } from "@/components/hud/Stress"
@@ -161,6 +162,7 @@ function HudContent() {
 export default function App() {
     return (
         <HudStateProvider>
+            <SeatbeltSound />
             <HudContent />
         </HudStateProvider>
     )
