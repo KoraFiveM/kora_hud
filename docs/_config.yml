@@ -1,4 +1,4 @@
 theme: jekyll-theme-cayman
 title: qbhud
-description: "Configurable HUD built on qblib"
+description: "Configurable HUD built on kora_lib"
 show_downloads: false

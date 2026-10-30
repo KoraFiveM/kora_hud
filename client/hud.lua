@@ -36,7 +36,7 @@
 --
 -- NOTE: this resource owns its own NUI frame (ui_page in fxmanifest.lua), so
 -- every NUI native below is called RAW rather than through QB.nui.*. Because
--- the body of a QB.* call runs in QBLIB's Lua VM, SendNUIMessage would post
+-- the body of a QB.* call runs in kora_lib's Lua VM, SendNUIMessage would post
 -- into kora_lib's frame and RegisterNUICallback would publish the callback at
 -- https://kora_lib/<name> while this resource's page fetches
 -- https://kora_hud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
@@ -51,7 +51,7 @@ end
 -- Forward-declared so the qbhud:ready callback can be registered as the very
 -- FIRST statement in this chunk, ahead of everything that can throw at load
 -- (HudBridge.getSnapshot below, QB.cache.onChange -- all cross-resource export
--- calls that fail if kora_core/qblib are mid-restart). A raised error aborts the
+-- calls that fail if kora_core/kora_lib are mid-restart). A raised error aborts the
 -- whole chunk; if that happened before registration, this resource's page would
 -- 404 on its ready ping forever with nothing left to retry it.
 local sendInitialState

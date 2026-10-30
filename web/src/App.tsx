@@ -18,7 +18,7 @@ import { memo } from "react"
  * self-contained -- it reads its own slice of HudStateProvider's contexts and
  * applies its configured element/dynamic visibility -- so mounting all of
  * them unconditionally here (once visible) *is* the layout, same pattern as
- * qblib's own web/src/App.tsx. Split out from App so the visibility check has
+ * kora_lib's own web/src/App.tsx. Split out from App so the visibility check has
  * HudStateProvider's context available (a provider's own children can't read
  * the context it provides).
  *

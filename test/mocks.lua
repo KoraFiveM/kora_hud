@@ -114,7 +114,7 @@ function M.install()
     end
 
     function _G.GetCurrentResourceName()
-        return "qblib_test"
+        return "kora_lib_test"
     end
 
     -- Not a real joaat -- just deterministic, so the same string always hashes

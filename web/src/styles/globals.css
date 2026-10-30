@@ -75,7 +75,7 @@
 /*
  * NUI headless overlay requirement -- composited over live gameplay at all
  * times, must render fully transparent and click-through by default. Same
- * convention as qblib's own globals.css.
+ * convention as kora_lib's own globals.css.
  */
 html,
 body,

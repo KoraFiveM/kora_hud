@@ -21,7 +21,7 @@ local hudSource = arg[1] or repoRoot .. 'client/hud.lua'
 -- than silently shipping a dead HUD.
 local FORBIDDEN_NUI = setmetatable({}, {
     __index = function(_, key)
-        error(("QB.nui.%s would run in qblib's VM and target qblib's frame, not qbhud's -- "
+        error(("QB.nui.%s would run in kora_lib's VM and target kora_lib's frame, not qbhud's -- "
             .. 'use the raw SendNUIMessage/RegisterNUICallback natives'):format(tostring(key)), 2)
     end,
 })
@@ -332,7 +332,7 @@ local function loadHud(opts)
         end,
         applyConfig = function(resource, settings)
             local binding = configBindings[resource]
-            harness.assertTrue(binding ~= nil, 'missing qblib config binding for ' .. resource)
+            harness.assertTrue(binding ~= nil, 'missing kora_lib config binding for ' .. resource)
             binding.handler(settings)
         end,
         -- The most recent qbhud:visibility payload, or nil if none was sent.
@@ -354,14 +354,14 @@ local function loadHud(opts)
     }
 end
 
-harness.test('qbhud registers qbhud:ready on the raw native, not through the qblib proxy', function()
+harness.test('qbhud registers qbhud:ready on the raw native, not through the kora_lib proxy', function()
     local hud = loadHud()
     harness.assertTrue(hud.loaded, 'client/hud.lua should load cleanly: ' .. tostring(hud.loadError))
     harness.assertEqual(type(hud.callbacks['qbhud:ready']), 'function',
         'qbhud:ready must be registered via the raw RegisterNUICallback so it resolves at https://kora_hud/')
 end)
 
-harness.test('qbhud never routes NUI through QB.nui (which targets qblib\'s frame)', function()
+harness.test('qbhud never routes NUI through QB.nui (which targets kora_lib\'s frame)', function()
     -- FORBIDDEN_NUI raises on any access, so a clean load is itself the proof.
     local hud = loadHud()
     harness.assertTrue(hud.loaded, 'a QB.nui.* call would abort the chunk: ' .. tostring(hud.loadError))
@@ -448,7 +448,7 @@ harness.test('the HUD applies and forwards the configured speed unit', function(
     end
 end)
 
-harness.test('a live qblib config update refreshes the speedometer without a HUD restart', function()
+harness.test('a live kora_lib config update refreshes the speedometer without a HUD restart', function()
     local hud = loadHud({ bridgePush = true, inVehicle = true, staticVehicle = true, speedUnit = 'kmh' })
     hud.reset()
     hud.applyConfig('kora_hud', {
@@ -556,9 +556,9 @@ harness.test('a live config update refreshes the mounted HUD while it is hidden'
         'the next visible HUD frame must use the newly selected speed unit')
 end)
 
-harness.test('HUD startup no longer depends on qblib theme derivation', function()
+harness.test('HUD startup no longer depends on kora_lib theme derivation', function()
     local hud = loadHud()
-    QB.theme.tokens = function() error('qblib restarting', 0) end
+    QB.theme.tokens = function() error('kora_lib restarting', 0) end
     hud.reset()
 
     hud.callbacks['qbhud:ready']({}, function() end)

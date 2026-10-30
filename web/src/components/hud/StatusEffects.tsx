@@ -3,7 +3,7 @@ import { AlertTriangle } from "lucide-react"
 import { useHudLayout, useHudUpdate } from "@/lib/hudState"
 
 /**
- * Renders one badge per active qblib QB.status effect (e.g. "bleeding",
+ * Renders one badge per active kora_lib QB.status effect (e.g. "bleeding",
  * "limping", a drug's "high_weed"). Deliberately generic -- kora_hud has no
  * dependency on, and no business knowing about, whichever job/drug resource
  * registered a given effect name, so this can't hardcode per-effect icons or

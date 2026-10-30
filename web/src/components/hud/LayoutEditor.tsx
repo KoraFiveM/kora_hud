@@ -18,7 +18,7 @@ export const HUD_SECTIONS = {
     vehicle: "vehicle",
     /** Bottom-right: mic, job/gang, money. */
     identity: "identity",
-    /** Top-right: active qblib status effects. */
+    /** Top-right: active kora_lib status effects. */
     status: "status",
     /** qbchat's composer, stored by qbhud but rendered in qbchat's NUI. */
     chatInput: "chatInput",

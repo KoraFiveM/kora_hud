@@ -8,7 +8,7 @@ name 'kora_hud'
 provide 'qbhud'
 author 'Jamie'
 version '0.1.0'
-description 'Configurable HUD built on qblib and qbtheme'
+description 'Configurable HUD built on kora_lib and qbtheme'
 
 dependency 'kora_theme'
 dependency 'kora_lib'

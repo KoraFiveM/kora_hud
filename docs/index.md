@@ -22,7 +22,7 @@ loads is a `fxmanifest.lua` `client_scripts` choice, documented by
 
 ## Requirements
 
-- [qblib](https://qbcore2.github.io/kora_lib/)
+- [kora_lib](https://qbcore2.github.io/kora_lib/)
 - kora_core — **optional**. Only needed if you keep the shipped `kora_core` bridge
   adapter (`client/bridge/qbcore.lua`) loaded. Swap `fxmanifest.lua`'s
   `client_scripts` to `client/bridge/stub.lua` instead and kora_hud runs
@@ -346,7 +346,7 @@ interval is deferred to the scheduler's trailing pass.
 
 Part of the [qbcore2](https://github.com/qbcore2) resource set:
 
-- [qblib](https://qbcore2.github.io/kora_lib/) — shared helper library
+- [kora_lib](https://qbcore2.github.io/kora_lib/) — shared helper library
 - [qbsql](https://qbcore2.github.io/kora_sql/) — database driver
 - [qbcore](https://qbcore2.github.io/kora_core/) — framework core
 - [qbinventory](https://qbcore2.github.io/kora_inventory/) — headless inventory
