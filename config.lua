@@ -4,6 +4,7 @@ Config = {}
 -- older kora_lib during a rolling upgrade.
 local configEnum = QB and QB.config and QB.config.enum
 local configInteger = QB and QB.config and QB.config.integer
+local configBoolean = QB and QB.config and QB.config.boolean
 
 -- Per-element toggles. Health, armour, and job/gang are NOT here -- they're
 -- baseline "usual player data" rather than independently toggleable elements.
@@ -47,6 +48,18 @@ Config.hud = {
     --   'vehicle' -- only while the player is in a vehicle.
     --   'never'   -- always hidden.
     minimap = 'vehicle',
+
+    -- While another resource force-hides the HUD (exports.kora_hud:hide(), as
+    -- kora_clothing does for its menu) also keep the radar hidden, and let
+    -- `minimap` above take over again on show(). Set false for the old
+    -- behaviour: the radar is handed back as visible, which with
+    -- minimap = 'vehicle' shows it on foot. Logout and resource stop always
+    -- restore the radar. Read live, so changes apply on the next hide().
+    hideMinimapWhenForcedHidden = configBoolean and configBoolean(true, {
+        label = 'Hide minimap with forced-hidden HUD',
+        description = 'Keeps the minimap hidden while another resource hides the HUD, such as a clothing menu, and returns it to the minimap mode when the HUD is shown again. When off, the minimap is handed back as visible instead, which shows it on foot in vehicle mode.',
+        live = true,
+    }) or true,
 
     -- Unit used by the vehicle speedometer.
     --   'kmh' -- kilometres per hour

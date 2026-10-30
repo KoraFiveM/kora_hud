@@ -163,6 +163,7 @@ local function loadHud(opts)
             -- native is called; the modes that DO take control are covered by
             -- their own cases below.
             minimap = opts.minimap or 'always',
+            hideMinimapWhenForcedHidden = opts.hideMinimapWhenForcedHidden,
         },
         layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
         voice = { enabled = true, interval = 200 },
@@ -1238,6 +1239,77 @@ harness.test('hiding the HUD hands the radar back', function()
         'the scheduler stops with the HUD, so a hidden HUD must not leave the radar off with nothing left to restore it')
 end)
 
+harness.test('hide() keeps the radar off when hideMinimapWhenForcedHidden is on (default)', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle' })
+    hud.tick()
+    hud.exported.hide()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'a menu must not turn the radar on for a player on foot')
+    for _, shown in ipairs(hud.radar) do
+        harness.assertFalse(shown, 'the radar is never switched on while forced hidden')
+    end
+end)
+
+harness.test('hide() hands the radar back when hideMinimapWhenForcedHidden is false', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle', hideMinimapWhenForcedHidden = false })
+    hud.tick()
+    hud.exported.hide()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'old behaviour: released to visible')
+end)
+
+harness.test("show() re-applies the minimap mode in 'vehicle'", function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle', inVehicle = true })
+    hud.tick()
+    hud.exported.hide()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'held off while hidden, even in a vehicle')
+    hud.exported.show()
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'the vehicle mode shows it again after show()')
+
+    hud.setVehicle(nil)
+    hud.exported.hide()
+    hud.exported.show()
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'on foot it stays hidden after show()')
+end)
+
+harness.test("show() leaves 'never' hidden and restores 'always'", function()
+    local never = loadHud({ bridgePush = true, minimap = 'never' })
+    never.tick()
+    never.exported.hide()
+    never.exported.show()
+    never.tick()
+    harness.assertEqual(never.radar[#never.radar], false, "'never' stays hidden")
+
+    local always = loadHud({ bridgePush = true, minimap = 'always' })
+    always.tick()
+    harness.assertEqual(#always.radar, 0, "'always' is untouched until something hides the HUD")
+    always.exported.hide()
+    harness.assertEqual(always.radar[#always.radar], false, 'hidden with the HUD')
+    always.exported.show()
+    harness.assertEqual(always.radar[#always.radar], true, 'handed back on show()')
+
+    local optedOut = loadHud({ bridgePush = true, minimap = 'always', hideMinimapWhenForcedHidden = false })
+    optedOut.exported.hide()
+    optedOut.exported.show()
+    harness.assertEqual(#optedOut.radar, 0, "'always' with the option off never touches the radar")
+end)
+
+harness.test('logout while force hidden still releases the held radar', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle' })
+    hud.tick()
+    hud.exported.hide()
+    hud.setLoggedIn(false)
+    harness.assertEqual(hud.radar[#hud.radar], true, 'a logged-out player must not be left without a radar')
+end)
+
+
+harness.test('stopping while force hidden releases the held radar', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle' })
+    hud.tick()
+    hud.exported.hide()
+    hud.stopResource('kora_hud')
+    harness.assertEqual(hud.radar[#hud.radar], true, 'a stopped resource must not leave the radar forced off')
+end)
 
 harness.test('hiding or logging out closes the owned editor without saving its preview', function()
     for _, action in ipairs({ 'hide', 'logout' }) do
@@ -1337,7 +1409,9 @@ end)
 
 harness.test('stop releases only acquired HUD assets and preserves unowned focus and radar', function()
     for _, mode in ipairs({ 'always', 'vehicle', 'never' }) do
-        local hud = loadHud({ bridgePush = true, minimap = mode, inVehicle = true })
+        -- Option off: the HUD never touched the radar here, which is what this
+        -- case pins. The held-radar release on stop is covered separately.
+        local hud = loadHud({ bridgePush = true, minimap = mode, inVehicle = true, hideMinimapWhenForcedHidden = false })
         harness.assertTrue(hud.loaded, tostring(hud.loadError))
         hud.exported.hide()
         hud.takeOtherFocus()

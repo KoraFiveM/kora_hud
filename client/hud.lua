@@ -751,12 +751,11 @@ local function minimapShouldShow()
 end
 
 local minimapVisibilityTask
+-- Tracked so the radar is only touched when the answer CHANGES. A resource
+-- that legitimately hid the radar for its own reasons then keeps working
+-- between our transitions instead of being overruled four times a second.
+local lastRadar
 if MINIMAP_MODE ~= 'always' then
-    -- Tracked so the radar is only touched when the answer CHANGES. A resource
-    -- that legitimately hid the radar for its own reasons then keeps working
-    -- between our transitions instead of being overruled four times a second.
-    local lastRadar
-
     local function applyMinimap()
         local shouldShow = minimapShouldShow()
         if shouldShow == nil or shouldShow == lastRadar then return end
@@ -780,6 +779,34 @@ if MINIMAP_MODE ~= 'always' then
             DisplayRadar(true)
         end
     end
+end
+
+-- While another resource force-hides the HUD (exports.kora_hud:hide(), e.g. a
+-- clothing menu), minimapRelease would hand the radar back as VISIBLE and
+-- 'vehicle' mode would show it on foot. With hideMinimapWhenForcedHidden the
+-- radar is kept off instead, and show() lets the normal mode take over again.
+-- Logout and resource stop still release it, so it is never left forced off.
+local radarHeldHidden = false
+
+local function wantsRadarHeldHidden(loggedIn, forcedHidden, stopping)
+    return loggedIn and forcedHidden and not stopping
+        and Config.hud.hideMinimapWhenForcedHidden ~= false
+end
+
+local function holdRadarHidden()
+    radarHeldHidden = true
+    lastRadar = nil -- the mode must be re-applied from scratch after show()
+    DisplayRadar(false)
+end
+
+-- Called when the radar is no longer held. `hudVisible` is true on show(),
+-- where the scheduler reapplies 'vehicle'/'never' itself; 'always' has no
+-- scheduler, so it must be handed back explicitly. Otherwise (logout, stop)
+-- nothing will run again, so the radar is restored.
+local function releaseHeldRadar(hudVisible)
+    radarHeldHidden = false
+    if hudVisible and MINIMAP_MODE ~= 'always' then return end
+    DisplayRadar(true)
 end
 
 -- --- sampled inputs ---------------------------------------------------------
@@ -923,8 +950,13 @@ end
 -- going through the channels: a show has to repaint the whole HUD on the spot,
 -- and a channel already mid-interval from some unrelated change would
 -- otherwise defer it.
+local resourceStopping = false
+
 local function refreshVisibility()
     local newVisible = loggedIn and not forcedHidden
+    if radarHeldHidden and not wantsRadarHeldHidden(loggedIn, forcedHidden, resourceStopping) then
+        releaseHeldRadar(newVisible)
+    end
     if not newVisible then closeLayout() end
     if newVisible == visible then return end
     visible = newVisible
@@ -945,12 +977,17 @@ local function refreshVisibility()
         -- until the HUD is shown again, nothing in this resource draws it.
         setupMinimapHealthArmour(MINIMAP_DRAW_DEFAULT)
         -- And the radar itself, for the same reason -- see minimapRelease.
-        if minimapRelease then minimapRelease() end
+        if wantsRadarHeldHidden(loggedIn, forcedHidden, resourceStopping) then
+            holdRadarHidden()
+        elseif minimapRelease then
+            minimapRelease()
+        end
     end
 end
 
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
+    resourceStopping = true
     forcedHidden = true
     refreshVisibility()
     if minimapScaleform then
