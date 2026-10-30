@@ -62,20 +62,21 @@ Config.hud = {
         live = true,
     }) or true,
 
-    -- Minimap layout. kora_hud positions the minimap, its mask and its
-    -- border/blur frame from one calculation so they stay aligned at every
-    -- aspect ratio (4:3 to 32:9) and GTA safezone size, re-applied
-    -- automatically when either changes. Read live.
+    -- Optional minimap layout. When enabled, kora_hud positions the minimap,
+    -- its mask and its border/blur frame from one calculation (vanilla 16:9
+    -- sizes, widths scaled for other aspect ratios) so they stay aligned at
+    -- every aspect ratio and GTA safezone size, re-applied automatically when
+    -- either changes. Off by default: the stock minimap is left untouched.
+    -- Read live.
     minimapLayout = {
-        -- Set false to leave the minimap completely alone (another resource
-        -- owns its layout). Default true: the stock minimap overruns its
-        -- border on most setups, and other resources can ask kora_hud to
-        -- restore the layout via exports.kora_hud:applyMinimapLayout().
-        enabled = configBoolean and configBoolean(true, {
-            label = 'Manage minimap layout',
-            description = 'Lets the HUD position the minimap, mask and border together so the map stays inside its frame across resolutions and safezone sizes. Turn off if another resource positions the minimap.',
+        -- Default false: kora_hud does not touch the minimap components or the
+        -- bigmap at all, and exports.kora_hud:applyMinimapLayout() returns
+        -- false. Opt in per server if the stock minimap overruns its border.
+        enabled = configBoolean and configBoolean(false, {
+            label = 'Manage minimap layout (off = stock minimap)',
+            description = 'Off by default, which leaves the stock GTA minimap alone. When on, the HUD positions the minimap, mask and border together at vanilla size so the map stays inside its frame across aspect ratios and safezone sizes. Leave off if another resource positions the minimap.',
             live = true,
-        }) or true,
+        }) or false,
         -- Screen-fraction offsets applied to the whole minimap (positive x is
         -- right, positive y is down). Default 0: the calculated position.
         x = configNumber and configNumber(0.0, {

@@ -1,8 +1,8 @@
--- Minimap layout owner. kora_hud is the single place that positions the
--- minimap, minimap_mask and minimap_blur components, so the map texture, its
--- mask and its border/blur frame always move and scale together. Before this,
--- nothing positioned them for the player's resolution at all, and the phone's
--- Maps app restored a fixed 16:9 table when it closed.
+-- Optional minimap layout owner. When Config.hud.minimapLayout.enabled is true
+-- kora_hud positions the minimap, minimap_mask and minimap_blur components so
+-- the map texture, its mask and its border/blur frame move and scale together.
+-- When it is false (the default) this file never touches a component position
+-- or the bigmap, and the stock minimap is left alone.
 --
 -- Everything that depends on the screen goes through HudMinimap.layout(), a
 -- pure function of (aspect ratio, safezone, config) so it is unit-tested
@@ -14,20 +14,14 @@
 HudMinimap = {}
 
 local WIDESCREEN = 16 / 9
--- Ultrawide correction: above 16:9 the HUD is still laid out in a centred 16:9
--- area, so a left-anchored component has to be pulled back by an amount that
--- grows with the extra width. 3.6 and the 0.008 trim are the widely used
--- values for this; both are applied only above 16:9, so 16:9, 16:10 and 4:3
--- need no correction.
-local ULTRAWIDE_DIVISOR = 3.6
-local ULTRAWIDE_TRIM = 0.008
 
--- Left/bottom anchored rects (x, y, w, h) at 16:9. The mask and blur are
--- expressed relative to the same anchor as the map, so scaling one scales all.
+-- Vanilla 16:9 rects, left/bottom anchored (x, y, w, h). These are the widely
+-- used community reference values for the stock GTA V minimap; at 16:9, scale
+-- 1.0 and no offsets the layout is exactly these numbers.
 local BASE = {
-    minimap      = { x = 0.0,   y = -0.047, w = 0.1638, h = 0.183 },
-    minimap_mask = { x = 0.0,   y = 0.0,    w = 0.128,  h = 0.20 },
-    minimap_blur = { x = -0.01, y = 0.025,  w = 0.262,  h = 0.300 },
+    minimap      = { x = -0.0045, y = 0.002, w = 0.150, h = 0.188 },
+    minimap_mask = { x = 0.020,   y = 0.032, w = 0.111, h = 0.159 },
+    minimap_blur = { x = -0.03,   y = 0.022, w = 0.266, h = 0.237 },
 }
 
 HudMinimap.COMPONENTS = { 'minimap', 'minimap_mask', 'minimap_blur' }
@@ -58,10 +52,12 @@ function HudMinimap.layout(aspect, safezone, cfg)
     local shiftY = number(cfg.y, 0.0, -1.0, 1.0)
     local compensation = number(cfg.safezoneCompensation, 0.0, 0.0, 2.0)
 
-    local wide = 0.0
-    if aspect > WIDESCREEN then
-        wide = ((WIDESCREEN - aspect) / ULTRAWIDE_DIVISOR) - ULTRAWIDE_TRIM
-    end
+    -- Screen fractions are relative to the screen width, so on a wider screen
+    -- the same fraction is more pixels and the map would stretch. Scaling the
+    -- widths (and the left inset) by (16/9)/aspect keeps the pixel size and
+    -- shape the same as at 16:9: narrower fractions on 21:9 and 32:9, wider on
+    -- 4:3. Exactly 1.0 at 16:9, so 16:9 is vanilla.
+    local widthFactor = WIDESCREEN / aspect
     -- The engine already anchors L/B components inside the safezone; the
     -- optional compensation cancels part of that margin for builds where the
     -- mask drifts relative to the blur at small safezones.
@@ -73,11 +69,11 @@ function HudMinimap.layout(aspect, safezone, cfg)
         local base, own = BASE[name], fine[FINE_KEY[name]]
         own = type(own) == 'table' and own or {}
         out[name] = {
-            -- Size and the in-frame offsets scale; the ultrawide correction,
-            -- safezone margin and user offsets are screen-space and do not.
-            x = base.x * scale + wide - margin + shiftX + number(own.x, 0.0, -1.0, 1.0),
+            -- Size and the in-frame offsets scale; the safezone margin and
+            -- user offsets are screen-space and do not.
+            x = base.x * scale * widthFactor - margin + shiftX + number(own.x, 0.0, -1.0, 1.0),
             y = base.y * scale + margin + shiftY + number(own.y, 0.0, -1.0, 1.0),
-            w = base.w * scale,
+            w = base.w * scale * widthFactor,
             h = base.h * scale,
         }
     end
@@ -86,39 +82,90 @@ end
 
 local function settings()
     local hud = type(Config) == 'table' and Config.hud
-    return type(hud) == 'table' and type(hud.minimapLayout) == 'table' and hud.minimapLayout or nil
+    local cfg = type(hud) == 'table' and hud.minimapLayout
+    if type(cfg) ~= 'table' or cfg.enabled ~= true then return nil end
+    return cfg
 end
 
 local lastKey
+local running, pending = false, false
 
----Applies the layout to the game. Returns false when the layout is disabled.
----@param force boolean|nil re-apply even if aspect/safezone/config are unchanged
----@return boolean applied
-function HudMinimap.apply(force)
+local function snapshot()
     local cfg = settings()
-    if not cfg or cfg.enabled == false then
-        lastKey = nil
-        return false
-    end
-
+    if not cfg then return nil end
     local aspect, safezone = GetAspectRatio(false), GetSafeZoneSize()
-    local rects = HudMinimap.layout(aspect, safezone, cfg)
-    local key = string.format('%.4f|%.4f|%s', aspect, safezone, json.encode(cfg))
-    if not force and key == lastKey then return true end
-    lastKey = key
+    return cfg, aspect, safezone, string.format('%.4f|%.4f|%s', aspect, safezone, json.encode(cfg))
+end
 
+-- Waits (bounded) for the minimap scaleform so the bigmap refresh below is not
+-- lost when this runs at resource start or spawn, before the radar exists.
+local function waitForMinimap()
+    local ok, handle = pcall(RequestScaleformMovie, 'minimap')
+    if not ok or not handle then return end
+    for _ = 1, 100 do
+        if HasScaleformMovieLoaded(handle) then return end
+        Wait(0)
+    end
+end
+
+local function place()
+    local cfg, aspect, safezone, key = snapshot()
+    if not cfg then
+        lastKey = nil
+        return
+    end
+    lastKey = key
+    local rects = HudMinimap.layout(aspect, safezone, cfg)
     for _, name in ipairs(HudMinimap.COMPONENTS) do
         local r = rects[name]
         SetMinimapComponentPosition(name, 'L', 'B', r.x, r.y, r.w, r.h)
     end
-    -- The engine only re-reads component positions on a bigmap toggle.
+    -- The engine only re-reads component positions on a bigmap toggle, and it
+    -- needs a frame between the two calls: toggling both in the same frame can
+    -- leave the bigmap radar on.
     SetBigmapActive(true, false)
+    Wait(0)
     SetBigmapActive(false, false)
+end
+
+local function run()
+    repeat
+        pending = false
+        local ok = pcall(function()
+            waitForMinimap()
+            place()
+        end)
+        -- Whatever happened, never leave the bigmap on.
+        if not ok then pcall(SetBigmapActive, false, false) end
+    until not pending
+    running = false
+end
+
+---Applies the layout to the game. Returns false when the layout is disabled
+---(nothing is touched); otherwise true, with the natives applied from a thread.
+---@param force boolean|nil re-apply even if aspect/safezone/config are unchanged
+---@return boolean applied
+function HudMinimap.apply(force)
+    local _, _, _, key = snapshot()
+    if not key then
+        lastKey = nil
+        return false
+    end
+    if not force and key == lastKey then return true end
+    -- One apply at a time: a request that arrives mid-apply runs once more
+    -- with the latest values when the current one finishes.
+    if running then
+        pending = true
+        return true
+    end
+    running = true
+    CreateThread(run)
     return true
 end
 
--- Re-applies the HUD's layout: used by resources that moved the minimap
--- temporarily (the phone Maps app) to put it back.
+-- Re-applies the HUD layout: used by resources that moved the minimap
+-- temporarily (the phone Maps app) to put it back. Returns false when the
+-- layout is disabled so the caller can restore the stock positions itself.
 exports('applyMinimapLayout', function()
     return HudMinimap.apply(true)
 end)
