@@ -62,6 +62,56 @@ Config.hud = {
         live = true,
     }) or true,
 
+    -- Minimap layout. kora_hud positions the minimap, its mask and its
+    -- border/blur frame from one calculation so they stay aligned at every
+    -- aspect ratio (4:3 to 32:9) and GTA safezone size, re-applied
+    -- automatically when either changes. Read live.
+    minimapLayout = {
+        -- Set false to leave the minimap completely alone (another resource
+        -- owns its layout). Default true: the stock minimap overruns its
+        -- border on most setups, and other resources can ask kora_hud to
+        -- restore the layout via exports.kora_hud:applyMinimapLayout().
+        enabled = configBoolean and configBoolean(true, {
+            label = 'Manage minimap layout',
+            description = 'Lets the HUD position the minimap, mask and border together so the map stays inside its frame across resolutions and safezone sizes. Turn off if another resource positions the minimap.',
+            live = true,
+        }) or true,
+        -- Screen-fraction offsets applied to the whole minimap (positive x is
+        -- right, positive y is down). Default 0: the calculated position.
+        x = configNumber and configNumber(0.0, {
+            label = 'Minimap X offset',
+            description = 'Moves the whole minimap horizontally as a fraction of the screen width; positive moves right.',
+            min = -0.5, max = 0.5, step = 0.001, live = true,
+        }) or 0.0,
+        y = configNumber and configNumber(0.0, {
+            label = 'Minimap Y offset',
+            description = 'Moves the whole minimap vertically as a fraction of the screen height; positive moves down.',
+            min = -0.5, max = 0.5, step = 0.001, live = true,
+        }) or 0.0,
+        -- Size multiplier for map, mask and border together. Default 1.0.
+        scale = configNumber and configNumber(1.0, {
+            label = 'Minimap size scale',
+            description = 'Scales the minimap, its mask and its border together; 1.0 is the stock size.',
+            min = 0.5, max = 2.0, step = 0.01, live = true,
+        }) or 1.0,
+        -- Fraction of the safezone margin to cancel. The engine already keeps
+        -- the minimap inside the safezone, so 0 is correct unless the mask
+        -- drifts from the border at small safezones on your build.
+        safezoneCompensation = configNumber and configNumber(0.0, {
+            label = 'Safezone compensation',
+            description = 'Cancels this fraction of the GTA safezone margin for the minimap. Leave at 0 unless the map drifts from its border when the safezone slider is lowered.',
+            min = 0.0, max = 2.0, step = 0.05, live = true,
+            advanced = true,
+        }) or 0.0,
+        -- Fine offsets for one component, to correct a single layer that is a
+        -- hair off on your setup (screen fractions, same signs as above).
+        offsets = {
+            map  = { x = 0.0, y = 0.0 },
+            mask = { x = 0.0, y = 0.0 },
+            blur = { x = 0.0, y = 0.0 },
+        },
+    },
+
     -- Unit used by the vehicle speedometer.
     --   'kmh' -- kilometres per hour
     --   'mph' -- miles per hour
