@@ -9,12 +9,12 @@ local calls, threads = 0, {}
 local playerIdReads = 0
 _G.Config = { voice = { enabled = true, interval = 200, resource = 'kora_voice' } }
 -- The local player index is a session constant; voice.lua resolves it once
--- from the native rather than paying for a QB.cache export call every sample.
+-- from the native rather than paying for a Kora.cache export call every sample.
 _G.PlayerId = function()
     playerIdReads = playerIdReads + 1
     return 3
 end
-_G.QB = { cache = { playerId = function() error('voice.lua must not cross the export boundary to read PlayerId()', 0) end } }
+_G.Kora = { cache = { playerId = function() error('voice.lua must not cross the export boundary to read PlayerId()', 0) end } }
 _G.NetworkIsPlayerTalking = function()
     calls = calls + 1
     return false

@@ -17,8 +17,8 @@ dependency 'kora_lib'
 dependency 'kora_core'
 dependency 'kora_fuel'
 
--- Required to reach QB.cache -- see kora_lib's own AGENTS.md for
--- why this is how a consumer resource pulls in the QB proxy (init.lua).
+-- Required to reach Kora.cache -- see kora_lib's own AGENTS.md for
+-- why this is how a consumer resource pulls in the Kora proxy (init.lua).
 shared_script '@kora_lib/init.lua'
 
 shared_scripts {

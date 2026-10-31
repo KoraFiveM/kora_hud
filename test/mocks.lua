@@ -35,10 +35,10 @@ function M.install()
 
     _G.source = nil
 
-    -- Minimal kora_lib QB stand-in -- only what a bridge adapter touches
+    -- Minimal kora_lib Kora stand-in -- only what a bridge adapter touches
     -- directly (client/bridge/stub.lua and client/bridge/qbcore.lua both call
-    -- QB.status.getActive() for the snapshot's `status` field).
-    _G.QB = { status = { getActive = function() return {} end } }
+    -- Kora.status.getActive() for the snapshot's `status` field).
+    _G.Kora = { status = { getActive = function() return {} end } }
 
     function _G.RegisterNetEvent(name, cb)
         netHandlers[name] = netHandlers[name] or {}

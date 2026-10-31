@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react"
 import type { NuiWireMessage } from "./types"
 
 /**
- * Subscribes to messages sent from Lua via QB.nui.send for a single `action`
+ * Subscribes to messages sent from Lua via Kora.nui.send for a single `action`
  * name. `handler` receives the message's `data` verbatim.
  *
  * The `window` listener is only ever attached/removed when `action` changes

@@ -203,7 +203,7 @@ noise clicks) and carry no third-party licence.
 ```
 /hud_toggleseatbelt
 ```
-Bound to `B` by default via `QB.keybind`. Stock FiveM has no seatbelt
+Bound to `B` by default via `Kora.keybind`. Stock FiveM has no seatbelt
 native at all, so both adapters own this as local placeholder state until a
 real seatbelt system is wired into a vehicle resource.
 
@@ -268,7 +268,7 @@ internals:
 ---@field thirst number     -- 0-100
 ---@field stress number     -- 0-100
 ---@field seatbelt boolean
----@field status { name, severity }[] | nil   -- kora_lib QB.status.getActive(), adapter-independent
+---@field status { name, severity }[] | nil   -- kora_lib Kora.status.getActive(), adapter-independent
 ```
 Writing a new adapter (ESX, ox_core, ...) means implementing this table in a
 new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
@@ -319,7 +319,7 @@ The HUD is written against a per-frame budget. Three rules hold everywhere in
    and mic state are genuinely sampled, because nothing in the stack can
    announce them.
 3. **No hot path reads back across the export boundary.** Every
-   `QB.<module>.<fn>` access is a cross-resource export call, not a table
+   `Kora.<module>.<fn>` access is a cross-resource export call, not a table
    lookup — announced values are mirrored into plain locals and kept current
    from the change handlers' own arguments.
 

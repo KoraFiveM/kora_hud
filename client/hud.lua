@@ -24,7 +24,7 @@
 --     vehicle telemetry and mic state are genuinely sampled, because nothing
 --     in the stack can announce them.
 --  3. NO HOT PATH READS BACK ACROSS THE EXPORT BOUNDARY. Every
---     QB.<module>.<fn> access is a cross-resource export call (see
+--     Kora.<module>.<fn> access is a cross-resource export call (see
 --     kora_lib/init.lua's proxy metatable) -- a full boundary crossing with
 --     argument marshalling, not a table lookup. Values are mirrored into
 --     plain locals once and kept current from the change handlers' own
@@ -35,14 +35,14 @@
 -- does no work at all.
 --
 -- NOTE: this resource owns its own NUI frame (ui_page in fxmanifest.lua), so
--- every NUI native below is called RAW rather than through QB.nui.*. Because
--- the body of a QB.* call runs in kora_lib's Lua VM, SendNUIMessage would post
+-- every NUI native below is called RAW rather than through Kora.nui.*. Because
+-- the body of a Kora.* call runs in kora_lib's Lua VM, SendNUIMessage would post
 -- into kora_lib's frame and RegisterNUICallback would publish the callback at
 -- https://kora_lib/<name> while this resource's page fetches
 -- https://kora_hud/<name> (web/src/lib/fetchNui.ts uses GetParentResourceName) --
 -- a permanent 404 that leaves the HUD stuck on DEFAULT_VISIBLE=false. Same
 -- reasoning and same fix as kora_loading/client.lua and kora_inventory/client/ui.lua.
--- QB.cache/QB.status stay on the proxy; kora_theme's imported bridge owns theme
+-- Kora.cache/Kora.status stay on the proxy; kora_theme's imported bridge owns theme
 -- delivery for this frame.
 local function send(action, data)
     SendNUIMessage({ action = action, data = data })
@@ -50,7 +50,7 @@ end
 
 -- Forward-declared so the qbhud:ready callback can be registered as the very
 -- FIRST statement in this chunk, ahead of everything that can throw at load
--- (HudBridge.getSnapshot below, QB.cache.onChange -- all cross-resource export
+-- (HudBridge.getSnapshot below, Kora.cache.onChange -- all cross-resource export
 -- calls that fail if kora_core/kora_lib are mid-restart). A raised error aborts the
 -- whole chunk; if that happened before registration, this resource's page would
 -- 404 on its ready ping forever with nothing left to retry it.
@@ -74,7 +74,7 @@ local minimapRelease
 -- whether the best-effort send in CreateThread below did.
 RegisterNUICallback('qbhud:ready', function(_, cb)
     -- Answer first, unconditionally: a raw handler that errors before calling
-    -- cb leaves the page's fetch promise hanging forever. QB.nui.register-
+    -- cb leaves the page's fetch promise hanging forever. Kora.nui.register-
     -- Callback used to pcall + cb({}) on our behalf; that safety net is ours
     -- now that we register directly.
     cb({})
@@ -312,7 +312,7 @@ end
 -- game needs. The NUI takes focus only while this mode is open.
 RegisterCommand(LAYOUT.command or 'hudlayout', function()
     if LAYOUT.movable == false then
-        QB.notify.send({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
+        Kora.notify.send({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
         return
     end
 
@@ -351,7 +351,7 @@ RegisterCommand('hudlayoutreset', function()
     closeLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
-    QB.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
+    Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end, false)
 
 -- Kept as a local, session-only choice: /id is a quick way to identify
@@ -683,7 +683,7 @@ end
 --
 -- The minimap's own scaleform draws a health/armour/breath cluster straight
 -- from the engine's internal ped state -- it is not driven by
--- QB.cache.health() and has its own smoothing/thresholds, so left alone it
+-- Kora.cache.health() and has its own smoothing/thresholds, so left alone it
 -- visibly disagrees with the radial gauges above (that's the "health isn't
 -- matching the default hud" symptom: two independent renderers of the same
 -- stat). SETUP_HEALTH_ARMOUR's param controls which of health(1)/armour(2)
@@ -744,7 +744,7 @@ local MINIMAP_MODE = (type(Config.hud.minimap) == 'string' and Config.hud.minima
 local function minimapShouldShow()
     if MINIMAP_MODE == 'never' then return false end
     if MINIMAP_MODE == 'vehicle' then
-        local vehicle = QB.cache.vehicle()
+        local vehicle = Kora.cache.vehicle()
         return vehicle ~= nil and vehicle ~= 0
     end
     return nil
@@ -844,8 +844,8 @@ end
 -- new value from its own ARGUMENT: kora_lib's cache passes (new, old), so there
 -- is no reason to call back across the export boundary to ask for what we
 -- were just handed.
-QB.cache.onChange("health", function(value) setVital('health', round(value)) end)
-QB.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
+Kora.cache.onChange("health", function(value) setVital('health', round(value)) end)
+Kora.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
 Voice.onChange(function(value) setVital('talking', value == true) end)
 Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 
@@ -856,13 +856,13 @@ Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 -- actually renders it: a server with the stamina ring switched off pays
 -- nothing for it, rather than paying to receive and discard it.
 if ELEMENTS.stamina then
-    QB.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
+    Kora.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
 end
 
 -- Maximum health is per-ped (freemode male 200, female 175) and only ever
 -- changes when the ped itself does -- a respawn, a model change, a script
 -- setting a new maximum. Reading it per push meant a native call AND a
--- cross-resource QB.cache.ped() on every single stamina tick.
+-- cross-resource Kora.cache.ped() on every single stamina tick.
 --
 -- A non-positive reading is discarded rather than published: the native
 -- answers 0 for a handle that isn't a valid entity yet (the join/loading
@@ -875,7 +875,7 @@ local function refreshMaxHealth(ped)
     setVital('maxHealth', maxHealth)
 end
 
-QB.cache.onChange("ped", function(ped)
+Kora.cache.onChange("ped", function(ped)
     refreshMaxHealth(ped)
     -- A respawn rebuilds the minimap, which is the one moment the suppression
     -- above is most likely to have been dropped. Re-assert it now rather than
@@ -890,7 +890,7 @@ end)
 -- the NUI reads as "on foot"). The task's own next run is deduplicated against
 -- this one, so the immediacy costs no extra message.
 if ELEMENTS.vehicle then
-    QB.cache.onChange("vehicle", function(vehicle)
+    Kora.cache.onChange("vehicle", function(vehicle)
         currentVehicle = vehicle or false
         pushVehicleUpdate()
         if currentVehicle then startScheduler() end
@@ -907,17 +907,17 @@ end
 local seeded = false
 
 local function seedFromCache()
-    vitals.health = round(QB.cache.health())
-    vitals.armour = round(QB.cache.armour())
-    if ELEMENTS.stamina then vitals.stamina = round(QB.cache.stamina()) end
-    refreshMaxHealth(QB.cache.ped())
-    if ELEMENTS.vehicle then currentVehicle = QB.cache.vehicle() or false end
+    vitals.health = round(Kora.cache.health())
+    vitals.armour = round(Kora.cache.armour())
+    if ELEMENTS.stamina then vitals.stamina = round(Kora.cache.stamina()) end
+    refreshMaxHealth(Kora.cache.ped())
+    if ELEMENTS.vehicle then currentVehicle = Kora.cache.vehicle() or false end
     seeded = true
 end
 
 pcall(seedFromCache)
 
--- QB.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
+-- Kora.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
 -- in spirit (it's read directly from kora_lib, not through HudBridge's own
 -- change notification), so a status effect applying/clearing needs its own
 -- push here rather than waiting up to Config.poll.bridgeInterval to show up.
@@ -925,8 +925,8 @@ pcall(seedFromCache)
 -- registers qbhud:ready, otherwise the web NUI receives a 404 and can never
 -- request the initial visibility/configuration snapshot.
 pcall(function()
-    QB.status.onChange(function()
-        local ok, status = pcall(function() return QB.status.getActive() end)
+    Kora.status.onChange(function()
+        local ok, status = pcall(function() return Kora.status.getActive() end)
         latestBridgeSnapshot.status = ok and type(status) == 'table' and status or {}
         requestPlayer()
     end)
@@ -1172,6 +1172,6 @@ end
 -- A kora_lib binding supplies the initial active snapshot after database
 -- hydration and subsequent live updates. Older kora_lib versions keep the
 -- file-backed configuration behaviour because this registration is optional.
-if QB.config and QB.config.bind then
-    QB.config.bind('kora_hud', {}, applyConfig)
+if Kora.config and Kora.config.bind then
+    Kora.config.bind('kora_hud', {}, applyConfig)
 end

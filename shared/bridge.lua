@@ -22,7 +22,7 @@
 ---@field thirst number Range 0-100.
 ---@field stress number Range 0-100.
 ---@field seatbelt boolean Stock FiveM has no seatbelt native/state at all -- this is a placeholder the stub owns via its own keybind until a real framework's seatbelt system is wired in. See client/vehicle.lua.
----@field status { name: string, severity: integer|nil }[]|nil Active kora_lib QB.status effects (bleed/limp/high/etc), sourced directly from QB.status.getActive() -- a pure client-side read of kora_lib's own cache, zero network cost, independent of the framework mirror everything else here reads from. Absence/empty means no adapter-independent status system is wired up; client/hud.lua treats a missing field the same as an empty list.
+---@field status { name: string, severity: integer|nil }[]|nil Active kora_lib Kora.status effects (bleed/limp/high/etc), sourced directly from Kora.status.getActive() -- a pure client-side read of kora_lib's own cache, zero network cost, independent of the framework mirror everything else here reads from. Absence/empty means no adapter-independent status system is wired up; client/hud.lua treats a missing field the same as an empty list.
 
 ---@class QBHudBridge
 ---@field getSnapshot fun(): QBHudBridgeSnapshot Synchronous and cheap -- called every Config.poll.bridgeInterval by client/hud.lua.

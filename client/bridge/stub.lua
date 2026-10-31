@@ -8,7 +8,7 @@ HudBridge = HudBridge or {}
 -- Status effects enrich the standalone bridge when kora_lib provides them, but
 -- they must never make the HUD unavailable during a staggered kora_lib update.
 local function activeStatus()
-    local ok, status = pcall(function() return QB.status.getActive() end)
+    local ok, status = pcall(function() return Kora.status.getActive() end)
     if ok and type(status) == 'table' then return status end
     return {}
 end
@@ -45,10 +45,10 @@ local function toggleSeatbelt()
     TriggerEvent('seatbelt:client:ToggleSeatbelt', state.seatbelt)
 end
 
--- Retain the documented console command while QB.keybind owns the actual
+-- Retain the documented console command while Kora.keybind owns the actual
 -- settings mapping and lifecycle.
 RegisterCommand('hud_toggleseatbelt', toggleSeatbelt, false)
-QB.keybind.add({
+Kora.keybind.add({
     name = 'hud_toggleseatbelt',
     description = 'Toggle seatbelt (qb-hud stub bridge)',
     defaultMapper = 'keyboard',

@@ -2,10 +2,10 @@ Config = {}
 
 -- Descriptors are optional so the configuration remains compatible with an
 -- older kora_lib during a rolling upgrade.
-local configEnum = QB and QB.config and QB.config.enum
-local configInteger = QB and QB.config and QB.config.integer
-local configBoolean = QB and QB.config and QB.config.boolean
-local configNumber = QB and QB.config and QB.config.number
+local configEnum = Kora and Kora.config and Kora.config.enum
+local configInteger = Kora and Kora.config and Kora.config.integer
+local configBoolean = Kora and Kora.config and Kora.config.boolean
+local configNumber = Kora and Kora.config and Kora.config.number
 
 -- Per-element toggles. Health, armour, and job/gang are NOT here -- they're
 -- baseline "usual player data" rather than independently toggleable elements.
@@ -267,7 +267,7 @@ Config.poll = {
 }
 
 -- Registers this resource-owned configuration with kora_lib without changing its public Config table.
-if QB and QB.config and QB.config.object then
-    Config.poll = QB.config.object(Config.poll, { advanced = true })
+if Kora and Kora.config and Kora.config.object then
+    Config.poll = Kora.config.object(Config.poll, { advanced = true })
 end
-if QB and QB.config and QB.config.adopt then Config = QB.config.adopt(Config) end
+if Kora and Kora.config and Kora.config.adopt then Config = Kora.config.adopt(Config) end

@@ -1,7 +1,7 @@
 -- Guards the NUI transport contract in client/hud.lua.
 --
 -- kora_hud owns its own ui_page, so its NUI I/O MUST use the raw natives. Going
--- through QB.nui.* routes the call into kora_lib's Lua VM (every QB.* access is a
+-- through Kora.nui.* routes the call into kora_lib's Lua VM (every Kora.* access is a
 -- cross-resource export call), which posts messages into kora_lib's frame and
 -- publishes callbacks at https://kora_lib/<name> while this resource's page
 -- fetches https://kora_hud/<name> -- a permanent 404 that leaves the HUD stuck on
@@ -16,12 +16,12 @@ package.path = testDir .. '?.lua;' .. package.path
 local harness = require('harness')
 local hudSource = arg[1] or repoRoot .. 'client/hud.lua'
 
--- Any QB.nui.<anything> access explodes with an explanatory message, so a
--- reintroduced QB.nui.send/registerCallback fails this suite loudly rather
+-- Any Kora.nui.<anything> access explodes with an explanatory message, so a
+-- reintroduced Kora.nui.send/registerCallback fails this suite loudly rather
 -- than silently shipping a dead HUD.
 local FORBIDDEN_NUI = setmetatable({}, {
     __index = function(_, key)
-        error(("QB.nui.%s would run in kora_lib's VM and target kora_lib's frame, not qbhud's -- "
+        error(("Kora.nui.%s would run in kora_lib's VM and target kora_lib's frame, not qbhud's -- "
             .. 'use the raw SendNUIMessage/RegisterNUICallback natives'):format(tostring(key)), 2)
     end,
 })
@@ -63,7 +63,7 @@ local function loadHud(opts)
     local waits = {}
     -- Mock game clock in ms, advanced explicitly by tick().
     local clock = 0
-    -- Every QB.cache.<fn>() read, by key. Each one is a cross-resource export
+    -- Every Kora.cache.<fn>() read, by key. Each one is a cross-resource export
     -- call, so "how many of these happen per update" IS this resource's cost
     -- while the player is moving -- pinned below.
     local cacheReads = { health = 0, armour = 0, stamina = 0, ped = 0, vehicle = 0 }
@@ -194,7 +194,7 @@ local function loadHud(opts)
 
     _G.Vehicle = {
         -- Reads the handle it is HANDED, not the cache: client/hud.lua already
-        -- has the vehicle from QB.cache.onChange and must not pay for an
+        -- has the vehicle from Kora.cache.onChange and must not pay for an
         -- export call to re-ask for it four times a second.
         getSnapshot = function(handle)
             vehicleHandles[#vehicleHandles + 1] = handle
@@ -219,7 +219,7 @@ local function loadHud(opts)
         sample = function() voiceSamples = voiceSamples + 1 end,
     }
 
-    _G.QB = {
+    _G.Kora = {
         nui = FORBIDDEN_NUI,
         cache = {
             onChange = function(key, handler)
@@ -361,10 +361,10 @@ harness.test('qbhud registers qbhud:ready on the raw native, not through the kor
         'qbhud:ready must be registered via the raw RegisterNUICallback so it resolves at https://kora_hud/')
 end)
 
-harness.test('qbhud never routes NUI through QB.nui (which targets kora_lib\'s frame)', function()
+harness.test('qbhud never routes NUI through Kora.nui (which targets kora_lib\'s frame)', function()
     -- FORBIDDEN_NUI raises on any access, so a clean load is itself the proof.
     local hud = loadHud()
-    harness.assertTrue(hud.loaded, 'a QB.nui.* call would abort the chunk: ' .. tostring(hud.loadError))
+    harness.assertTrue(hud.loaded, 'a Kora.nui.* call would abort the chunk: ' .. tostring(hud.loadError))
     harness.assertTrue(hud.contains('qbhud:config'), 'initial state should reach the frame via SendNUIMessage')
 end)
 
@@ -558,7 +558,7 @@ end)
 
 harness.test('HUD startup no longer depends on kora_lib theme derivation', function()
     local hud = loadHud()
-    QB.theme.tokens = function() error('kora_lib restarting', 0) end
+    Kora.theme.tokens = function() error('kora_lib restarting', 0) end
     hud.reset()
 
     hud.callbacks['qbhud:ready']({}, function() end)
@@ -658,7 +658,7 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
 end)
 
 harness.test('a player already in a vehicle at resource start gets telemetry', function()
-    -- QB.cache.onChange only observes FUTURE transitions, so `ensure kora_hud`
+    -- Kora.cache.onChange only observes FUTURE transitions, so `ensure kora_hud`
     -- mid-drive needs an explicit arm at startup.
     local hud = loadHud({ bridgePush = true, inVehicle = true })
     hud.reset()
@@ -823,7 +823,7 @@ harness.test('no HUD thread runs on a per-frame Wait(0)', function()
 end)
 
 harness.test('a vitals change costs zero cross-resource cache reads', function()
-    -- Every QB.cache.<fn>() is an export call. The old push read four of them
+    -- Every Kora.cache.<fn>() is an export call. The old push read four of them
     -- (health/ped/armour/stamina) EVERY time stamina moved -- ten times a
     -- second for the whole length of a sprint. The change handlers are handed
     -- the new value as an argument; there is nothing left to go and ask for.
@@ -840,7 +840,7 @@ harness.test('a vitals change costs zero cross-resource cache reads', function()
     local after = hud.cacheReads()
     for key, count in pairs(baseline) do
         harness.assertEqual(after[key], count,
-            ('a stamina tick must not read QB.cache.%s across the export boundary'):format(key))
+            ('a stamina tick must not read Kora.cache.%s across the export boundary'):format(key))
     end
 end)
 
@@ -935,7 +935,7 @@ harness.test('the vehicle sampler is handed the cached handle rather than re-rea
     local handles = hud.vehicleHandles()
     harness.assertTrue(#handles > 0, 'sanity: the sampler ran')
     for _, handle in ipairs(handles) do
-        harness.assertEqual(handle, 42, 'every sample must use the handle QB.cache.onChange pushed')
+        harness.assertEqual(handle, 42, 'every sample must use the handle Kora.cache.onChange pushed')
     end
 end)
 

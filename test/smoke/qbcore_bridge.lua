@@ -30,7 +30,7 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
     -- reason the bridge defers its state bag registration.
     _G.GetPlayerServerId = function() return sessionLive and 17 or -1 end
     _G.NetworkIsSessionStarted = function() return sessionLive end
-    _G.QB = {
+    _G.Kora = {
         cache = { serverId = function() return sessionLive and 17 or -1 end },
         keybind = { add = function() return { remove = function() return true end } end },
     }
@@ -231,7 +231,7 @@ harness.test('a qbhud restart reconciles an already-present local login state', 
 end)
 
 harness.test('a missing optional kora_lib status export cannot stop the core HUD bridge', function()
-    _G.QB = nil
+    _G.Kora = nil
     local bridge = loadBridge(false, { money = {}, metadata = {} })
     local snapshot = bridge.bridge.getSnapshot()
     harness.assertEqual(type(snapshot.status), 'table', 'status should degrade to an empty array')
@@ -285,7 +285,7 @@ end)
 harness.test('a burst of delta roots costs one snapshot rebuild, not one per root', function()
     -- kora_core fires money/job/gang/metadata separately, and a resync touches all
     -- four at once. Each rebuild is a getPlayerData export call plus a
-    -- QB.status.getActive one, so re-snapshotting per root turns one logical
+    -- Kora.status.getActive one, so re-snapshotting per root turns one logical
     -- update into four boundary crossings and four HUD pushes.
     local bridge = loadBridge(true, { money = { cash = 10 }, metadata = {} })
     local pushes = 0

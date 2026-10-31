@@ -17,7 +17,7 @@ _G.RegisterCommand = function(name, handler)
     commands[name] = handler
 end
 _G.RegisterKeyMapping = function() end
-_G.QB = {
+_G.Kora = {
     status = { getActive = function() return {} end },
     keybind = {
         add = function(options)

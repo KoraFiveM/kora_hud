@@ -150,7 +150,7 @@ export interface HudVehicleInfo {
     seatbelt: boolean
 }
 
-// One entry per active kora_lib QB.status effect (e.g. "bleeding", "limping",
+// One entry per active kora_lib Kora.status effect (e.g. "bleeding", "limping",
 // "high_weed") -- see kora_lib's modules/status. `severity` is whatever the
 // effect definition's severityLevels scale means for that specific effect;
 // the HUD doesn't interpret it beyond passing it to a per-name icon/style

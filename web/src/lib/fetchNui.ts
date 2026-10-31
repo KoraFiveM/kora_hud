@@ -15,7 +15,7 @@ function resourceName(): string {
 }
 
 /**
- * Calls an NUI callback registered via QB.nui.registerCallback (Lua side).
+ * Calls an NUI callback registered via Kora.nui.registerCallback (Lua side).
  * In a plain browser (isBrowserEnv) this never reaches Lua -- it resolves an
  * empty object so components stay usable in isolation during development.
  */

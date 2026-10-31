@@ -37,7 +37,7 @@ local loginGeneration = 0
 local dataHandlers = {}
 
 -- Rebuilding the snapshot is not free -- it is a getPlayerData export call
--- plus a QB.status.getActive one -- and kora_core's delta stream routinely fires
+-- plus a Kora.status.getActive one -- and kora_core's delta stream routinely fires
 -- several of the roots this adapter subscribes to for ONE logical update (a
 -- resync touches money, job, gang and metadata). Coalesce every notification
 -- landing in the same frame into a single rebuild and a single push.
@@ -67,7 +67,7 @@ end
 -- server has restarted kora_lib with the status exports.  A missing export must
 -- not prevent the NUI-ready callback below in client/hud.lua from registering.
 local function activeStatus()
-    local ok, status = pcall(function() return QB.status.getActive() end)
+    local ok, status = pcall(function() return Kora.status.getActive() end)
     if ok and type(status) == 'table' then return status end
     return {}
 end
@@ -108,7 +108,7 @@ local function reconcileLogin(value)
     -- mirror is actually visible before letting the HUD render player data.
     -- Capped at 200 frames per round rather than an unbounded Wait(0) spin, so
     -- a mirror that never populates can't leave this thread running forever --
-    -- not QB.loops.controlled, since this file must keep working even with QB
+    -- not Kora.loops.controlled, since this file must keep working even with Kora
     -- entirely absent (see the "missing optional kora_lib status export" test).
     --
     -- A single 200-frame timeout used to be treated as permanent failure: if
@@ -152,24 +152,24 @@ end
 -- handler is bound to a bag NAME resolved once, at registration, and the local
 -- player's server id does not exist yet while this chunk loads. Client scripts
 -- start during the join/loading screen, where GetPlayerServerId(PlayerId())
--- (and therefore QB.cache.serverId(), which just mirrors it) is -1 -- so
+-- (and therefore Kora.cache.serverId(), which just mirrors it) is -1 -- so
 -- registering here would permanently subscribe to `player:-1`, a bag nothing
 -- ever writes. Every login, cinematic-mode and cash change would then be
 -- invisible to this adapter: `loggedIn` stays false for the whole session and
 -- the HUD never appears at all. kora_multichar/client.lua defers its own
 -- `qbcore:loggedIn` handler for exactly this reason.
 --
--- Waiting on the server id itself as well as the session flag: QB.cache
+-- Waiting on the server id itself as well as the session flag: Kora.cache
 -- re-reads the native on kora_lib's shared tick (Config.cache.tickInterval), so
 -- it can still be reporting the pre-session -1 for one tick after
 -- NetworkIsSessionStarted() flips.
 CreateThread(function()
     while not NetworkIsSessionStarted() do Wait(0) end
 
-    local serverId = QB.cache.serverId()
+    local serverId = Kora.cache.serverId()
     while type(serverId) ~= 'number' or serverId <= 0 do
         Wait(0)
-        serverId = QB.cache.serverId()
+        serverId = Kora.cache.serverId()
     end
 
     local localPlayerBag = ('player:%s'):format(serverId)
@@ -316,7 +316,7 @@ function HudBridge.onChange(handler)
 
     -- Push once immediately so the HUD reflects current state without waiting
     -- for the first change. Capped rather than an unbounded poll -- see the
-    -- reconcileLogin thread above for why this doesn't use QB.loops.controlled.
+    -- reconcileLogin thread above for why this doesn't use Kora.loops.controlled.
     CreateThread(function()
         local attempts = 0
         while exports.kora_core:getPlayerData() == nil and attempts < 100 do

@@ -3,12 +3,12 @@ import { AlertTriangle } from "lucide-react"
 import { useHudLayout, useHudUpdate } from "@/lib/hudState"
 
 /**
- * Renders one badge per active kora_lib QB.status effect (e.g. "bleeding",
+ * Renders one badge per active kora_lib Kora.status effect (e.g. "bleeding",
  * "limping", a drug's "high_weed"). Deliberately generic -- kora_hud has no
  * dependency on, and no business knowing about, whichever job/drug resource
  * registered a given effect name, so this can't hardcode per-effect icons or
  * colors the way a screen vignette or ptfx (owned by that effect's own
- * `fx`/`anim` definition, played back by QB.status itself) can. A humanized
+ * `fx`/`anim` definition, played back by Kora.status itself) can. A humanized
  * label plus severity, if the effect uses one, is the most this component
  * can honestly show.
  *
