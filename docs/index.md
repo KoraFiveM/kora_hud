@@ -302,13 +302,19 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   when it closes. Polled on the HUD scheduler (`Config.poll.minimapInterval`),
   one NUI message per open/close; forced hides, logout and the minimap toggle
   are independent and unaffected.
-- `Config.hud.minimapLayout` — off by default. `enabled` positions the minimap,
-  mask and border together (aspect ratio / safezone aware). `shape = 'square'`
-  (default `'stock'`) additionally swaps `radarmasksm`/`radarmask1g` for the
-  masks in the streamed texture dict `squareTextureDict` (default
-  `'squaremap'`) and sets the square clip type so rotated map tiles stay inside
-  a square border. kora_hud does not ship that `.ytd`; stream one from any
-  resource, otherwise the shape stays stock.
+- `Config.hud.minimapLayout` — `enabled` (default `true`) positions the
+  minimap, mask and border together (aspect ratio / safezone aware, 16:9, 21:9
+  and 32:9); `false` leaves the stock minimap untouched. `shape` (default
+  `'square'`) swaps `radarmasksm`/`radarmask1g` for a square mask and sets the
+  square clip type so rotated map tiles stay inside a square border; `'stock'`
+  restores the round masks and stock rects. The mask is shipped as
+  `assets/square_minimap_mask.png` and loaded at runtime
+  (`CreateRuntimeTxd` / `CreateRuntimeTextureFromImage`). It is generated
+  in-repo by `python3 tools/gen_minimap_mask.py` (pure Python, no third-party
+  art): a Kora original under the same licence as the resource, reproducible
+  byte for byte. Optionally set `squareTextureDict` (default `''`) to a streamed
+  texture dict containing `radarmasksm`/`radarmask1g`; when it is streamed it is
+  preferred over the built-in mask.
 - `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
   `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD

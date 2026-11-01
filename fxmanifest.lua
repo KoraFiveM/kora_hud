@@ -50,5 +50,6 @@ ui_page 'web/build/index.html'
 files {
     'web/build/index.html',
     'web/build/assets/**/*',
-    'web/build/sounds/*.wav'
+    'web/build/sounds/*.wav',
+    'assets/square_minimap_mask.png'
 }

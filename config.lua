@@ -113,26 +113,33 @@ Config.hud = {
     -- its mask and its border/blur frame from one calculation (vanilla 16:9
     -- sizes, widths scaled for other aspect ratios) so they stay aligned at
     -- every aspect ratio and GTA safezone size, re-applied automatically when
-    -- either changes. Off by default: the stock minimap is left untouched.
-    -- Read live.
+    -- either changes. On by default so the default square shape (below) lines up
+    -- with its border out of the box; set enabled = false to leave the stock
+    -- minimap untouched. Read live.
     minimapLayout = {
-        -- Default false: kora_hud does not touch the minimap components or the
-        -- bigmap at all, and exports.kora_hud:applyMinimapLayout() returns
-        -- false. Opt in per server if the stock minimap overruns its border.
-        enabled = configBoolean and configBoolean(false, {
+        -- Default true. When false, kora_hud does not touch the minimap
+        -- components or the bigmap at all, and
+        -- exports.kora_hud:applyMinimapLayout() returns false. Turn it off if
+        -- another resource positions the minimap (and set shape = 'stock'
+        -- unless that resource sizes its frame for a square mask).
+        enabled = configBoolean and configBoolean(true, {
             label = 'Manage minimap layout (off = stock minimap)',
-            description = 'Off by default, which leaves the stock GTA minimap alone. When on, the HUD positions the minimap, mask and border together at vanilla size so the map stays inside its frame across aspect ratios and safezone sizes. Leave off if another resource positions the minimap.',
+            description = 'On by default: the HUD positions the minimap, mask and border together so the map stays inside its frame across aspect ratios and safezone sizes. Turn off to leave the stock GTA minimap positions alone, for example if another resource positions the minimap.',
             live = true,
-        }) or false,
-        -- Map mask shape. 'stock' (default) leaves the radar masks alone.
-        -- 'square' replaces radarmasksm/radarmask1g with the masks from the
-        -- streamed texture dict below and sets the square clip type, so the
-        -- rotating map tiles stay inside a square border. Needs a resource that
-        -- streams that dict (a .ytd holding square radarmasksm and radarmask1g
-        -- textures); without it the shape stays stock. Use together with
-        -- `enabled = true` so the mask and the border line up. Read live.
-        shape = 'stock',
-        squareTextureDict = 'squaremap',
+        }) or true,
+        -- Map mask shape. 'square' (default) replaces radarmasksm/radarmask1g
+        -- with a square mask and sets the square clip type, so the rotating map
+        -- tiles stay inside a square border; the layout above sizes the mask
+        -- square at every aspect ratio. The mask is kora_hud's own generated
+        -- PNG (assets/square_minimap_mask.png, see tools/gen_minimap_mask.py),
+        -- loaded as a runtime texture. 'stock' restores the stock round masks
+        -- and the stock component rects. Read live.
+        shape = 'square',
+        -- Optional: name of a streamed texture dict holding radarmasksm and
+        -- radarmask1g textures from another resource. When set and streamed it
+        -- is used instead of the built-in mask; '' (default) uses the built-in
+        -- mask only. Read live.
+        squareTextureDict = '',
         -- Screen-fraction offsets applied to the whole minimap (positive x is
         -- right, positive y is down). Default 0: the calculated position.
         x = configNumber and configNumber(0.0, {

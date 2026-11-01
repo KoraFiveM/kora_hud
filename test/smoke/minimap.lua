@@ -59,7 +59,7 @@ local VANILLA = {
 }
 
 harness.test('16:9, full safezone, default config is exactly the vanilla reference', function()
-    local r = HudMinimap.layout(16 / 9, 1.0, {})
+    local r = HudMinimap.layout(16 / 9, 1.0, { shape = 'stock' })
     for name, want in pairs(VANILLA) do
         for _, k in ipairs({ 'x', 'y', 'w', 'h' }) do
             harness.assertTrue(r[name][k] == want[k], name .. '.' .. k .. ' is ' .. tostring(r[name][k]))
@@ -241,12 +241,19 @@ harness.test('a failing native inside apply still ends with bigmap off and unloc
     harness.assertEqual(#placed, 3, 'later applies still run')
 end)
 
-local mask = { added = {}, removed = {}, clip = {}, requested = {}, loaded = true, released = {} }
+local mask = { added = {}, removed = {}, clip = {}, requested = {}, loaded = true, released = {}, runtimeTxd = {}, runtimeImage = {} }
 _G.RequestStreamedTextureDict = function(d) mask.requested[#mask.requested + 1] = d end
 _G.HasStreamedTextureDictLoaded = function() return mask.loaded end
 _G.AddReplaceTexture = function(t, n, d, dn) mask.added[#mask.added + 1] = { t, n, d, dn } end
 _G.RemoveReplaceTexture = function(t, n) mask.removed[#mask.removed + 1] = n end
 _G.SetMinimapClipType = function(c) mask.clip[#mask.clip + 1] = c end
+_G.CreateRuntimeTxd = function(n)
+    mask.runtimeCalls = (mask.runtimeCalls or 0) + 1
+    if mask.runtimeFails then error('no txd') end
+    mask.runtimeTxd[#mask.runtimeTxd + 1] = n
+    return n
+end
+_G.CreateRuntimeTextureFromImage = function(txd, n, path) mask.runtimeImage[#mask.runtimeImage + 1] = path end
 _G.SetStreamedTextureDictAsNoLongerNeeded = function(d) mask.released[#mask.released + 1] = d end
 
 local function runShape()
@@ -257,10 +264,30 @@ local function runShape()
     end
 end
 
-harness.test('shape stock (default) touches no mask native', function()
-    Config.hud = { minimapLayout = { enabled = true } }
+harness.test('shape stock touches no mask native', function()
+    Config.hud = { minimapLayout = { enabled = true, shape = 'stock' } }
     runShape()
     harness.assertEqual(#mask.added + #mask.clip + #mask.requested + #mask.removed, 0, 'nothing called')
+end)
+
+harness.test('a missing mask dict leaves the stock mask and does not retry every poll', function()
+    mask.added, mask.clip, mask.requested = {}, {}, {}
+    mask.runtimeFails, mask.runtimeCalls = true, 0
+    -- Earlier tests ran the poll thread with no natives: forget its failure.
+    handlers.onClientResourceStart('x')
+    Config.hud = { minimapLayout = { shape = 'stock' } }
+    runShape()
+    Config.hud = { minimapLayout = { shape = 'square' } }
+    runShape(); runShape()
+    harness.assertEqual(#mask.added + #mask.clip, 0, 'no mask change without the asset')
+    harness.assertEqual(mask.runtimeCalls, 1, 'runtime texture tried until a resource starts, not every poll')
+    mask.runtimeFails = false
+    handlers.onClientResourceStart('x')
+    runShape()
+    harness.assertEqual(#mask.added, 2, 'applied once the texture can be created')
+    Config.hud = { minimapLayout = { shape = 'stock' } }
+    runShape()
+    mask.added, mask.removed, mask.clip, mask.released = {}, {}, {}, {}
 end)
 
 harness.test('shape square swaps both masks, sets clip type 0, and applies once', function()
@@ -269,7 +296,13 @@ harness.test('shape square swaps both masks, sets clip type 0, and applies once'
     harness.assertEqual(#mask.added, 2, 'radarmasksm and radarmask1g replaced once')
     harness.assertEqual(mask.added[1][2], 'radarmasksm', 'radarmasksm')
     harness.assertEqual(mask.added[2][2], 'radarmask1g', 'radarmask1g')
-    harness.assertEqual(mask.added[1][3], 'squaremap', 'default dict')
+    harness.assertEqual(mask.added[1][3], 'kora_hud_minimap', 'runtime txd by default')
+    harness.assertEqual(mask.added[1][4], 'square_mask', 'runtime texture name')
+    harness.assertEqual(mask.added[2][3], 'kora_hud_minimap', 'same txd for radarmask1g')
+    harness.assertEqual(#mask.requested, 0, 'no streamed dict requested without squareTextureDict')
+    harness.assertEqual(#mask.runtimeTxd, 1, 'runtime txd created once')
+    harness.assertEqual(mask.runtimeImage[1], 'assets/square_minimap_mask.png', 'PNG path')
+    harness.assertTrue(#bigmap >= 2 and bigmap[#bigmap] == false, 'bigmap refresh toggled back off')
     harness.assertEqual(mask.clip[#mask.clip], 0, 'square clip type')
     harness.assertEqual(#mask.clip, 1, 'not re-applied while unchanged')
 end)
@@ -279,20 +312,43 @@ harness.test('switching back to stock removes the masks and restores the clip ty
     runShape()
     harness.assertEqual(#mask.removed, 2, 'both replacements removed')
     harness.assertEqual(mask.clip[#mask.clip], 1, 'round clip type restored')
-    harness.assertEqual(mask.released[1], 'squaremap', 'dict released')
+    harness.assertEqual(bigmap[#bigmap], false, 'refresh leaves the bigmap off')
 end)
 
-harness.test('a missing mask dict leaves the stock mask and does not retry every poll', function()
-    mask.added, mask.clip, mask.requested = {}, {}, {}
-    mask.loaded = false
-    Config.hud = { minimapLayout = { shape = 'square', squareTextureDict = 'nodict' } }
-    runShape(); runShape()
-    harness.assertEqual(#mask.added + #mask.clip, 0, 'no mask change without the asset')
-    harness.assertEqual(#mask.requested, 1, 'requested once until a resource starts')
-    mask.loaded = true
-    handlers.onClientResourceStart('x')
+harness.test('square is the default shape when none is configured', function()
+    Config.hud = { minimapLayout = { enabled = true } }
+    mask.added = {}
     runShape()
-    harness.assertEqual(#mask.added, 2, 'applied once the dict is streamed')
+    harness.assertEqual(#mask.added, 2, 'masks applied with no shape set')
+    harness.assertEqual(mask.clip[#mask.clip], 0, 'square clip type')
+end)
+
+harness.test('square mask is square in pixels at 16:9, 21:9 and 32:9, and safezone-aware', function()
+    for _, a in ipairs({ 16 / 9, 21 / 9, 32 / 9 }) do
+        local m = HudMinimap.layout(a, 1.0, {}).minimap_mask
+        harness.assertTrue(math.abs(m.w * a - m.h) < 0.001, 'square at aspect ' .. a)
+    end
+    local m = HudMinimap.layout(16 / 9, 0.9, { safezoneCompensation = 1.0 }).minimap_mask
+    harness.assertTrue(m.x < HudMinimap.layout(16 / 9, 1.0, { safezoneCompensation = 1.0 }).minimap_mask.x, 'safezone compensation shifts x')
+end)
+
+harness.test('a streamed squareTextureDict is preferred over the runtime texture', function()
+    mask.added = {}
+    Config.hud = { minimapLayout = { enabled = true, shape = 'square', squareTextureDict = 'mydict' } }
+    runShape()
+    harness.assertEqual(mask.added[1][3], 'mydict', 'streamed dict used')
+    harness.assertEqual(mask.added[1][4], 'radarmasksm', 'same texture name in the dict')
+    Config.hud = { minimapLayout = { enabled = true, shape = 'stock' } }
+    runShape()
+    harness.assertEqual(mask.released[#mask.released], 'mydict', 'dict released')
+end)
+
+harness.test('a missing squareTextureDict falls back to the runtime texture', function()
+    mask.added, mask.loaded = {}, false
+    Config.hud = { minimapLayout = { enabled = true, shape = 'square', squareTextureDict = 'nodict' } }
+    runShape()
+    harness.assertEqual(mask.added[1][3], 'kora_hud_minimap', 'runtime fallback')
+    mask.loaded = true
 end)
 
 harness.report('minimap')

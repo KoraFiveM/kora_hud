@@ -1,8 +1,9 @@
 -- Optional minimap layout owner. When Config.hud.minimapLayout.enabled is true
 -- kora_hud positions the minimap, minimap_mask and minimap_blur components so
 -- the map texture, its mask and its border/blur frame move and scale together.
--- When it is false (the default) this file never touches a component position
--- or the bigmap, and the stock minimap is left alone.
+-- When it is false this file never touches a component position or the
+-- bigmap, and the stock minimap is left alone. It is true by default so the
+-- default square shape lines up out of the box.
 --
 -- Everything that depends on the screen goes through HudMinimap.layout(), a
 -- pure function of (aspect ratio, safezone, config) so it is unit-tested
@@ -24,10 +25,24 @@ local BASE = {
     minimap_blur = { x = -0.03,   y = 0.022, w = 0.266, h = 0.237 },
 }
 
+-- Square shape: the mask is square in PIXELS (w * 16 = h * 9 at 16:9, kept at
+-- other aspects by the width factor in layout()), centred on the stock mask.
+-- The map and blur rects stay stock so the border frame is unchanged.
+local SQUARE_BASE = {
+    minimap      = BASE.minimap,
+    minimap_mask = { x = 0.031, y = 0.032, w = 0.0894, h = 0.159 },
+    minimap_blur = BASE.minimap_blur,
+}
+
 HudMinimap.COMPONENTS = { 'minimap', 'minimap_mask', 'minimap_blur' }
 
 -- Short config keys for the per-component fine offsets.
 local FINE_KEY = { minimap = 'map', minimap_mask = 'mask', minimap_blur = 'blur' }
+
+-- Square is the default shape; only an explicit 'stock' keeps the round mask.
+local function isSquare(cfg)
+    return type(cfg) ~= 'table' or cfg.shape ~= 'stock'
+end
 
 local function number(value, fallback, min, max)
     value = tonumber(value)
@@ -66,7 +81,7 @@ function HudMinimap.layout(aspect, safezone, cfg)
     local fine = type(cfg.offsets) == 'table' and cfg.offsets or {}
     local out = {}
     for _, name in ipairs(HudMinimap.COMPONENTS) do
-        local base, own = BASE[name], fine[FINE_KEY[name]]
+        local base, own = (isSquare(cfg) and SQUARE_BASE or BASE)[name], fine[FINE_KEY[name]]
         own = type(own) == 'table' and own or {}
         out[name] = {
             -- Size and the in-frame offsets scale; the safezone margin and
@@ -163,39 +178,60 @@ function HudMinimap.apply(force)
     return true
 end
 
--- Optional square map mask. The stock radar clips the rotating map tiles with a
+-- Square map mask. The stock radar clips the rotating map tiles with a
 -- round/rounded mask, so inside a square border the corner tiles show outside
--- it. 'square' swaps the radar masks for the ones in a streamed texture dict
--- the server supplies and sets the square clip type. 'stock' (the default)
--- touches nothing and, if square was applied earlier, undoes it. kora_hud ships
--- no mask texture: the dict (Config.hud.minimapLayout.squareTextureDict) must
--- be streamed by some resource, or the shape stays stock and one line is logged.
+-- it. 'square' (the default) swaps radarmasksm/radarmask1g for a square mask
+-- and sets the square clip type. The mask is kora_hud's own generated PNG
+-- (assets/square_minimap_mask.png, tools/gen_minimap_mask.py) loaded as a
+-- runtime texture; a streamed dict named by squareTextureDict, if one is
+-- streamed, is preferred. 'stock' restores the stock masks.
 local MASK_TXD = 'platform:/textures/graphics'
 local MASK_NAMES = { 'radarmasksm', 'radarmask1g' }
-local shapeKey, shapeFailedKey, shapeDict
+local RUNTIME_TXD, RUNTIME_TEX = 'kora_hud_minimap', 'square_mask'
+local RUNTIME_IMAGE = 'assets/square_minimap_mask.png'
+local DICT_WAIT_FRAMES = 30
+local shapeKey, shapeFailedKey, shapeDict, shapeApplied, runtimeReady
 
 local function shapeSettings()
     local hud = type(Config) == 'table' and Config.hud
     local cfg = type(hud) == 'table' and hud.minimapLayout
     cfg = type(cfg) == 'table' and cfg or {}
-    local dict = type(cfg.squareTextureDict) == 'string' and cfg.squareTextureDict ~= '' and cfg.squareTextureDict or 'squaremap'
-    return cfg.shape == 'square' and 'square' or 'stock', dict
+    local dict = type(cfg.squareTextureDict) == 'string' and cfg.squareTextureDict or ''
+    return isSquare(cfg) and 'square' or 'stock', dict
 end
 
 local function loadMaskDict(dict)
     RequestStreamedTextureDict(dict, false)
-    for _ = 1, 100 do
+    for _ = 1, DICT_WAIT_FRAMES do
         if HasStreamedTextureDictLoaded(dict) then return true end
         Wait(0)
     end
     return false
 end
 
+-- Creates the runtime txd/texture once. Returns false if the engine refuses.
+local function ensureRuntimeTexture()
+    if runtimeReady then return true end
+    local ok = pcall(function()
+        local txd = CreateRuntimeTxd(RUNTIME_TXD)
+        CreateRuntimeTextureFromImage(txd, RUNTIME_TEX, RUNTIME_IMAGE)
+    end)
+    runtimeReady = ok
+    return ok
+end
+
+-- The engine only re-reads the masks on a bigmap toggle (one frame apart).
+local function refreshRadar()
+    SetBigmapActive(true, false)
+    Wait(0)
+    SetBigmapActive(false, false)
+end
+
 local function removeMasks()
     for _, name in ipairs(MASK_NAMES) do RemoveReplaceTexture(MASK_TXD, name) end
     SetMinimapClipType(1)
     if shapeDict then SetStreamedTextureDictAsNoLongerNeeded(shapeDict) end
-    shapeDict = nil
+    shapeDict, shapeApplied = nil, false
 end
 
 ---Applies Config.hud.minimapLayout.shape. Safe to call often: it only acts when
@@ -204,20 +240,32 @@ function HudMinimap.applyShape()
     local shape, dict = shapeSettings()
     local key = shape .. '|' .. dict
     if key == shapeKey or key == shapeFailedKey then return end
+    -- A layout apply is mid-refresh; try again on the next poll.
+    if running then return end
     if shape == 'stock' then
-        if shapeDict then removeMasks() end
+        if shapeApplied then
+            removeMasks()
+            refreshRadar()
+        end
         shapeKey = key
         return
     end
-    if not loadMaskDict(dict) then
+    local txd, tex
+    if dict ~= '' and loadMaskDict(dict) then
+        txd = dict
+    elseif ensureRuntimeTexture() then
+        txd, tex = RUNTIME_TXD, RUNTIME_TEX
+    else
         shapeFailedKey = key
-        print(('[kora_hud] minimap shape "square": texture dict "%s" is not streamed, keeping the stock mask'):format(dict))
+        print('[kora_hud] minimap shape "square": could not create the runtime mask texture, keeping the stock mask')
         return
     end
-    if shapeDict and shapeDict ~= dict then removeMasks() end
-    for _, name in ipairs(MASK_NAMES) do AddReplaceTexture(MASK_TXD, name, dict, name) end
+    if shapeApplied then removeMasks() end
+    for _, name in ipairs(MASK_NAMES) do AddReplaceTexture(MASK_TXD, name, txd, tex or name) end
     SetMinimapClipType(0)
-    shapeDict, shapeKey, shapeFailedKey = dict, key, nil
+    shapeDict = txd == dict and dict or nil
+    shapeKey, shapeFailedKey, shapeApplied = key, nil, true
+    refreshRadar()
 end
 
 -- Re-applies the HUD layout: used by resources that moved the minimap
