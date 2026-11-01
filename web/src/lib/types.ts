@@ -99,6 +99,16 @@ export interface HudLayoutConfig {
     justifications: Record<string, HudLayoutJustification>
     /** True keeps gauges at the screen bottom until vehicle telemetry appears. */
     gaugesBottomAnchored: boolean
+    /**
+     * This player's effective "Minimap only in vehicle" choice
+     * (Config.hud.minimapVehicleOnly, saved with the layout). Optional for the
+     * same reason as `money`: a payload from an older client/hud.lua omits it.
+     */
+    minimapVehicleOnly?: boolean
+    /** Config.hud.minimapVehicleOnly.default -- what /hudlayoutreset returns to. */
+    minimapVehicleOnlyDefault?: boolean
+    /** Config.hud.minimapVehicleOnly.allowPlayerChange; false hides the switch. */
+    minimapVehicleOnlyAllowed?: boolean
 }
 
 // action: "qbhud:layoutMode" -- the player entered layout edit mode with

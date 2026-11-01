@@ -167,6 +167,7 @@ local function loadHud(opts)
             minimap = opts.minimap or 'always',
             hideMinimapWhenForcedHidden = opts.hideMinimapWhenForcedHidden,
             minimapToggle = opts.minimapToggle,
+            minimapVehicleOnly = opts.minimapVehicleOnly,
             hideOnPauseMenu = opts.hideOnPauseMenu,
         },
         layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
@@ -1563,6 +1564,116 @@ harness.test('hideOnPauseMenu = false leaves the HUD alone and is live', functio
     live.setPaused(true)
     live.tick()
     harness.assertEqual(live.lastVisibility(), false, 'sanity: on by default')
+end)
+
+-- Per-player "Minimap only in vehicle" (Config.hud.minimapVehicleOnly).
+local function saveVehicleOnly(hud, value)
+    hud.commands.hudlayout()
+    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = {}, minimapVehicleOnly = value }, function() end)
+end
+
+harness.test('minimap-only-in-vehicle is off by default and leaves the radar alone', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.tick()
+    harness.assertEqual(#hud.radar, 0, 'default config still never touches DisplayRadar')
+    local layout = configPayload(hud).layout
+    harness.assertFalse(layout.minimapVehicleOnly, 'effective value is the server default')
+    harness.assertFalse(layout.minimapVehicleOnlyDefault, 'default is false')
+    harness.assertTrue(layout.minimapVehicleOnlyAllowed, 'players may change it by default')
+end)
+
+harness.test('the server default hides the radar on foot and shows it in a vehicle, even with minimap = always', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always', minimapVehicleOnly = { default = true } })
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'hidden on foot')
+    local count = #hud.radar
+    hud.tick()
+    harness.assertEqual(#hud.radar, count, 'DisplayRadar is only called on change')
+    hud.setVehicle(42)
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'shown in a vehicle (driver or passenger)')
+    count = #hud.radar
+    hud.tick()
+    harness.assertEqual(#hud.radar, count, 'and not re-asserted')
+    hud.setVehicle(nil)
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'hidden again on foot')
+end)
+
+harness.test("'never' and the player's own hide choice still win over minimap-only-in-vehicle", function()
+    local never = loadHud({ bridgePush = true, minimap = 'never', inVehicle = true, minimapVehicleOnly = { default = true } })
+    never.tick()
+    harness.assertEqual(never.radar[#never.radar], false, "'never' hides it even in a vehicle")
+
+    local hud = loadHud({ bridgePush = true, minimap = 'always', inVehicle = true, minimapVehicleOnly = { default = true } })
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'sanity: shown in a vehicle')
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], false, '/minimap hides it in a vehicle')
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'the visibility task does not undo it')
+end)
+
+harness.test('a player can switch minimap-only-in-vehicle on in /hudlayout and it survives a reconnect', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.tick()
+    harness.assertEqual(#hud.radar, 0, 'sanity: untouched before the choice')
+    saveVehicleOnly(hud, true)
+    harness.assertEqual(hud.radar[#hud.radar], false, 'applies at once on confirm, on foot')
+
+    local reloaded = loadHud({ bridgePush = true, minimap = 'always', kvp = hud.kvp })
+    harness.assertTrue(configPayload(reloaded).layout.minimapVehicleOnly, 'the saved choice is seeded on load')
+    reloaded.tick()
+    harness.assertEqual(reloaded.radar[#reloaded.radar], false, 'and applied after a reconnect')
+    reloaded.setVehicle(42)
+    reloaded.tick()
+    harness.assertEqual(reloaded.radar[#reloaded.radar], true, 'in a vehicle it shows')
+end)
+
+harness.test('the choice is only stored once it differs from the server default', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    saveVehicleOnly(hud, false)
+    local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
+    harness.assertFalse(config.layout.minimapVehicleOnly, 'false stays the effective value')
+    local follows = loadHud({ bridgePush = true, kvp = hud.kvp, minimapVehicleOnly = { default = true } })
+    harness.assertTrue(configPayload(follows).layout.minimapVehicleOnly,
+        'a player who never chose follows a later change of the server default')
+end)
+
+harness.test('/hudlayoutreset puts minimap-only-in-vehicle back to the server default', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    saveVehicleOnly(hud, true)
+    harness.assertEqual(hud.radar[#hud.radar], false, 'sanity: on foot with the option on')
+    hud.commands.hudlayoutreset()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'the radar is handed back at once')
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'the saved layout is gone')
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
+    harness.assertFalse(configPayload(reloaded).layout.minimapVehicleOnly, 'and stays at the default')
+end)
+
+harness.test('allowPlayerChange = false forces the default and hides the switch', function()
+    local seeded = loadHud({ bridgePush = true })
+    saveVehicleOnly(seeded, true)
+    harness.assertTrue(seeded.kvp['qbhud:layout'] ~= nil, 'sanity: an earlier choice is saved')
+
+    local locked = loadHud({ bridgePush = true, minimap = 'always', kvp = seeded.kvp,
+        minimapVehicleOnly = { default = false, allowPlayerChange = false } })
+    locked.tick()
+    local layout = configPayload(locked).layout
+    harness.assertFalse(layout.minimapVehicleOnlyAllowed, 'the editor hides the switch')
+    harness.assertFalse(layout.minimapVehicleOnly, 'the saved choice is ignored')
+    harness.assertEqual(#locked.radar, 0, 'so the radar stays untouched')
+
+    saveVehicleOnly(locked, true)
+    harness.assertEqual(#locked.radar, 0, 'a submitted value is ignored too')
+
+    local lockedOn = loadHud({ bridgePush = true, minimap = 'always', inVehicle = false,
+        minimapVehicleOnly = { default = true, allowPlayerChange = false } })
+    lockedOn.tick()
+    harness.assertEqual(lockedOn.radar[#lockedOn.radar], false, 'a forced default of true hides the radar on foot')
+    saveVehicleOnly(lockedOn, false)
+    lockedOn.tick()
+    harness.assertEqual(lockedOn.radar[#lockedOn.radar], false, 'and a player can not opt out')
 end)
 
 harness.report('nui')

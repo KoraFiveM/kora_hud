@@ -42,6 +42,10 @@ client_scripts {
     'client/hud.lua'
 }
 
+-- stream/kora_hud_squaremap.ytd (the square radar mask, built by
+-- tools/gen_minimap_ytd.py) needs no files entry: FiveM streams everything in
+-- stream/ automatically and the dictionary name is the file name.
+
 -- web/build is committed (see kora_lib's AGENTS.md "UI (web/) layout" -- same
 -- convention here). FiveM serves it statically, there's no build step at
 -- resource-start time.
@@ -52,6 +56,5 @@ ui_page 'web/build/index.html'
 files {
     'web/build/index.html',
     'web/build/assets/**/*',
-    'web/build/sounds/*.wav',
-    'assets/square_minimap_mask.png'
+    'web/build/sounds/*.wav'
 }

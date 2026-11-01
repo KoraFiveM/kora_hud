@@ -36,7 +36,17 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     // pre-existing behaviour, so defaulting to them means the pre-config
     // window looks like the HUD rather than like a different one.
     money: { scrollAccounts: false, scrollAccountsTime: 5000 },
-    layout: { movable: true, command: "hudlayout", offsets: {}, scales: {}, justifications: {}, gaugesBottomAnchored: true },
+    layout: {
+        movable: true,
+        command: "hudlayout",
+        offsets: {},
+        scales: {},
+        justifications: {},
+        gaugesBottomAnchored: true,
+        minimapVehicleOnly: false,
+        minimapVehicleOnlyDefault: false,
+        minimapVehicleOnlyAllowed: true,
+    },
 }
 
 const DEFAULT_VITALS: HudVitalsPayload = {
@@ -91,6 +101,10 @@ export interface HudLayoutState {
     justifications: Record<string, "left" | "center" | "right">
     /** Whether gauges share the bottom anchor with the vehicle panel. */
     gaugesBottomAnchored: boolean
+    /** This player's "Minimap only in vehicle" choice (the preview while editing). */
+    minimapVehicleOnly: boolean
+    /** False when the server forces its default, which hides the switch. */
+    minimapVehicleOnlyAllowed: boolean
     /**
      * Called once per finished drag with that section's new offset. Updates
      * the page preview only; the NUI holds no authority over persistence until
@@ -103,6 +117,8 @@ export interface HudLayoutState {
     commitJustification: (section: string, justification: "left" | "center" | "right") => void
     /** Preview the gauges' bottom-anchor preference until confirmation. */
     setGaugesBottomAnchored: (bottomAnchored: boolean) => void
+    /** Preview the minimap-only-in-vehicle preference until confirmation. */
+    setMinimapVehicleOnly: (vehicleOnly: boolean) => void
     /** Preview the shipped layout until the player confirms it. */
     resetToDefaults: () => void
     /** Persist the preview and leave edit mode. */
@@ -119,10 +135,13 @@ const DEFAULT_LAYOUT: HudLayoutState = {
     scales: {},
     justifications: {},
     gaugesBottomAnchored: true,
+    minimapVehicleOnly: false,
+    minimapVehicleOnlyAllowed: true,
     commitOffset: () => {},
     commitScale: () => {},
     commitJustification: () => {},
     setGaugesBottomAnchored: () => {},
+    setMinimapVehicleOnly: () => {},
     resetToDefaults: () => {},
     confirm: () => {},
     cancel: () => {},
@@ -168,6 +187,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const [scales, setScales] = useState<Record<string, number>>(DEFAULT_LAYOUT.scales)
     const [justifications, setJustifications] = useState<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
     const [gaugesBottomAnchored, setGaugesBottomAnchoredState] = useState(DEFAULT_LAYOUT.gaugesBottomAnchored)
+    const [minimapVehicleOnly, setMinimapVehicleOnlyState] = useState(DEFAULT_LAYOUT.minimapVehicleOnly)
 
     // Mirrors `offsets` for the callbacks below, which run from a mouseup
     // listener and from a wire handler rather than from a render -- both need
@@ -183,6 +203,11 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const initialJustificationsRef = useRef<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
     const gaugesBottomAnchoredRef = useRef(gaugesBottomAnchored)
     const initialGaugesBottomAnchoredRef = useRef(DEFAULT_LAYOUT.gaugesBottomAnchored)
+    const minimapVehicleOnlyRef = useRef(minimapVehicleOnly)
+    const initialMinimapVehicleOnlyRef = useRef(DEFAULT_LAYOUT.minimapVehicleOnly)
+    // What /hudlayoutreset and the editor's reset button return to. Lua sends it
+    // with the config (Config.hud.minimapVehicleOnly.default).
+    const minimapVehicleOnlyDefaultRef = useRef(false)
 
     const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
         offsetsRef.current = next
@@ -223,12 +248,18 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         setGaugesBottomAnchoredState(bottomAnchored)
     }, [])
 
+    const setMinimapVehicleOnly = useCallback((vehicleOnly: boolean) => {
+        minimapVehicleOnlyRef.current = vehicleOnly
+        setMinimapVehicleOnlyState(vehicleOnly)
+    }, [])
+
     const resetToDefaults = useCallback(() => {
         applyOffsets({})
         applyScales({})
         applyJustifications({})
         setGaugesBottomAnchored(true)
-    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored])
+        setMinimapVehicleOnly(minimapVehicleOnlyDefaultRef.current)
+    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored, setMinimapVehicleOnly])
 
     const confirm = useCallback(() => {
         // The WHOLE map goes over: Lua stores one JSON blob per player and
@@ -240,6 +271,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             scales: scalesRef.current,
             justifications: justificationsRef.current,
             gaugesBottomAnchored: gaugesBottomAnchoredRef.current,
+            minimapVehicleOnly: minimapVehicleOnlyRef.current,
         }).catch((error) => {
             console.error("[qbhud] qbhud:finishLayout failed:", error)
         })
@@ -252,11 +284,12 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 applyScales(initialScalesRef.current)
                 applyJustifications(initialJustificationsRef.current)
                 setGaugesBottomAnchored(initialGaugesBottomAnchoredRef.current)
+                setMinimapVehicleOnly(initialMinimapVehicleOnlyRef.current)
             })
             .catch((error) => {
                 console.error("[qbhud] qbhud:finishLayout failed:", error)
             })
-    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored])
+    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored, setMinimapVehicleOnly])
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (!payload) return
@@ -272,6 +305,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         const seededJustifications = payload.layout?.justifications
         applyJustifications(seededJustifications && typeof seededJustifications === "object" ? seededJustifications : {})
         setGaugesBottomAnchored(payload.layout?.gaugesBottomAnchored !== false)
+        minimapVehicleOnlyDefaultRef.current = payload.layout?.minimapVehicleOnlyDefault === true
+        setMinimapVehicleOnly(payload.layout?.minimapVehicleOnly === true)
     })
 
     useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
@@ -304,6 +339,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             initialScalesRef.current = scalesRef.current
             initialJustificationsRef.current = justificationsRef.current
             initialGaugesBottomAnchoredRef.current = gaugesBottomAnchoredRef.current
+            initialMinimapVehicleOnlyRef.current = minimapVehicleOnlyRef.current
         }
         setLayoutEditing(payload)
     })
@@ -317,6 +353,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         applyScales({})
         applyJustifications({})
         setGaugesBottomAnchored(true)
+        setMinimapVehicleOnly(minimapVehicleOnlyDefaultRef.current)
     })
 
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
@@ -345,15 +382,18 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             scales,
             justifications,
             gaugesBottomAnchored,
+            minimapVehicleOnly,
+            minimapVehicleOnlyAllowed: config.layout?.minimapVehicleOnlyAllowed !== false,
             commitOffset,
             commitScale,
             commitJustification,
             setGaugesBottomAnchored,
+            setMinimapVehicleOnly,
             resetToDefaults,
             confirm,
             cancel,
         }),
-        [config.layout, layoutEditing, offsets, scales, justifications, gaugesBottomAnchored, commitOffset, commitScale, commitJustification, setGaugesBottomAnchored, resetToDefaults, confirm, cancel],
+        [config.layout, layoutEditing, offsets, scales, justifications, gaugesBottomAnchored, minimapVehicleOnly, commitOffset, commitScale, commitJustification, setGaugesBottomAnchored, setMinimapVehicleOnly, resetToDefaults, confirm, cancel],
     )
 
     // Each provider is handed the state value itself -- no useMemo wrapper

@@ -128,6 +128,44 @@ local layoutEditing = false
 local visible
 local LAYOUT_KVP = LAYOUT.kvpKey or 'qbhud:layout'
 
+-- "Minimap only in vehicle" (Config.hud.minimapVehicleOnly) is a per-player
+-- preference saved in the same KVP blob as the section layout, as the boolean
+-- `minimapVehicleOnly`. nil means the player never chose, so the server default
+-- applies. Cached here and updated on every write/reset, so the visibility task
+-- never parses JSON.
+local vehicleOnlyChoice
+
+---@return boolean default, boolean playerMayChange
+local function minimapVehicleOnlySettings()
+    local cfg = Config.hud.minimapVehicleOnly
+    cfg = type(cfg) == 'table' and cfg or {}
+    -- A pinned layout has no editor, so nobody could change it either.
+    return cfg.default == true, cfg.allowPlayerChange ~= false and LAYOUT.movable ~= false
+end
+
+---Whether the radar is currently limited to vehicles for this player.
+---@return boolean
+local function minimapVehicleOnly()
+    local default, mayChange = minimapVehicleOnlySettings()
+    if mayChange and vehicleOnlyChoice ~= nil then return vehicleOnlyChoice end
+    return default
+end
+
+local function loadVehicleOnlyChoice()
+    local raw = GetResourceKvpString(LAYOUT_KVP)
+    if type(raw) ~= 'string' or raw == '' then return nil end
+    local ok, decoded = pcall(json.decode, raw)
+    if ok and type(decoded) == 'table' and type(decoded.minimapVehicleOnly) == 'boolean' then
+        return decoded.minimapVehicleOnly
+    end
+    return nil
+end
+vehicleOnlyChoice = loadVehicleOnlyChoice()
+
+local function emptyLayout()
+    return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true, minimapVehicleOnly = minimapVehicleOnly() }
+end
+
 local function closeLayout()
     if not layoutEditing then return end
     layoutEditing = false
@@ -194,10 +232,6 @@ end
 ---or hand-edited KVP value must cost the player their layout, not their HUD.
 ---@return table
 local function readLayout()
-    local function emptyLayout()
-        return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true }
-    end
-
     if LAYOUT.movable == false then return emptyLayout() end
 
     local raw = GetResourceKvpString(LAYOUT_KVP)
@@ -218,7 +252,10 @@ local function readLayout()
             if justification then justifications[section] = justification end
         end
     end
-    return { offsets = offsets, scales = scales, justifications = justifications, gaugesBottomAnchored = gaugesBottomAnchored }
+    return {
+        offsets = offsets, scales = scales, justifications = justifications,
+        gaugesBottomAnchored = gaugesBottomAnchored, minimapVehicleOnly = minimapVehicleOnly(),
+    }
 end
 
 ---Persists a layout the NUI submitted. Re-validated here, not merely stored:
@@ -292,6 +329,17 @@ local function writeLayout(payload)
         if entry then entry.bottomAnchored = false end
     end
 
+    -- Minimap-only-in-vehicle rides in the same blob. A choice is only stored
+    -- once the player picked something other than the server default (or had
+    -- already chosen), so players who never touch it keep following the default.
+    -- When the server forbids changing it the old saved choice is kept as it was.
+    local default, mayChange = minimapVehicleOnlySettings()
+    local requested = payload.minimapVehicleOnly
+    if mayChange and type(requested) == 'boolean' and (requested ~= default or vehicleOnlyChoice ~= nil) then
+        vehicleOnlyChoice = requested
+    end
+    if vehicleOnlyChoice ~= nil then clean.minimapVehicleOnly = vehicleOnlyChoice end
+
     SetResourceKvp(LAYOUT_KVP, json.encode(clean))
     return true
 end
@@ -340,8 +388,10 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
     if not layoutEditing then return end
 
     if type(payload) == 'table' and payload.confirmed == true then
+        local before = minimapVehicleOnly()
         pcall(writeLayout, payload)
         syncChatInputLayout()
+        if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
     end
 
     closeLayout()
@@ -351,10 +401,13 @@ end)
 -- whose layout put a section somewhere unreachable needs a way out that does
 -- not require clicking on the HUD.
 RegisterCommand('hudlayoutreset', function()
+    local before = minimapVehicleOnly()
     DeleteResourceKvp(LAYOUT_KVP)
+    vehicleOnlyChoice = nil
     closeLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
+    if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
     Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end, false)
 
@@ -756,12 +809,20 @@ local function minimapPlayerHidden()
     return minimapToggleEnabled() and minimapHiddenChoice == true
 end
 
+---Whether anything wants the radar managed: a mode other than 'always', the
+---player's own hide choice, or their "minimap only in vehicle" option.
+local function minimapManaged()
+    return MINIMAP_MODE ~= 'always' or minimapPlayerHidden() or minimapVehicleOnly()
+end
+
 ---Whether the radar should be on screen right now, or nil for "not our call".
+---The player's hide choice and 'never' win over everything; 'vehicle' mode and
+---the per-player vehicle-only option share one test (any seat of a vehicle).
 ---@return boolean|nil
 local function minimapShouldShow()
     if minimapPlayerHidden() then return false end
     if MINIMAP_MODE == 'never' then return false end
-    if MINIMAP_MODE == 'vehicle' then
+    if MINIMAP_MODE == 'vehicle' or minimapVehicleOnly() then
         local vehicle = Kora.cache.vehicle()
         return vehicle ~= nil and vehicle ~= 0
     end
@@ -783,20 +844,21 @@ do
         DisplayRadar(shouldShow)
     end
 
-    -- Registered in every mode so a live change of `minimap` or of the toggle
-    -- needs no restart, but only RUNS when something wants the radar managed:
-    -- 'always' with the player not hiding it is still hands-off.
+    -- Registered in every mode so a live change of `minimap`, of the toggle or
+    -- of the vehicle-only option needs no restart, but only RUNS when something
+    -- wants the radar managed: 'always' with the player neither hiding it nor
+    -- limiting it to vehicles is still hands-off.
     minimapVisibilityTask = addTask({
         interval = MINIMAP_INTERVAL,
-        active = function() return MINIMAP_MODE ~= 'always' or minimapPlayerHidden() end,
+        active = minimapManaged,
         run = applyMinimap,
     })
 
     ---Applies a changed player choice at once instead of on the next tick.
-    ---'always' mode has no task running while the player is showing the map, so
-    ---un-hiding must hand the radar back explicitly.
+    ---With nothing managing the radar there is no task running, so un-hiding
+    ---must hand the radar back explicitly.
     minimapChoiceChanged = function()
-        if MINIMAP_MODE == 'always' and not minimapPlayerHidden() then
+        if not minimapManaged() then
             if lastRadar == false then
                 lastRadar = nil
                 if visible and not radarHeldHidden then DisplayRadar(true) end
@@ -839,7 +901,7 @@ end
 -- nothing will run again, so the radar is restored.
 local function releaseHeldRadar(hudVisible)
     radarHeldHidden = false
-    if hudVisible and (MINIMAP_MODE ~= 'always' or minimapPlayerHidden()) then return end
+    if hudVisible and minimapManaged() then return end
     DisplayRadar(true)
 end
 
@@ -1145,6 +1207,11 @@ sendInitialState = function()
         layout = {
             movable = LAYOUT.movable ~= false,
             command = LAYOUT.command or 'hudlayout',
+            -- Effective value for this player, the server default it resets
+            -- to, and whether the editor may offer the switch at all.
+            minimapVehicleOnly = savedLayout.minimapVehicleOnly,
+            minimapVehicleOnlyDefault = (minimapVehicleOnlySettings()),
+            minimapVehicleOnlyAllowed = select(2, minimapVehicleOnlySettings()),
             -- Seeded from this player's own machine. Sent with the config
             -- rather than on its own channel so the HUD's first paint is
             -- already in the right place instead of visibly jumping.
@@ -1245,6 +1312,7 @@ end
 local function applyConfig(settings)
     if type(settings) ~= 'table' then return end
 
+    local previousVehicleOnly = minimapVehicleOnly()
     Config.hud = type(settings.hud) == 'table' and settings.hud or Config.hud
     Config.voice = type(settings.voice) == 'table' and settings.voice or Config.voice
     Config.poll = type(settings.poll) == 'table' and settings.poll or Config.poll
@@ -1277,7 +1345,9 @@ local function applyConfig(settings)
     if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' then
         minimapRelease()
     end
-    if previousPlayerHidden ~= minimapPlayerHidden() then minimapChoiceChanged() end
+    if previousPlayerHidden ~= minimapPlayerHidden() or previousVehicleOnly ~= minimapVehicleOnly() then
+        minimapChoiceChanged()
+    end
 
     syncVoiceSampling()
     -- The NUI remains mounted while the HUD is hidden. Refresh its complete

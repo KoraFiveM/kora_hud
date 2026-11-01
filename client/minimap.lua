@@ -1,48 +1,42 @@
--- Optional minimap layout owner. When Config.hud.minimapLayout.enabled is true
--- kora_hud positions the minimap, minimap_mask and minimap_blur components so
--- the map texture, its mask and its border/blur frame move and scale together.
--- When it is false this file never touches a component position or the
--- bigmap, and the stock minimap is left alone. It is true by default so the
--- default square shape lines up out of the box.
+-- Minimap layout owner. When Config.hud.minimapLayout.enabled is true and the
+-- shape is not 'stock', kora_hud
+--   * streams in its own square radar mask (stream/kora_hud_squaremap.ytd,
+--     texture 'radarmasksm', black = clipped, grey = visible) and swaps it in for
+--     the radarmasksm/radarmask1g textures of platform:/textures/graphics, and
+--   * positions the minimap, minimap_mask and minimap_blur components,
+-- then refreshes the radar once, because the engine only re-reads component
+-- rects and masks on a bigmap toggle. This is the proven GTA route used by the
+-- widely deployed qb-hud/ps-hud square map; a runtime-built PNG texture is not:
+-- the radar reads the mask from the colour channels, so a mask that is white in
+-- RGB clips nothing.
 --
--- Everything that depends on the screen goes through HudMinimap.layout(), a
--- pure function of (aspect ratio, safezone, config) so it is unit-tested
--- without the game. apply() is the only part that calls natives.
+-- The rects are config (Config.hud.minimapLayout.shapes.<shape>.rects), left /
+-- bottom anchored and NOT scaled for the aspect ratio: the engine already lays
+-- out L/B components in a 16:9 space. Only x gets the ultrawide offset.
+--
+-- Everything that touches natives runs on ONE worker (run / reconcile) and is
+-- the only caller of SetBigmapActive besides the stuck-bigmap guard and the
+-- resource-stop cleanup below. Every caller (poll, spawn, export, config
+-- change) just asks for a pass; requests that arrive during a pass coalesce
+-- into one more pass with the latest values, so there is exactly one bigmap
+-- refresh per change and never two overlapping toggles.
+--
+-- With layout disabled or shape 'stock' nothing is touched (pure vanilla); if
+-- something was applied earlier it is undone cleanly. The same cleanup runs
+-- when this resource stops, so a txAdmin restart reverts and re-applies.
 --
 -- Config.hud.minimapLayout is read at use time (kora_lib live config replaces
--- Config.hud wholesale), so a change takes effect on the next check without a
--- restart.
+-- Config.hud wholesale), so a change takes effect on the next poll.
 HudMinimap = {}
 
-local WIDESCREEN = 16 / 9
-
--- Vanilla 16:9 rects, left/bottom anchored (x, y, w, h). These are the widely
--- used community reference values for the stock GTA V minimap; at 16:9, scale
--- 1.0 and no offsets the layout is exactly these numbers.
-local BASE = {
-    minimap      = { x = -0.0045, y = 0.002, w = 0.150, h = 0.188 },
-    minimap_mask = { x = 0.020,   y = 0.032, w = 0.111, h = 0.159 },
-    minimap_blur = { x = -0.03,   y = 0.022, w = 0.266, h = 0.237 },
-}
-
--- Square shape: the mask is square in PIXELS (w * 16 = h * 9 at 16:9, kept at
--- other aspects by the width factor in layout()), centred on the stock mask.
--- The map and blur rects stay stock so the border frame is unchanged.
-local SQUARE_BASE = {
-    minimap      = BASE.minimap,
-    minimap_mask = { x = 0.031, y = 0.032, w = 0.0894, h = 0.159 },
-    minimap_blur = BASE.minimap_blur,
-}
+local REFERENCE_ASPECT = 16 / 9
+local MASK_TXD = 'platform:/textures/graphics'
+local MASK_TARGETS = { 'radarmasksm', 'radarmask1g' }
 
 HudMinimap.COMPONENTS = { 'minimap', 'minimap_mask', 'minimap_blur' }
 
 -- Short config keys for the per-component fine offsets.
 local FINE_KEY = { minimap = 'map', minimap_mask = 'mask', minimap_blur = 'blur' }
-
--- Square is the default shape; only an explicit 'stock' keeps the round mask.
-local function isSquare(cfg)
-    return type(cfg) ~= 'table' or cfg.shape ~= 'stock'
-end
 
 local function number(value, fallback, min, max)
     value = tonumber(value)
@@ -52,249 +46,431 @@ local function number(value, fallback, min, max)
     return value
 end
 
----Computes the three component rects.
----@param aspect number GetAspectRatio(false)
+local function layoutConfig()
+    local hud = type(Config) == 'table' and Config.hud
+    local cfg = type(hud) == 'table' and hud.minimapLayout
+    return type(cfg) == 'table' and cfg or nil
+end
+
+---The layout config, or nil while the layout is disabled.
+local function settings()
+    local cfg = layoutConfig()
+    if not cfg or cfg.enabled ~= true then return nil end
+    return cfg
+end
+
+---Square is the default shape; 'circle' and 'stock' are the other two.
+local function shapeName(cfg)
+    local shape = type(cfg) == 'table' and cfg.shape
+    if shape == 'circle' or shape == 'stock' then return shape end
+    return 'square'
+end
+
+local function shapeDef(cfg, shape)
+    local shapes = type(cfg) == 'table' and cfg.shapes
+    local def = type(shapes) == 'table' and shapes[shape]
+    if type(def) ~= 'table' or type(def.rects) ~= 'table' then return nil end
+    return def
+end
+
+---Current screen aspect ratio plus the resolution it came from. Uses the real
+---render resolution (GetActiveScreenResolution); GetAspectRatio is the fallback.
+local function screen()
+    local ok, w, h = pcall(GetActiveScreenResolution)
+    w, h = tonumber(w), tonumber(h)
+    if ok and w and h and w > 0 and h > 0 then return w / h, w, h end
+    local okAspect, aspect = pcall(GetAspectRatio, false)
+    aspect = tonumber(aspect)
+    if okAspect and aspect and aspect > 0 then return aspect end
+    return REFERENCE_ASPECT
+end
+
+---x offset for screens wider than 16:9: ((16/9 - aspect) / divisor) + bias,
+---0 at or below 16:9 (and within `tolerance` above it, which absorbs windowed
+---sizes such as 1919x1079).
+---@param aspect number
+---@param cfg table|nil Config.hud.minimapLayout
+---@return number
+function HudMinimap.aspectOffset(aspect, cfg)
+    aspect = number(aspect, REFERENCE_ASPECT, 1.0, 10.0)
+    local o = type(cfg) == 'table' and cfg.aspectOffset
+    o = type(o) == 'table' and o or {}
+    local tolerance = number(o.tolerance, 0.0, 0.0, 0.5)
+    if aspect <= REFERENCE_ASPECT + tolerance then return 0.0 end
+    return (REFERENCE_ASPECT - aspect) / number(o.divisor, 3.6, 0.1, 100.0) + number(o.bias, -0.008, -1.0, 1.0)
+end
+
+---Computes the three component rects for the configured shape, or nil when the
+---shape has no valid rects in the config.
+---@param aspect number
 ---@param safezone number GetSafeZoneSize()
 ---@param cfg table|nil Config.hud.minimapLayout
----@return table<string, {x:number, y:number, w:number, h:number}>
+---@return table<string, {x:number, y:number, w:number, h:number}>|nil
 function HudMinimap.layout(aspect, safezone, cfg)
     cfg = type(cfg) == 'table' and cfg or {}
-    aspect = number(aspect, WIDESCREEN, 1.0, 10.0)
+    local shape = shapeName(cfg)
+    local def = shapeDef(cfg, shape)
+    if not def then return nil end
+    -- 'stock' is the vanilla rects exactly: used to put the stock layout back.
+    local stock = shape == 'stock'
+
     safezone = number(safezone, 1.0, 0.5, 1.0)
-
-    local scale = number(cfg.scale, 1.0, 0.5, 2.0)
-    local shiftX = number(cfg.x, 0.0, -1.0, 1.0)
-    local shiftY = number(cfg.y, 0.0, -1.0, 1.0)
-    local compensation = number(cfg.safezoneCompensation, 0.0, 0.0, 2.0)
-
-    -- Screen fractions are relative to the screen width, so on a wider screen
-    -- the same fraction is more pixels and the map would stretch. Scaling the
-    -- widths (and the left inset) by (16/9)/aspect keeps the pixel size and
-    -- shape the same as at 16:9: narrower fractions on 21:9 and 32:9, wider on
-    -- 4:3. Exactly 1.0 at 16:9, so 16:9 is vanilla.
-    local widthFactor = WIDESCREEN / aspect
+    local scale = stock and 1.0 or number(cfg.scale, 1.0, 0.5, 2.0)
+    local shiftX = stock and 0.0 or number(cfg.x, 0.0, -1.0, 1.0)
+    local shiftY = stock and 0.0 or number(cfg.y, 0.0, -1.0, 1.0)
     -- The engine already anchors L/B components inside the safezone; the
     -- optional compensation cancels part of that margin for builds where the
     -- mask drifts relative to the blur at small safezones.
+    local compensation = stock and 0.0 or number(cfg.safezoneCompensation, 0.0, 0.0, 2.0)
     local margin = (1.0 - safezone) / 2.0 * compensation
+    local offset = stock and 0.0 or HudMinimap.aspectOffset(aspect, cfg)
+    local fine = (not stock and type(cfg.offsets) == 'table') and cfg.offsets or {}
 
-    local fine = type(cfg.offsets) == 'table' and cfg.offsets or {}
     local out = {}
     for _, name in ipairs(HudMinimap.COMPONENTS) do
-        local base, own = (isSquare(cfg) and SQUARE_BASE or BASE)[name], fine[FINE_KEY[name]]
+        local base = def.rects[name]
+        if type(base) ~= 'table' then return nil end
+        local x, y = number(base.x, nil, -1.0, 1.0), number(base.y, nil, -1.0, 1.0)
+        local w, h = number(base.w, nil, 0.0, 1.0), number(base.h, nil, 0.0, 1.0)
+        if not (x and y and w and h and w > 0 and h > 0) then return nil end
+        local own = fine[FINE_KEY[name]]
         own = type(own) == 'table' and own or {}
         out[name] = {
-            -- Size and the in-frame offsets scale; the safezone margin and
-            -- user offsets are screen-space and do not.
-            x = base.x * scale * widthFactor - margin + shiftX + number(own.x, 0.0, -1.0, 1.0),
-            y = base.y * scale + margin + shiftY + number(own.y, 0.0, -1.0, 1.0),
-            w = base.w * scale * widthFactor,
-            h = base.h * scale,
+            x = (x + offset) * scale - margin + shiftX + number(own.x, 0.0, -1.0, 1.0),
+            y = y * scale + margin + shiftY + number(own.y, 0.0, -1.0, 1.0),
+            w = w * scale,
+            h = h * scale,
         }
     end
     return out
 end
 
-local function settings()
-    local hud = type(Config) == 'table' and Config.hud
-    local cfg = type(hud) == 'table' and hud.minimapLayout
-    if type(cfg) ~= 'table' or cfg.enabled ~= true then return nil end
-    return cfg
+local function now()
+    if type(GetGameTimer) == 'function' then return GetGameTimer() end
+    return 0
 end
 
-local lastKey
+local function warn(message)
+    print('[kora_hud] minimap: ' .. message)
+end
+
+-- What this resource has changed in the game, nil while it has changed nothing.
+-- Set BEFORE the first native so an interrupted pass is still undone.
+local state = { applied = nil }
 local running, pending = false, false
+local refreshing = false -- the bigmap is on because of our own refresh
+local stopped, settled, failed = false, false, false
+-- Set once a pass has started changing things. A request that arrives before
+-- that is already covered by the running pass (it reads the config after its
+-- waits), so only later requests need another pass.
+local committed = false
+local failures, retryAt = 0, 0
+local requestedDict
+local lastKey
+local bigmapSeen = 0
 
-local function snapshot()
-    local cfg = settings()
-    if not cfg then return nil end
-    local aspect, safezone = GetAspectRatio(false), GetSafeZoneSize()
-    return cfg, aspect, safezone, string.format('%.4f|%.4f|%s', aspect, safezone, json.encode(cfg))
+---The safezone only matters when safezoneCompensation is used; otherwise the
+---native is not even read.
+local function safezoneFor(cfg)
+    if (tonumber(cfg.safezoneCompensation) or 0) == 0 then return 1.0 end
+    local ok, zone = pcall(GetSafeZoneSize)
+    return ok and tonumber(zone) or 1.0
 end
 
--- Waits (bounded) for the minimap scaleform so the bigmap refresh below is not
--- lost when this runs at resource start or spawn, before the radar exists.
-local function waitForMinimap()
-    local ok, handle = pcall(RequestScaleformMovie, 'minimap')
-    if not ok or not handle then return end
-    for _ = 1, 100 do
-        if HasScaleformMovieLoaded(handle) then return end
+local function snapshotKey(cfg)
+    local aspect, w, h = screen()
+    local safezone = safezoneFor(cfg)
+    return string.format('%s|%s|%.5f|%.4f|%s', tostring(w), tostring(h), aspect, safezone, json.encode(cfg))
+end
+
+-- The radar exists once the player ped does, the loading screen is gone and the
+-- minimap scaleform is loaded. IsRadarEnabled is deliberately not used: our own
+-- 'minimap only in vehicle' hides the radar on foot.
+local function radarReady(scaleform)
+    if type(PlayerPedId) == 'function' then
+        local ped = PlayerPedId()
+        if not ped or ped == 0 then return false end
+        if type(DoesEntityExist) == 'function' and not DoesEntityExist(ped) then return false end
+    end
+    if type(NetworkIsPlayerActive) == 'function' and type(PlayerId) == 'function'
+        and not NetworkIsPlayerActive(PlayerId()) then
+        return false
+    end
+    if type(GetIsLoadingScreenActive) == 'function' and GetIsLoadingScreenActive() then return false end
+    if scaleform and type(HasScaleformMovieLoaded) == 'function' and not HasScaleformMovieLoaded(scaleform) then
+        return false
+    end
+    return true
+end
+
+-- Waits (bounded) for the radar before the first apply, then lets it settle
+-- once, instead of applying blindly at resource start.
+local function waitUntilReady(cfg)
+    if settled then return end
+    local okRequest, handle = pcall(RequestScaleformMovie, 'minimap')
+    local deadline = now() + number(cfg.readyTimeoutMs, 30000, 0, 600000)
+    while now() < deadline do
+        local ok, ready = pcall(radarReady, okRequest and handle or nil)
+        if ok and ready then break end
+        Wait(100)
+    end
+    Wait(number(cfg.readySettleMs, 2000, 0, 60000))
+    settled = true
+end
+
+local function loadDict(dict, timeoutMs)
+    requestedDict = dict
+    RequestStreamedTextureDict(dict, false)
+    local deadline = now() + timeoutMs
+    while not HasStreamedTextureDictLoaded(dict) do
+        if now() >= deadline then return false end
         Wait(0)
     end
+    return true
 end
 
-local function place()
-    local cfg, aspect, safezone, key = snapshot()
-    if not cfg then
-        lastKey = nil
-        return
-    end
-    lastKey = key
-    local rects = HudMinimap.layout(aspect, safezone, cfg)
+local function place(rects)
     for _, name in ipairs(HudMinimap.COMPONENTS) do
         local r = rects[name]
         SetMinimapComponentPosition(name, 'L', 'B', r.x, r.y, r.w, r.h)
     end
-    -- The engine only re-reads component positions on a bigmap toggle, and it
-    -- needs a frame between the two calls: toggling both in the same frame can
-    -- leave the bigmap radar on.
-    SetBigmapActive(true, false)
-    Wait(0)
-    SetBigmapActive(false, false)
+end
+
+---Removes the mask replacement, keeping `keepDict` streamed when it is reused.
+local function removeTextures(applied, keepDict)
+    if not applied.dict then return end
+    for _, target in ipairs(MASK_TARGETS) do RemoveReplaceTexture(MASK_TXD, target) end
+    if applied.dict ~= keepDict then SetStreamedTextureDictAsNoLongerNeeded(applied.dict) end
+    applied.dict = nil
+end
+
+---Puts everything this resource changed back to stock. Never raises. Returns
+---true when there was something to undo.
+local function undoAll()
+    local applied = state.applied
+    if not applied then return false end
+    state.applied = nil
+    local cfg = layoutConfig()
+    local stock = cfg and shapeDef(cfg, 'stock')
+    pcall(removeTextures, applied, nil)
+    pcall(SetMinimapClipType, stock and number(stock.clipType, 0, 0, 3) or 0)
+    local rects = cfg and HudMinimap.layout(REFERENCE_ASPECT, 1.0, { shape = 'stock', shapes = cfg.shapes })
+    if rects then pcall(place, rects) end
+    return true
+end
+
+---The ONLY bigmap refresh: on, a short wait, off. Always ends off.
+local function refreshBigmap(cfg)
+    refreshing = true
+    local ok, err = pcall(function()
+        SetBigmapActive(true, false)
+        Wait(number(cfg and cfg.bigmapWaitMs, 50, 0, 1000))
+    end)
+    pcall(SetBigmapActive, false, false)
+    refreshing = false
+    if not ok then warn('bigmap refresh failed: ' .. tostring(err)) end
+end
+
+---The state the current config asks for, or nil for stock / invalid.
+local function desired(cfg)
+    local shape = shapeName(cfg)
+    if shape == 'stock' then return nil end
+    local def = shapeDef(cfg, shape)
+    local rects = def and HudMinimap.layout((screen()), safezoneFor(cfg), cfg)
+    if not rects then return nil, 'shape "' .. shape .. '" has no valid rects in Config.hud.minimapLayout.shapes, keeping the stock minimap' end
+    local want = { shape = shape, rects = rects, clipType = number(def.clipType, shape == 'circle' and 1 or 0, 0, 3) }
+    if shape == 'square' then
+        if type(cfg.textureDict) ~= 'string' or cfg.textureDict == '' then
+            return nil, 'shape "square" needs Config.hud.minimapLayout.textureDict, keeping the stock minimap'
+        end
+        want.dict = cfg.textureDict
+        want.texture = type(cfg.maskTexture) == 'string' and cfg.maskTexture ~= '' and cfg.maskTexture or MASK_TARGETS[1]
+        want.timeout = number(cfg.dictTimeoutMs, 5000, 0, 120000)
+    end
+    return want
+end
+
+local function applyWanted(want)
+    if want.dict and not loadDict(want.dict, want.timeout) then
+        return false, string.format('texture dictionary "%s" did not stream in within %d ms (is stream/ started?), keeping the stock minimap',
+            want.dict, want.timeout)
+    end
+    state.applied = state.applied or {}
+    removeTextures(state.applied, want.dict)
+    SetMinimapClipType(want.clipType)
+    if want.dict then
+        for _, target in ipairs(MASK_TARGETS) do AddReplaceTexture(MASK_TXD, target, want.dict, want.texture) end
+        state.applied.dict = want.dict
+    end
+    place(want.rects)
+    return true
+end
+
+-- A failed apply keeps the stock minimap and is retried a few times (the stream
+-- may simply not have been ready), then left alone until a resource starts.
+local function markFailed(cfg, problem)
+    warn(problem)
+    failed = true
+    failures = failures + 1
+    retryAt = now() + number(cfg and cfg.retryMs, 10000, 1000, 600000)
+end
+
+-- One full pass with the config as it is NOW: idempotent, so any mix of
+-- coalesced requests ends in the right state.
+local function reconcile()
+    local cfg = settings()
+    if cfg and shapeName(cfg) ~= 'stock' then
+        waitUntilReady(cfg)
+        cfg = settings() -- live config: use what is current after the wait
+    end
+    local want, problem
+    if cfg then want, problem = desired(cfg) end
+    committed = true
+    if not want then
+        if problem then markFailed(cfg, problem) end
+        if undoAll() then refreshBigmap(cfg) end
+        return
+    end
+    local ok, why = applyWanted(want)
+    if not ok then
+        markFailed(cfg, why)
+        if undoAll() then refreshBigmap(cfg) end
+        return
+    end
+    failed, failures = false, 0
+    refreshBigmap(cfg)
 end
 
 local function run()
     repeat
-        pending = false
-        local ok = pcall(function()
-            waitForMinimap()
-            place()
-        end)
-        -- Whatever happened, never leave the bigmap on.
-        if not ok then pcall(SetBigmapActive, false, false) end
-    until not pending
+        pending, committed = false, false
+        local ok, err = pcall(reconcile)
+        if not ok then
+            -- Whatever happened, never leave a half-applied layout or the bigmap on.
+            warn('apply failed: ' .. tostring(err))
+            failed = true
+            pcall(undoAll)
+            pcall(SetBigmapActive, false, false)
+            refreshing = false
+        end
+    until not pending or stopped
     running = false
 end
 
----Applies the layout to the game. Returns false when the layout is disabled
----(nothing is touched); otherwise true, with the natives applied from a thread.
----@param force boolean|nil re-apply even if aspect/safezone/config are unchanged
----@return boolean applied
-function HudMinimap.apply(force)
-    local _, _, _, key = snapshot()
-    if not key then
-        lastKey = nil
-        return false
-    end
-    if not force and key == lastKey then return true end
-    -- One apply at a time: a request that arrives mid-apply runs once more
-    -- with the latest values when the current one finishes.
+local function schedule()
+    if stopped then return end
+    -- One pass at a time: a request that arrives mid-pass runs once more with
+    -- the latest values when the current one finishes.
     if running then
-        pending = true
-        return true
+        if committed then pending = true end
+        return
     end
     running = true
     CreateThread(run)
-    return true
 end
 
--- Square map mask. The stock radar clips the rotating map tiles with a
--- round/rounded mask, so inside a square border the corner tiles show outside
--- it. 'square' (the default) swaps radarmasksm/radarmask1g for a square mask
--- and sets the square clip type. The mask is kora_hud's own generated PNG
--- (assets/square_minimap_mask.png, tools/gen_minimap_mask.py) loaded as a
--- runtime texture; a streamed dict named by squareTextureDict, if one is
--- streamed, is preferred. 'stock' restores the stock masks.
-local MASK_TXD = 'platform:/textures/graphics'
-local MASK_NAMES = { 'radarmasksm', 'radarmask1g' }
-local RUNTIME_TXD, RUNTIME_TEX = 'kora_hud_minimap', 'square_mask'
-local RUNTIME_IMAGE = 'assets/square_minimap_mask.png'
-local DICT_WAIT_FRAMES = 30
-local shapeKey, shapeFailedKey, shapeDict, shapeApplied, runtimeReady
-
-local function shapeSettings()
-    local hud = type(Config) == 'table' and Config.hud
-    local cfg = type(hud) == 'table' and hud.minimapLayout
-    cfg = type(cfg) == 'table' and cfg or {}
-    local dict = type(cfg.squareTextureDict) == 'string' and cfg.squareTextureDict or ''
-    return isSquare(cfg) and 'square' or 'stock', dict
-end
-
-local function loadMaskDict(dict)
-    RequestStreamedTextureDict(dict, false)
-    for _ = 1, DICT_WAIT_FRAMES do
-        if HasStreamedTextureDictLoaded(dict) then return true end
-        Wait(0)
+---Applies the layout to the game. Returns true when the layout is managed (the
+---natives are applied from a worker thread), false when it is disabled or the
+---shape is 'stock' (nothing is touched; anything applied earlier is undone), so
+---callers such as the phone Maps app know to restore the stock positions.
+---@param force boolean|nil re-apply even if resolution/config are unchanged
+---@return boolean applied
+function HudMinimap.apply(force)
+    local cfg = settings()
+    if not cfg then
+        lastKey = nil
+        if state.applied then schedule() end
+        return false
     end
-    return false
+    local active = shapeName(cfg) ~= 'stock'
+    local key = snapshotKey(cfg)
+    if not force and key == lastKey then return active end
+    lastKey = key
+    if active or state.applied then schedule() end
+    return active
 end
 
--- Creates the runtime txd/texture once. Returns false if the engine refuses.
-local function ensureRuntimeTexture()
-    if runtimeReady then return true end
-    local ok = pcall(function()
-        local txd = CreateRuntimeTxd(RUNTIME_TXD)
-        CreateRuntimeTextureFromImage(txd, RUNTIME_TEX, RUNTIME_IMAGE)
-    end)
-    runtimeReady = ok
-    return ok
+---True while this resource has changed the game's minimap (introspection/tests).
+function HudMinimap.isApplied()
+    return state.applied ~= nil
 end
 
--- The engine only re-reads the masks on a bigmap toggle (one frame apart).
-local function refreshRadar()
-    SetBigmapActive(true, false)
-    Wait(0)
-    SetBigmapActive(false, false)
+local function paused()
+    local ok, active = pcall(IsPauseMenuActive)
+    return ok and active == true
 end
 
-local function removeMasks()
-    for _, name in ipairs(MASK_NAMES) do RemoveReplaceTexture(MASK_TXD, name) end
-    SetMinimapClipType(1)
-    if shapeDict then SetStreamedTextureDictAsNoLongerNeeded(shapeDict) end
-    shapeDict, shapeApplied = nil, false
-end
-
----Applies Config.hud.minimapLayout.shape. Safe to call often: it only acts when
----the shape or dict changed, and may Wait (call it from a thread).
-function HudMinimap.applyShape()
-    local shape, dict = shapeSettings()
-    local key = shape .. '|' .. dict
-    if key == shapeKey or key == shapeFailedKey then return end
-    -- A layout apply is mid-refresh; try again on the next poll.
-    if running then return end
-    if shape == 'stock' then
-        if shapeApplied then
-            removeMasks()
-            refreshRadar()
+-- A stuck expanded bigmap is the "huge radar" bug. Only while we manage the
+-- layout, are not refreshing ourselves and the pause menu is closed; it must be
+-- seen on twice in a row so a short toggle by another script is left alone.
+local function guard(cfg)
+    if cfg.guardBigmap == false or not state.applied or running or refreshing or paused() then
+        bigmapSeen = 0
+        return
+    end
+    local ok, active = pcall(IsBigmapActive)
+    if ok and active == true then
+        bigmapSeen = bigmapSeen + 1
+        if bigmapSeen >= 2 then
+            bigmapSeen = 0
+            SetBigmapActive(false, false)
         end
-        shapeKey = key
-        return
-    end
-    local txd, tex
-    if dict ~= '' and loadMaskDict(dict) then
-        txd = dict
-    elseif ensureRuntimeTexture() then
-        txd, tex = RUNTIME_TXD, RUNTIME_TEX
     else
-        shapeFailedKey = key
-        print('[kora_hud] minimap shape "square": could not create the runtime mask texture, keeping the stock mask')
-        return
+        bigmapSeen = 0
     end
-    if shapeApplied then removeMasks() end
-    for _, name in ipairs(MASK_NAMES) do AddReplaceTexture(MASK_TXD, name, txd, tex or name) end
-    SetMinimapClipType(0)
-    shapeDict = txd == dict and dict or nil
-    shapeKey, shapeFailedKey, shapeApplied = key, nil, true
-    refreshRadar()
 end
 
 -- Re-applies the HUD layout: used by resources that moved the minimap
 -- temporarily (the phone Maps app) to put it back. Returns false when the
--- layout is disabled so the caller can restore the stock positions itself.
+-- layout is disabled or 'stock' so the caller can restore the stock positions
+-- itself.
 exports('applyMinimapLayout', function()
     return HudMinimap.apply(true)
 end)
 
 AddEventHandler('playerSpawned', function()
+    -- A respawn can rebuild the radar; re-assert the mask and rects.
     HudMinimap.apply(true)
-    -- A respawn can rebuild the radar; re-assert the mask on the next poll.
-    shapeKey = nil
 end)
 
--- A texture dict streamed after this resource started is picked up on the next
--- poll instead of staying failed.
+-- A texture dictionary streamed after this resource started (or a failed apply)
+-- is retried when any resource starts, instead of staying failed.
 AddEventHandler('onClientResourceStart', function()
-    shapeFailedKey = nil
+    if failed then
+        failed = false
+        lastKey = nil
+    end
+end)
+
+-- Restart-safe cleanup: put the stock masks, clip type and rects back and make
+-- sure the bigmap is off, so a txAdmin restart reverts and then re-applies. No
+-- bigmap toggle here (a Wait would be cut off by the stop); the new instance's
+-- first apply does the refresh.
+AddEventHandler('onResourceStop', function(resource)
+    if resource ~= GetCurrentResourceName() then return end
+    stopped = true
+    local touched = state.applied ~= nil or refreshing
+    undoAll()
+    if requestedDict then pcall(SetStreamedTextureDictAsNoLongerNeeded, requestedDict) end
+    if touched then pcall(SetBigmapActive, false, false) end
+    refreshing = false
 end)
 
 -- Resolution, aspect ratio and the GTA safezone slider have no change event,
--- so poll the two cheap natives once a second. Re-applying only happens when
--- the answer changes. Not part of the HUD scheduler because that stops while
--- the HUD is hidden (character select), when the layout should still be right.
+-- so poll the cheap natives. Re-applying only happens when the answer changes.
+-- Not part of the HUD scheduler because that stops while the HUD is hidden
+-- (character select), when the layout should still be right.
 CreateThread(function()
-    while true do
-        pcall(HudMinimap.apply)
-        pcall(HudMinimap.applyShape)
-        Wait(1000)
+    while not stopped do
+        pcall(function()
+            local cfg = settings()
+            if cfg and failed and failures <= number(cfg.maxRetries, 3, 0, 100) and now() >= retryAt then
+                failed, lastKey = false, nil
+            end
+            HudMinimap.apply()
+            cfg = settings()
+            if cfg then guard(cfg) end
+        end)
+        Wait(number((layoutConfig() or {}).pollMs, 1000, 250, 60000))
     end
 end)

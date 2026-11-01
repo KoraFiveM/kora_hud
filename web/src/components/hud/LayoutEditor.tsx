@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Maximize2, Move, RotateCcw, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Map as MapIcon, Maximize2, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useHudLayout } from "@/lib/hudState"
@@ -404,34 +404,65 @@ export function LayoutEditorOverlay() {
 
     return (
         <div className="pointer-events-none fixed inset-0 bg-black/45">
-            <div className="hud-panel pointer-events-auto absolute left-1/2 top-1/2 flex w-fit -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full p-1 overlay-text">
-                <button
-                    type="button"
-                    aria-label="Confirm layout changes"
-                    title="Confirm"
-                    onClick={layout.confirm}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90"
-                >
-                    <Check className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                    type="button"
-                    aria-label="Close without saving layout changes"
-                    title="Close without saving"
-                    onClick={layout.cancel}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
-                >
-                    <X className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                    type="button"
-                    aria-label="Reset HUD layout to defaults"
-                    title="Reset to defaults"
-                    onClick={layout.resetToDefaults}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
-                >
-                    <RotateCcw className="h-4 w-4" aria-hidden />
-                </button>
+            <div className="absolute left-1/2 top-1/2 flex w-fit -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2">
+                <div className="hud-panel pointer-events-auto flex w-fit items-center gap-1 rounded-full p-1 overlay-text">
+                    <button
+                        type="button"
+                        aria-label="Confirm layout changes"
+                        title="Confirm"
+                        onClick={layout.confirm}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+                    >
+                        <Check className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                        type="button"
+                        aria-label="Close without saving layout changes"
+                        title="Close without saving"
+                        onClick={layout.cancel}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
+                    >
+                        <X className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                        type="button"
+                        aria-label="Reset HUD layout to defaults"
+                        title="Reset to defaults"
+                        onClick={layout.resetToDefaults}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
+                    >
+                        <RotateCcw className="h-4 w-4" aria-hidden />
+                    </button>
+                </div>
+                {/* Per player, saved with the layout. Hidden when the server pins
+                    it (Config.hud.minimapVehicleOnly.allowPlayerChange = false). */}
+                {layout.minimapVehicleOnlyAllowed && (
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={layout.minimapVehicleOnly}
+                        title="Show the minimap only while you are in a vehicle"
+                        onClick={() => layout.setMinimapVehicleOnly(!layout.minimapVehicleOnly)}
+                        className="hud-panel pointer-events-auto flex items-center gap-2 rounded-full px-3 py-1.5 text-sm text-foreground overlay-text transition-colors hover:bg-muted"
+                    >
+                        <MapIcon className="h-4 w-4 text-primary" aria-hidden />
+                        <span>Minimap only in vehicle</span>
+                        <span
+                            aria-hidden
+                            className={cn(
+                                "flex h-5 w-9 items-center rounded-full p-0.5 transition-colors",
+                                layout.minimapVehicleOnly ? "bg-primary" : "bg-border",
+                            )}
+                        >
+                            <span
+                                className={cn(
+                                    "h-4 w-4 rounded-full bg-primary-foreground transition-transform",
+                                    layout.minimapVehicleOnly ? "translate-x-4" : "translate-x-0",
+                                )}
+                            />
+                        </span>
+                    </button>
+                )}
             </div>
         </div>
     )

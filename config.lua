@@ -7,6 +7,14 @@ local configInteger = Kora and Kora.config and Kora.config.integer
 local configBoolean = Kora and Kora.config and Kora.config.boolean
 local configNumber = Kora and Kora.config and Kora.config.number
 
+-- Boolean option: the kora_lib descriptor when available, otherwise the plain
+-- default. Replaces the old `configBoolean and configBoolean(x, ...) or true`,
+-- whose trailing `or true` made a `false` default impossible to express.
+local function boolean(default, options)
+    if configBoolean then return configBoolean(default, options) end
+    return default
+end
+
 -- Per-element toggles. Health, armour, and job/gang are NOT here -- they're
 -- baseline "usual player data" rather than independently toggleable elements.
 -- Dynamic mode can still suppress health/armour while they are neutral.
@@ -60,11 +68,11 @@ Config.hud = {
     -- the player it is disabled. `enabled`, `defaultVisible` and `remember` are
     -- read live; `command` and `defaultKey` are registered at resource start.
     minimapToggle = {
-        enabled = configBoolean and configBoolean(true, {
+        enabled = boolean(true, {
             label = 'Player minimap toggle',
             description = 'Lets players hide and show their own minimap with a command or a key they bind in Settings > Key Bindings. The minimap mode still decides when the map may appear; the toggle can only hide it further.',
             live = true,
-        }) or true,
+        }),
         -- Chat/console command that toggles the minimap.
         command = 'minimap',
         -- Default key for the rebindable "Toggle minimap" binding. '' leaves it
@@ -72,18 +80,44 @@ Config.hud = {
         defaultKey = '',
         -- Save each player's choice on their own machine (client KVP) so it
         -- survives reconnects. When false the choice lasts until relog/restart.
-        remember = configBoolean and configBoolean(true, {
+        remember = boolean(true, {
             label = 'Remember minimap choice',
             description = 'Saves each player\'s minimap on/off choice on their own machine so it survives reconnects.',
             live = true,
-        }) or true,
+        }),
         -- What a player with no saved choice sees: true = the minimap follows
         -- `minimap` above, false = it starts hidden until they toggle it on.
-        defaultVisible = configBoolean and configBoolean(true, {
+        defaultVisible = boolean(true, {
             label = 'Minimap visible by default',
             description = 'When off, players without a saved choice start with the minimap hidden until they toggle it on.',
             live = true,
-        }) or true,
+        }),
+    },
+
+    -- Minimap only in a vehicle, per player. Each player can switch this on in
+    -- /hudlayout ("Minimap only in vehicle"); with it on, the radar is hidden
+    -- on foot and shown in a vehicle (driver or passenger, the same test the
+    -- 'vehicle' mode of `minimap` uses). It is saved with that player's HUD
+    -- layout on their own machine, and /hudlayoutreset puts it back to
+    -- `default`. It sits on top of the modes above like the player toggle does:
+    -- `minimap = 'never'` and a player's own /minimap "hidden" choice still
+    -- hide the radar, and it works with `minimap = 'always'` too. Read live.
+    minimapVehicleOnly = {
+        -- What a player who never chose sees: true = minimap only in vehicles
+        -- for everyone by default, false = the minimap follows `minimap`.
+        default = boolean(false, {
+            label = 'Minimap only in vehicle (default)',
+            description = 'The server-wide default for players who never changed it in /hudlayout. When on, the minimap is hidden on foot and shown in vehicles.',
+            live = true,
+        }),
+        -- false hides the option in /hudlayout and forces `default` for every
+        -- player, ignoring anything they saved earlier. Also forced to the
+        -- default while Config.layout.movable is false (no layout editor).
+        allowPlayerChange = boolean(true, {
+            label = 'Players can change minimap-only-in-vehicle',
+            description = 'Shows the "Minimap only in vehicle" switch in /hudlayout. When off, every player gets the server default and the switch is hidden.',
+            live = true,
+        }),
     },
 
     -- While another resource force-hides the HUD (exports.kora_hud:hide(), as
@@ -92,75 +126,153 @@ Config.hud = {
     -- behaviour: the radar is handed back as visible, which with
     -- minimap = 'vehicle' shows it on foot. Logout and resource stop always
     -- restore the radar. Read live, so changes apply on the next hide().
-    hideMinimapWhenForcedHidden = configBoolean and configBoolean(true, {
+    hideMinimapWhenForcedHidden = boolean(true, {
         label = 'Hide minimap with forced-hidden HUD',
         description = 'Keeps the minimap hidden while another resource hides the HUD, such as a clothing menu, and returns it to the minimap mode when the HUD is shown again. When off, the minimap is handed back as visible instead, which shows it on foot in vehicle mode.',
         live = true,
-    }) or true,
+    }),
 
     -- Hide every HUD element (gauges, job/cash pills, status effects such as
     -- Bleeding/Limping, vehicle bar) while the pause menu or the full map
     -- (ESC, P) is open, and show them again, exactly as before, when it closes.
     -- Other reasons the HUD is hidden (forced hide, logout, minimap toggle) are
     -- unaffected. Read live.
-    hideOnPauseMenu = configBoolean and configBoolean(true, {
+    hideOnPauseMenu = boolean(true, {
         label = 'Hide HUD on pause menu / map',
         description = 'Hides the whole HUD while the pause menu or the full map is open so it does not draw over the map and its legend, and restores it when the menu closes.',
         live = true,
-    }) or true,
+    }),
 
-    -- Optional minimap layout. When enabled, kora_hud positions the minimap,
-    -- its mask and its border/blur frame from one calculation (vanilla 16:9
-    -- sizes, widths scaled for other aspect ratios) so they stay aligned at
-    -- every aspect ratio and GTA safezone size, re-applied automatically when
-    -- either changes. On by default so the default square shape (below) lines up
-    -- with its border out of the box; set enabled = false to leave the stock
-    -- minimap untouched. Read live.
+    -- Minimap layout. When enabled, kora_hud positions the minimap, its mask
+    -- and its border/blur frame from one calculation and, for the 'square'
+    -- shape, swaps the radar mask for its own streamed texture
+    -- (stream/kora_hud_squaremap.ytd, built by tools/gen_minimap_ytd.py), so the
+    -- rotating map tiles are clipped to a square instead of spilling out of the
+    -- border. This is the same technique the widely used qb-hud/ps-hud square
+    -- map relies on, with the same rect values (below).
+    --
+    -- Widths and heights are NOT scaled for the aspect ratio: the engine already
+    -- lays out left/bottom-anchored components in a 16:9 space, so scaling them
+    -- again would double-correct. Only the x position gets the small ultrawide
+    -- offset (`aspectOffset`). The engine also already applies the safezone to
+    -- L/B anchors, so no safezone compensation is applied by default.
+    --
+    -- Natives only re-read the component rects and masks on a bigmap toggle, so
+    -- after every change one SetBigmapActive(true) -> wait -> (false) refresh is
+    -- done from a single owner in client/minimap.lua. Read live (apart from the
+    -- stream file itself).
     minimapLayout = {
-        -- Default true. When false, kora_hud does not touch the minimap
-        -- components or the bigmap at all, and
+        -- When false kora_hud does not touch the minimap components, masks or
+        -- the bigmap at all (and undoes anything it applied earlier), and
         -- exports.kora_hud:applyMinimapLayout() returns false. Turn it off if
-        -- another resource positions the minimap (and set shape = 'stock'
-        -- unless that resource sizes its frame for a square mask).
-        enabled = configBoolean and configBoolean(true, {
+        -- another resource positions the minimap.
+        enabled = boolean(true, {
             label = 'Manage minimap layout (off = stock minimap)',
-            description = 'On by default: the HUD positions the minimap, mask and border together so the map stays inside its frame across aspect ratios and safezone sizes. Turn off to leave the stock GTA minimap positions alone, for example if another resource positions the minimap.',
+            description = 'On by default: the HUD positions the minimap, mask and border together and clips the map to the chosen shape. Turn off to leave the stock GTA minimap alone, for example if another resource positions the minimap.',
             live = true,
-        }) or true,
-        -- Map mask shape. 'square' (default) replaces radarmasksm/radarmask1g
-        -- with a square mask and sets the square clip type, so the rotating map
-        -- tiles stay inside a square border; the layout above sizes the mask
-        -- square at every aspect ratio. The mask is kora_hud's own generated
-        -- PNG (assets/square_minimap_mask.png, see tools/gen_minimap_mask.py),
-        -- loaded as a runtime texture. 'stock' restores the stock round masks
-        -- and the stock component rects. Read live.
+        }),
+        -- 'square' (default): streamed square mask + clip type 0.
+        -- 'circle': stock round mask + clip type 1 (no texture replaced).
+        -- 'stock': kora_hud touches no component position or texture (pure
+        --          vanilla); if it applied one earlier it undoes it.
         shape = 'square',
-        -- Optional: name of a streamed texture dict holding radarmasksm and
-        -- radarmask1g textures from another resource. When set and streamed it
-        -- is used instead of the built-in mask; '' (default) uses the built-in
-        -- mask only. Read live.
-        squareTextureDict = '',
-        -- Screen-fraction offsets applied to the whole minimap (positive x is
-        -- right, positive y is down). Default 0: the calculated position.
+        -- Streamed texture dictionary holding the square mask (stream/ is
+        -- streamed automatically; the dictionary name is the .ytd file name) and
+        -- the texture inside it. It replaces the radarmasksm and radarmask1g
+        -- textures of platform:/textures/graphics.
+        textureDict = 'kora_hud_squaremap',
+        maskTexture = 'radarmasksm',
+        -- How long to wait for the dictionary to stream in. On timeout a warning
+        -- is printed and the stock minimap is kept (nothing half-applied).
+        dictTimeoutMs = 5000,
+        -- A failed apply (dictionary not streamed in time) keeps the stock
+        -- minimap, is retried every retryMs up to maxRetries times, then left
+        -- alone until another resource starts.
+        retryMs = 10000,
+        maxRetries = 3,
+        -- Ms between SetBigmapActive(true) and (false) in the refresh. The
+        -- engine needs a frame or more between them.
+        bigmapWaitMs = 50,
+        -- Applying waits for the player ped and the minimap scaleform to exist,
+        -- then this long once, instead of applying blindly at resource start.
+        -- readyTimeoutMs bounds that wait.
+        readySettleMs = 2000,
+        readyTimeoutMs = 30000,
+        -- Ms between checks of the screen resolution and the config. The layout
+        -- is only re-applied when the answer changed.
+        pollMs = 1000,
+        -- Force the bigmap back off if it is found on (twice in a row, so a
+        -- short toggle by another script is left alone) while kora_hud manages
+        -- the layout and is not refreshing, and the pause menu is closed. This
+        -- is what un-sticks an oversized "bigmap" radar. Turn it off if another
+        -- resource deliberately keeps the bigmap on.
+        guardBigmap = boolean(true, {
+            label = 'Force the bigmap off when stuck',
+            description = 'Switches the expanded bigmap radar back off if it stays on while the HUD manages the minimap layout. Turn off if another resource keeps the bigmap on on purpose.',
+            live = true,
+        }),
+        -- Ultrawide x offset: for aspect > 16:9 every rect x gets
+        -- ((16/9 - aspect) / divisor) + bias. Aspects within `tolerance` above
+        -- 16:9 (windowed 1919x1079 and the like) count as 16:9.
+        aspectOffset = {
+            divisor = 3.6,
+            bias = -0.008,
+            tolerance = 0.01,
+        },
+        -- Per-shape rects, left/bottom anchored, as { x, y, w, h } in screen
+        -- fractions, plus the SetMinimapClipType value. Not scaled by aspect.
+        shapes = {
+            square = {
+                clipType = 0,
+                rects = {
+                    minimap      = { x = 0.0,   y = -0.047, w = 0.1638, h = 0.183 },
+                    minimap_mask = { x = 0.0,   y = 0.0,    w = 0.128,  h = 0.20 },
+                    minimap_blur = { x = -0.01, y = 0.025,  w = 0.262,  h = 0.300 },
+                },
+            },
+            circle = {
+                clipType = 1,
+                rects = {
+                    minimap      = { x = -0.0100, y = -0.030, w = 0.180, h = 0.258 },
+                    minimap_mask = { x = 0.200,   y = 0.0,    w = 0.065, h = 0.20 },
+                    minimap_blur = { x = -0.00,   y = 0.015,  w = 0.252, h = 0.338 },
+                },
+            },
+            -- The vanilla 16:9 rects and clip type. Only used to put the stock
+            -- layout back (shape 'stock', layout disabled, resource stop); never
+            -- scaled, offset or nudged.
+            stock = {
+                clipType = 0,
+                rects = {
+                    minimap      = { x = -0.0045, y = 0.002, w = 0.150, h = 0.188 },
+                    minimap_mask = { x = 0.020,   y = 0.032, w = 0.111, h = 0.159 },
+                    minimap_blur = { x = -0.03,   y = 0.022, w = 0.266, h = 0.237 },
+                },
+            },
+        },
+        -- Optional nudges applied on top of the shape rects (not used by
+        -- 'stock'). Defaults give exactly the numbers above.
+        -- x / y are added to every component's x / y (screen fractions).
         x = configNumber and configNumber(0.0, {
             label = 'Minimap X offset',
-            description = 'Moves the whole minimap horizontally as a fraction of the screen width; positive moves right.',
+            description = 'Added to the x of the whole minimap as a fraction of the screen width.',
             min = -0.5, max = 0.5, step = 0.001, live = true,
         }) or 0.0,
         y = configNumber and configNumber(0.0, {
             label = 'Minimap Y offset',
-            description = 'Moves the whole minimap vertically as a fraction of the screen height; positive moves down.',
+            description = 'Added to the y of the whole minimap (bottom-anchored) as a fraction of the screen height.',
             min = -0.5, max = 0.5, step = 0.001, live = true,
         }) or 0.0,
         -- Size multiplier for map, mask and border together. Default 1.0.
         scale = configNumber and configNumber(1.0, {
             label = 'Minimap size scale',
-            description = 'Scales the minimap, its mask and its border together; 1.0 is the stock size.',
+            description = 'Scales the minimap, its mask and its border together; 1.0 is the shipped size.',
             min = 0.5, max = 2.0, step = 0.01, live = true,
         }) or 1.0,
-        -- Fraction of the safezone margin to cancel. The engine already keeps
-        -- the minimap inside the safezone, so 0 is correct unless the mask
-        -- drifts from the border at small safezones on your build.
+        -- Extra safezone compensation. The engine already applies the safezone
+        -- to left/bottom anchors, so this stays 0 (correcting it would double
+        -- up); only raise it if the map drifts from its border at small
+        -- safezone sizes on your build.
         safezoneCompensation = configNumber and configNumber(0.0, {
             label = 'Safezone compensation',
             description = 'Cancels this fraction of the GTA safezone margin for the minimap. Leave at 0 unless the map drifts from its border when the safezone slider is lowered.',
@@ -168,7 +280,7 @@ Config.hud = {
             advanced = true,
         }) or 0.0,
         -- Fine offsets for one component, to correct a single layer that is a
-        -- hair off on your setup (screen fractions, same signs as above).
+        -- hair off on your setup (screen fractions).
         offsets = {
             map  = { x = 0.0, y = 0.0 },
             mask = { x = 0.0, y = 0.0 },
@@ -209,11 +321,11 @@ Config.layout = {
 -- sound plays, so edits apply without a restart.
 Config.seatbelt = {
     sound = {
-        enabled = configBoolean and configBoolean(true, {
+        enabled = boolean(true, {
             label = 'Seatbelt sounds',
             description = 'Plays a buckle sound when the seatbelt goes on and a different unbuckle sound when it comes off, for the local player only. Turn off on servers that already play their own seatbelt audio.',
             live = true,
-        }) or true,
+        }),
         volume = configNumber and configNumber(0.5, {
             label = 'Seatbelt sound volume',
             description = 'Volume of the buckle and unbuckle sounds from 0.0 (silent) to 1.0 (full). Only applies to the bundled NUI sounds; native frontend sounds cannot be scaled.',

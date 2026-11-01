@@ -316,19 +316,62 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   when it closes. Polled on the HUD scheduler (`Config.poll.minimapInterval`),
   one NUI message per open/close; forced hides, logout and the minimap toggle
   are independent and unaffected.
-- `Config.hud.minimapLayout` — `enabled` (default `true`) positions the
-  minimap, mask and border together (aspect ratio / safezone aware, 16:9, 21:9
-  and 32:9); `false` leaves the stock minimap untouched. `shape` (default
-  `'square'`) swaps `radarmasksm`/`radarmask1g` for a square mask and sets the
-  square clip type so rotated map tiles stay inside a square border; `'stock'`
-  restores the round masks and stock rects. The mask is shipped as
-  `assets/square_minimap_mask.png` and loaded at runtime
-  (`CreateRuntimeTxd` / `CreateRuntimeTextureFromImage`). It is generated
-  in-repo by `python3 tools/gen_minimap_mask.py` (pure Python, no third-party
-  art): a Kora original under the same licence as the resource, reproducible
-  byte for byte. Optionally set `squareTextureDict` (default `''`) to a streamed
-  texture dict containing `radarmasksm`/`radarmask1g`; when it is streamed it is
-  preferred over the built-in mask.
+- `Config.hud.minimapVehicleOnly` — per-player "Minimap only in vehicle",
+  switched on in `/hudlayout` (a toggle under the confirm/cancel buttons) and
+  saved with that player's layout in the same client KVP (`Config.layout.kvpKey`),
+  so it survives reconnects; `/hudlayoutreset` puts it back to `default`. With
+  it on the radar is hidden on foot and shown in any seat of a vehicle (the same
+  test as `minimap = 'vehicle'`), also when `Config.hud.minimap` is `'always'`.
+  `Config.hud.minimap = 'never'`, the player's own `/minimap` hide choice and a
+  force-hidden HUD still win, and `DisplayRadar` is only called when the answer
+  changes, so other resources (such as the phone Maps app) are not fought.
+  - `default` (default `false`, live) — what a player who never chose gets;
+    `true` makes the minimap vehicle-only for everyone by default.
+  - `allowPlayerChange` (default `true`, live) — `false` hides the toggle and
+    forces `default` for every player, ignoring anything saved earlier. It is
+    also forced while `Config.layout.movable` is `false` (no editor).
+- `Config.hud.minimapLayout` — `enabled` (default `true`, `false` works) lets
+  kora_hud own the minimap: it positions the minimap, mask and blur/border
+  components from `shapes.<shape>.rects`, swaps the radar mask and refreshes the
+  radar once through a single bigmap toggle. `false` leaves the stock minimap
+  untouched (and undoes anything applied earlier).
+  - `shape` (default `'square'`): `'square'` streams `stream/kora_hud_squaremap.ytd`
+    (texture dictionary `textureDict = 'kora_hud_squaremap'`, texture
+    `maskTexture = 'radarmasksm'`, built by `python3 tools/gen_minimap_ytd.py`,
+    pure Python, our own artwork) and replaces `radarmasksm` and `radarmask1g`
+    of `platform:/textures/graphics` with it, with clip type 0. The radar reads
+    its mask from the colour channels of a *streamed* texture (black = clipped,
+    grey = visible), which is why a runtime-built PNG never worked. `'circle'`
+    keeps the stock round mask (clip type 1, no texture replaced). `'stock'`
+    touches nothing (pure vanilla).
+  - Rects are left/bottom anchored `{ x, y, w, h }`. The shipped square values
+    are `minimap 0.0, -0.047, 0.1638, 0.183`, `minimap_mask 0.0, 0.0, 0.128, 0.20`,
+    `minimap_blur -0.01, 0.025, 0.262, 0.300`. Widths and heights are **not**
+    scaled for the aspect ratio (the engine already lays out L/B components in a
+    16:9 space); only x gets `aspectOffset` for screens wider than 16:9:
+    `((16/9 - aspect) / divisor) + bias` (defaults `3.6` and `-0.008`;
+    `tolerance` treats e.g. 1919x1079 as 16:9). The aspect comes from
+    `GetActiveScreenResolution`, with `GetAspectRatio` as the fallback, and is
+    re-checked every `pollMs` (default 1000); the layout is only re-applied when
+    it changed. The engine applies the safezone to L/B anchors itself, so
+    `safezoneCompensation` stays `0.0`.
+  - `x`, `y`, `scale` (defaults `0.0`, `0.0`, `1.0`) and `offsets.map/mask/blur`
+    nudge the rects; the defaults give exactly the numbers above.
+  - Timing: `dictTimeoutMs` (5000, on timeout a warning is printed and the stock
+    minimap is kept), `bigmapWaitMs` (50, between `SetBigmapActive(true)` and
+    `(false)`), `readySettleMs` (2000) and `readyTimeoutMs` (30000) wait for the
+    player ped and minimap scaleform before the first apply, `retryMs` (10000)
+    and `maxRetries` (3) retry a failed apply.
+  - `guardBigmap` (default `true`) forces a bigmap that stays on (seen on twice
+    in a row, pause menu closed) back off while kora_hud manages the layout.
+  - One owner (`client/minimap.lua`) runs every `SetBigmapActive` refresh;
+    overlapping requests (layout, resolution change, respawn, the
+    `applyMinimapLayout` export) coalesce. On resource stop (including a txAdmin
+    restart) both mask replacements, the clip type and the component rects are
+    put back to stock and the bigmap is forced off, then re-applied on start.
+  - `exports.kora_hud:applyMinimapLayout()` re-applies the layout (for resources
+    that moved the minimap temporarily) and returns `false` when the layout is
+    disabled or `'stock'`.
 - `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
   `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD
