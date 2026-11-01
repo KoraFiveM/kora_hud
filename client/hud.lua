@@ -112,8 +112,6 @@ local SPEED_MULTIPLIER = SPEED_UNIT == 'mph' and 0.621371 or 1
 -- four times a second. See the guarded registrations further down.
 local ELEMENTS = Config.hud.elements or {}
 
--- --- per-player layout ------------------------------------------------------
---
 -- Section positions are stored on THIS player's machine, as JSON in a FiveM
 -- KVP key. Client-side on purpose: a HUD layout is a personal preference about
 -- one screen, so it needs neither a database column nor a server round trip,
@@ -422,14 +420,10 @@ local loggedIn = currentlyLoggedIn()
 local forcedHidden = false
 visible = loggedIn and not forcedHidden
 
--- --- the scheduler ----------------------------------------------------------
---
 -- ONE thread owns every periodic thing this resource does: the vitals and
 -- player-data trailing flushes, vehicle telemetry, the mic sample, and the
--- minimap re-assert. It replaces the five independent loops those used to be,
--- for the reason in rule 1 of the cost model above -- plus a second one:
--- deadlines coincide constantly (vitals at 300ms, voice at 400ms, minimap and
--- vehicle both at 500ms). One thread waking once and running three due tasks
+-- minimap re-assert. Deadlines coincide constantly (vitals at 300ms, voice at
+-- 400ms, minimap and vehicle both at 500ms). One thread waking once and running three due tasks
 -- is one resume; three threads waking is three.
 --
 -- Each task declares whether it has any reason to run at all (`active`), and
@@ -535,8 +529,6 @@ local function channel(interval, flush)
     return request, task
 end
 
--- --- vitals -----------------------------------------------------------------
---
 -- Local mirror of the four continuously-moving values, kept current from the
 -- change notifications that already exist for them rather than re-read per
 -- push (cost model rule 3). Quantised to whole units on the way in, which is
@@ -583,8 +575,6 @@ local function setVital(key, value)
     if visible then requestVitals() end
 end
 
--- --- bridge-sourced player data ---------------------------------------------
-
 local function flushPlayer()
     if not visible then return end
 
@@ -602,8 +592,6 @@ local function flushPlayer()
 end
 
 local requestPlayer, playerTask = channel(PLAYER_INTERVAL, flushPlayer)
-
--- --- vehicle telemetry ------------------------------------------------------
 
 -- Mirrored from the cache (see the onChange registration below) so the
 -- sampling task's own condition isn't a cross-resource call four times a
@@ -682,8 +670,6 @@ local function pushVehicleUpdate(force)
     send("qbhud:vehicle", payload)
 end
 
--- --- minimap ----------------------------------------------------------------
---
 -- The minimap's own scaleform draws a health/armour/breath cluster straight
 -- from the engine's internal ped state -- it is not driven by
 -- Kora.cache.health() and has its own smoothing/thresholds, so left alone it
@@ -731,8 +717,6 @@ if minimapScaleform then
     })
 end
 
--- --- minimap visibility -----------------------------------------------------
---
 -- Separate from the health/armour cluster above: that decides what the radar
 -- DRAWS, this decides whether it is on screen at all.
 --
@@ -857,8 +841,6 @@ local function releaseHeldRadar(hudVisible)
     DisplayRadar(true)
 end
 
--- --- player minimap toggle --------------------------------------------------
-
 local minimapChoiceSet = false
 
 local function toggleMinimap()
@@ -896,8 +878,6 @@ if Kora.keybind and Kora.keybind.add then
     })
 end
 
--- --- sampled inputs ---------------------------------------------------------
-
 -- Mic state is the only HUD input with no change notification anywhere in the
 -- stack, so it is genuinely sampled -- but on the shared thread, and only
 -- while the element is on AND the HUD is visible (Voice.setActive owns that
@@ -923,8 +903,6 @@ if ELEMENTS.vehicle then
         run = pushVehicleUpdate,
     })
 end
-
--- --- change notifications ---------------------------------------------------
 
 -- Push-driven for anything that already has cheap change notification --
 -- these fire immediately instead of waiting for a tick. Each handler takes the
@@ -1018,8 +996,6 @@ pcall(function()
         requestPlayer()
     end)
 end)
-
--- --- visibility -------------------------------------------------------------
 
 local function syncVoiceSampling()
     Voice.setActive(visible and ELEMENTS.mic == true)
