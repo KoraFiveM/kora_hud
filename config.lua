@@ -50,6 +50,42 @@ Config.hud = {
     --   'never'   -- always hidden.
     minimap = 'vehicle',
 
+    -- Player minimap toggle. Lets each player hide the minimap on top of the
+    -- `minimap` mode above: the mode decides when the radar CAN show, the
+    -- player's choice can only hide it further, never force it on. Menus,
+    -- pause, phone and forced-hidden HUD keep working as before. Enabled by
+    -- default because it is harmless -- nothing changes until a player runs the
+    -- command or presses a key they bound themselves (defaultKey is unbound).
+    -- Set enabled = false to remove the feature; the command then only tells
+    -- the player it is disabled. `enabled`, `defaultVisible` and `remember` are
+    -- read live; `command` and `defaultKey` are registered at resource start.
+    minimapToggle = {
+        enabled = configBoolean and configBoolean(true, {
+            label = 'Player minimap toggle',
+            description = 'Lets players hide and show their own minimap with a command or a key they bind in Settings > Key Bindings. The minimap mode still decides when the map may appear; the toggle can only hide it further.',
+            live = true,
+        }) or true,
+        -- Chat/console command that toggles the minimap.
+        command = 'minimap',
+        -- Default key for the rebindable "Toggle minimap" binding. '' leaves it
+        -- unbound; players can still bind it in Settings > Key Bindings > FiveM.
+        defaultKey = '',
+        -- Save each player's choice on their own machine (client KVP) so it
+        -- survives reconnects. When false the choice lasts until relog/restart.
+        remember = configBoolean and configBoolean(true, {
+            label = 'Remember minimap choice',
+            description = 'Saves each player\'s minimap on/off choice on their own machine so it survives reconnects.',
+            live = true,
+        }) or true,
+        -- What a player with no saved choice sees: true = the minimap follows
+        -- `minimap` above, false = it starts hidden until they toggle it on.
+        defaultVisible = configBoolean and configBoolean(true, {
+            label = 'Minimap visible by default',
+            description = 'When off, players without a saved choice start with the minimap hidden until they toggle it on.',
+            live = true,
+        }) or true,
+    },
+
     -- While another resource force-hides the HUD (exports.kora_hud:hide(), as
     -- kora_clothing does for its menu) also keep the radar hidden, and let
     -- `minimap` above take over again on show(). Set false for the old

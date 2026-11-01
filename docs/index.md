@@ -288,6 +288,14 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   applies while both the `cash` and `bank` elements are enabled.
 - `Config.hud.minimap` — `'always'` (never touch `DisplayRadar`), `'vehicle'`,
   or `'never'`.
+- `Config.hud.minimapToggle` — lets players hide/show their own minimap with
+  `/minimap` (`command`) or a key bound in Settings > Key Bindings ("Toggle
+  minimap", `defaultKey` unbound by default). Layered on `Config.hud.minimap`:
+  the mode decides when the radar can show, the player's choice can only hide
+  it further, and menus, pause, phone and forced-hidden HUD behave as before.
+  `enabled` (default `true`), `remember` (default `true`, saved in client KVP
+  `kora_hud:minimapHidden`) and `defaultVisible` (default `true`) are live.
+  Players get a Kora notification on each toggle.
 - `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
   `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD

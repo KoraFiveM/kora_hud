@@ -57,9 +57,12 @@ end
 local sendInitialState
 
 -- Hands the radar back to the engine when the HUD hides. Assigned only when
--- Config.hud.minimap actually takes control of it; nil in 'always' mode, where
--- this resource never touches DisplayRadar at all.
+-- Config.hud.minimap or the player minimap toggle actually takes control of
+-- it. In 'always' mode with nothing hidden this resource never touches
+-- DisplayRadar at all.
 local minimapRelease
+-- Set once the minimap visibility block below has run.
+local minimapChoiceChanged
 
 -- FiveM delivers SendNUIMessage like postMessage, not like a mailbox: if the
 -- NUI page hasn't finished mounting (and attaching its "message" listener)
@@ -739,9 +742,38 @@ end
 -- screen, which is a far worse default than leaving the engine alone.
 local MINIMAP_MODE = (type(Config.hud.minimap) == 'string' and Config.hud.minimap) or 'always'
 
+-- Player minimap toggle (Config.hud.minimapToggle). The player's choice sits on
+-- top of MINIMAP_MODE and can only HIDE the radar: it feeds the same
+-- visibility task below instead of a second DisplayRadar caller, so menus,
+-- pause, phone and forced-hidden HUD keep going through their existing paths.
+local MINIMAP_TOGGLE = Config.hud.minimapToggle or {}
+local MINIMAP_KVP = 'kora_hud:minimapHidden'
+local minimapHiddenChoice
+
+local function minimapToggleEnabled()
+    return MINIMAP_TOGGLE.enabled ~= false
+end
+
+---The saved choice wins over defaultVisible; anything else in the KVP is ignored.
+local function loadMinimapChoice()
+    if MINIMAP_TOGGLE.remember ~= false then
+        local saved = GetResourceKvpString(MINIMAP_KVP)
+        if saved == 'hidden' then return true end
+        if saved == 'visible' then return false end
+    end
+    return MINIMAP_TOGGLE.defaultVisible == false
+end
+minimapHiddenChoice = loadMinimapChoice()
+
+---Whether the player's choice is currently hiding the radar.
+local function minimapPlayerHidden()
+    return minimapToggleEnabled() and minimapHiddenChoice == true
+end
+
 ---Whether the radar should be on screen right now, or nil for "not our call".
 ---@return boolean|nil
 local function minimapShouldShow()
+    if minimapPlayerHidden() then return false end
     if MINIMAP_MODE == 'never' then return false end
     if MINIMAP_MODE == 'vehicle' then
         local vehicle = Kora.cache.vehicle()
@@ -755,7 +787,8 @@ local minimapVisibilityTask
 -- that legitimately hid the radar for its own reasons then keeps working
 -- between our transitions instead of being overruled four times a second.
 local lastRadar
-if MINIMAP_MODE ~= 'always' then
+local radarHeldHidden = false
+do
     local function applyMinimap()
         local shouldShow = minimapShouldShow()
         if shouldShow == nil or shouldShow == lastRadar then return end
@@ -764,11 +797,28 @@ if MINIMAP_MODE ~= 'always' then
         DisplayRadar(shouldShow)
     end
 
+    -- Registered in every mode so a live change of `minimap` or of the toggle
+    -- needs no restart, but only RUNS when something wants the radar managed:
+    -- 'always' with the player not hiding it is still hands-off.
     minimapVisibilityTask = addTask({
         interval = MINIMAP_INTERVAL,
-        active = function() return MINIMAP_MODE ~= 'always' end,
+        active = function() return MINIMAP_MODE ~= 'always' or minimapPlayerHidden() end,
         run = applyMinimap,
     })
+
+    ---Applies a changed player choice at once instead of on the next tick.
+    ---'always' mode has no task running while the player is showing the map, so
+    ---un-hiding must hand the radar back explicitly.
+    minimapChoiceChanged = function()
+        if MINIMAP_MODE == 'always' and not minimapPlayerHidden() then
+            if lastRadar == false then
+                lastRadar = nil
+                if visible and not radarHeldHidden then DisplayRadar(true) end
+            end
+        elseif visible and not radarHeldHidden then
+            applyMinimap()
+        end
+    end
 
     -- The scheduler only runs while the HUD is visible, so hand the radar back
     -- when it is not: a hidden HUD must not leave the radar forced off with
@@ -786,8 +836,6 @@ end
 -- 'vehicle' mode would show it on foot. With hideMinimapWhenForcedHidden the
 -- radar is kept off instead, and show() lets the normal mode take over again.
 -- Logout and resource stop still release it, so it is never left forced off.
-local radarHeldHidden = false
-
 local function wantsRadarHeldHidden(loggedIn, forcedHidden, stopping)
     return loggedIn and forcedHidden and not stopping
         and Config.hud.hideMinimapWhenForcedHidden ~= false
@@ -805,8 +853,47 @@ end
 -- nothing will run again, so the radar is restored.
 local function releaseHeldRadar(hudVisible)
     radarHeldHidden = false
-    if hudVisible and MINIMAP_MODE ~= 'always' then return end
+    if hudVisible and (MINIMAP_MODE ~= 'always' or minimapPlayerHidden()) then return end
     DisplayRadar(true)
+end
+
+-- --- player minimap toggle --------------------------------------------------
+
+local minimapChoiceSet = false
+
+local function toggleMinimap()
+    if not minimapToggleEnabled() then
+        Kora.notify.send({ title = 'Minimap', message = 'The minimap toggle is disabled on this server.', type = 'error' })
+        return
+    end
+
+    minimapChoiceSet = true
+    minimapHiddenChoice = not minimapHiddenChoice
+    if MINIMAP_TOGGLE.remember ~= false then
+        SetResourceKvp(MINIMAP_KVP, minimapHiddenChoice and 'hidden' or 'visible')
+    end
+    minimapChoiceChanged()
+
+    if minimapHiddenChoice then
+        Kora.notify.send({ title = 'Minimap', message = 'Minimap hidden.', type = 'success' })
+    elseif MINIMAP_MODE == 'never' then
+        Kora.notify.send({ title = 'Minimap', message = 'Minimap enabled, but this server keeps it hidden.', type = 'success' })
+    else
+        Kora.notify.send({ title = 'Minimap', message = 'Minimap shown.', type = 'success' })
+    end
+end
+
+-- The plain command always exists so a live `enabled` change needs no restart;
+-- the keybind is the same action on a key the player can rebind in Settings.
+RegisterCommand(MINIMAP_TOGGLE.command or 'minimap', toggleMinimap, false)
+if Kora.keybind and Kora.keybind.add then
+    Kora.keybind.add({
+        name = 'kora_hud_minimap',
+        description = 'Toggle minimap',
+        defaultMapper = 'keyboard',
+        defaultKey = MINIMAP_TOGGLE.defaultKey or '',
+        onPressed = toggleMinimap,
+    })
 end
 
 -- --- sampled inputs ---------------------------------------------------------
@@ -1152,11 +1239,15 @@ local function applyConfig(settings)
     if minimapHealthTask then minimapHealthTask.interval = MINIMAP_INTERVAL end
     if minimapVisibilityTask then minimapVisibilityTask.interval = MINIMAP_INTERVAL end
 
+    local previousPlayerHidden = minimapPlayerHidden()
+    MINIMAP_TOGGLE = Config.hud.minimapToggle or {}
+    if not minimapChoiceSet then minimapHiddenChoice = loadMinimapChoice() end
     local previousMinimapMode = MINIMAP_MODE
     MINIMAP_MODE = type(Config.hud.minimap) == 'string' and Config.hud.minimap or 'always'
     if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' and minimapRelease then
         minimapRelease()
     end
+    if previousPlayerHidden ~= minimapPlayerHidden() then minimapChoiceChanged() end
 
     syncVoiceSampling()
     -- The NUI remains mounted while the HUD is hidden. Refresh its complete

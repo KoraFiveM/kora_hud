@@ -164,6 +164,7 @@ local function loadHud(opts)
             -- their own cases below.
             minimap = opts.minimap or 'always',
             hideMinimapWhenForcedHidden = opts.hideMinimapWhenForcedHidden,
+            minimapToggle = opts.minimapToggle,
         },
         layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
         voice = { enabled = true, interval = 200 },
@@ -1309,6 +1310,90 @@ harness.test('stopping while force hidden releases the held radar', function()
     hud.exported.hide()
     hud.stopResource('kora_hud')
     harness.assertEqual(hud.radar[#hud.radar], true, 'a stopped resource must not leave the radar forced off')
+end)
+
+-- --- player minimap toggle -------------------------------------------------
+
+harness.test('the minimap toggle changes nothing until a player uses it', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.tick()
+    harness.assertEqual(#hud.radar, 0, 'default config leaves the radar alone')
+    harness.assertTrue(hud.commands.minimap ~= nil, 'the /minimap command is registered')
+end)
+
+harness.test("toggling hides the radar in 'always' mode and hands it back", function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'hidden at once')
+    hud.tick()
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'handed back when shown again')
+    local count = #hud.radar
+    hud.tick()
+    harness.assertEqual(#hud.radar, count, 'and left alone afterwards')
+    harness.assertEqual(#hud.notices, 2, 'each toggle notifies')
+end)
+
+harness.test("the player's hidden choice wins over 'vehicle' mode and can not force the map on", function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle', inVehicle = true })
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'sanity: shown in a vehicle')
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'hidden even in a vehicle')
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'the visibility loop does not undo it')
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], true, 'shown again in a vehicle')
+
+    hud.setVehicle(nil)
+    hud.tick()
+    hud.commands.minimap()
+    hud.commands.minimap()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'un-hiding on foot still obeys vehicle mode')
+end)
+
+harness.test('a hidden minimap stays hidden through hide()/show() menus', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'vehicle', inVehicle = true })
+    hud.tick()
+    hud.commands.minimap()
+    hud.exported.hide()
+    hud.exported.show()
+    hud.tick()
+    harness.assertEqual(hud.radar[#hud.radar], false, 'the choice survives a menu round trip')
+end)
+
+harness.test('the minimap choice is remembered in KVP unless remember is off', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always' })
+    hud.commands.minimap()
+    harness.assertEqual(hud.kvp['kora_hud:minimapHidden'], 'hidden')
+
+    local reloaded = loadHud({ bridgePush = true, minimap = 'always', kvp = hud.kvp })
+    reloaded.tick()
+    harness.assertEqual(reloaded.radar[#reloaded.radar], false, 'a saved hidden choice applies on boot')
+
+    local volatile = loadHud({ bridgePush = true, minimap = 'always', minimapToggle = { remember = false } })
+    volatile.commands.minimap()
+    harness.assertEqual(volatile.kvp['kora_hud:minimapHidden'], nil, 'remember = false writes nothing')
+end)
+
+harness.test('defaultVisible = false starts hidden but a saved choice wins', function()
+    local hidden = loadHud({ bridgePush = true, minimap = 'always', minimapToggle = { defaultVisible = false } })
+    hidden.tick()
+    harness.assertEqual(hidden.radar[#hidden.radar], false, 'starts hidden')
+
+    local saved = loadHud({ bridgePush = true, minimap = 'always', minimapToggle = { defaultVisible = false },
+        kvp = { ['kora_hud:minimapHidden'] = 'visible' } })
+    saved.tick()
+    harness.assertEqual(#saved.radar, 0, 'the saved visible choice beats the default')
+end)
+
+harness.test('enabled = false disables the toggle and ignores a saved hidden choice', function()
+    local hud = loadHud({ bridgePush = true, minimap = 'always', minimapToggle = { enabled = false },
+        kvp = { ['kora_hud:minimapHidden'] = 'hidden' } })
+    hud.tick()
+    hud.commands.minimap()
+    harness.assertEqual(#hud.radar, 0, 'the radar is never touched')
+    harness.assertEqual(hud.notices[1].type, 'error', 'the player is told it is disabled')
 end)
 
 harness.test('hiding or logging out closes the owned editor without saving its preview', function()
