@@ -1015,6 +1015,39 @@ end
 -- otherwise defer it.
 local resourceStopping = false
 
+-- The pause menu and the full map (ESC, P) are drawn by the engine ABOVE the
+-- game screen but BELOW the NUI, so the HUD would sit over the map and its
+-- legend. While Config.hud.hideOnPauseMenu is on the NUI is told to hide, and
+-- told to show again when the menu closes. This is only the NUI's drawn state:
+-- `visible`, the radar policy, forced hides and the minimap toggle are not
+-- touched, so whatever else hides the HUD keeps doing so after the menu closes.
+-- It is a scheduler task (nothing runs while the HUD is hidden) and sends one
+-- message per open/close, never one per tick.
+local pauseHidden = false
+
+local function pauseMenuActive()
+    if Config.hud.hideOnPauseMenu == false then return false end
+    local ok, active = pcall(IsPauseMenuActive)
+    return ok and active == true
+end
+
+local function nuiVisible()
+    return visible and not pauseHidden
+end
+
+local function syncPauseHidden()
+    local active = pauseMenuActive()
+    if active == pauseHidden then return end
+    pauseHidden = active
+    if visible then send("qbhud:visibility", nuiVisible()) end
+end
+
+addTask({
+    interval = MINIMAP_INTERVAL,
+    active = function() return true end,
+    run = syncPauseHidden,
+})
+
 local function refreshVisibility()
     local newVisible = loggedIn and not forcedHidden
     if radarHeldHidden and not wantsRadarHeldHidden(loggedIn, forcedHidden, resourceStopping) then
@@ -1023,8 +1056,10 @@ local function refreshVisibility()
     if not newVisible then closeLayout() end
     if newVisible == visible then return end
     visible = newVisible
+    -- Hidden HUDs do not poll, so the pause state may be stale on a show.
+    pauseHidden = visible and pauseMenuActive()
     syncVoiceSampling()
-    send("qbhud:visibility", visible)
+    send("qbhud:visibility", nuiVisible())
 
     if visible then
         -- pcall'd (via safeGetBridgeSnapshot): this runs inside the adapter's
@@ -1118,7 +1153,7 @@ sendInitialState = function()
         },
     })
 
-    send("qbhud:visibility", visible)
+    send("qbhud:visibility", nuiVisible())
 
     if visible then
         -- Direct, un-throttled and unconditional: this is a REMOUNT, so the

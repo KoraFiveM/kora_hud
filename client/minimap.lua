@@ -163,6 +163,63 @@ function HudMinimap.apply(force)
     return true
 end
 
+-- Optional square map mask. The stock radar clips the rotating map tiles with a
+-- round/rounded mask, so inside a square border the corner tiles show outside
+-- it. 'square' swaps the radar masks for the ones in a streamed texture dict
+-- the server supplies and sets the square clip type. 'stock' (the default)
+-- touches nothing and, if square was applied earlier, undoes it. kora_hud ships
+-- no mask texture: the dict (Config.hud.minimapLayout.squareTextureDict) must
+-- be streamed by some resource, or the shape stays stock and one line is logged.
+local MASK_TXD = 'platform:/textures/graphics'
+local MASK_NAMES = { 'radarmasksm', 'radarmask1g' }
+local shapeKey, shapeFailedKey, shapeDict
+
+local function shapeSettings()
+    local hud = type(Config) == 'table' and Config.hud
+    local cfg = type(hud) == 'table' and hud.minimapLayout
+    cfg = type(cfg) == 'table' and cfg or {}
+    local dict = type(cfg.squareTextureDict) == 'string' and cfg.squareTextureDict ~= '' and cfg.squareTextureDict or 'squaremap'
+    return cfg.shape == 'square' and 'square' or 'stock', dict
+end
+
+local function loadMaskDict(dict)
+    RequestStreamedTextureDict(dict, false)
+    for _ = 1, 100 do
+        if HasStreamedTextureDictLoaded(dict) then return true end
+        Wait(0)
+    end
+    return false
+end
+
+local function removeMasks()
+    for _, name in ipairs(MASK_NAMES) do RemoveReplaceTexture(MASK_TXD, name) end
+    SetMinimapClipType(1)
+    if shapeDict then SetStreamedTextureDictAsNoLongerNeeded(shapeDict) end
+    shapeDict = nil
+end
+
+---Applies Config.hud.minimapLayout.shape. Safe to call often: it only acts when
+---the shape or dict changed, and may Wait (call it from a thread).
+function HudMinimap.applyShape()
+    local shape, dict = shapeSettings()
+    local key = shape .. '|' .. dict
+    if key == shapeKey or key == shapeFailedKey then return end
+    if shape == 'stock' then
+        if shapeDict then removeMasks() end
+        shapeKey = key
+        return
+    end
+    if not loadMaskDict(dict) then
+        shapeFailedKey = key
+        print(('[kora_hud] minimap shape "square": texture dict "%s" is not streamed, keeping the stock mask'):format(dict))
+        return
+    end
+    if shapeDict and shapeDict ~= dict then removeMasks() end
+    for _, name in ipairs(MASK_NAMES) do AddReplaceTexture(MASK_TXD, name, dict, name) end
+    SetMinimapClipType(0)
+    shapeDict, shapeKey, shapeFailedKey = dict, key, nil
+end
+
 -- Re-applies the HUD layout: used by resources that moved the minimap
 -- temporarily (the phone Maps app) to put it back. Returns false when the
 -- layout is disabled so the caller can restore the stock positions itself.
@@ -172,6 +229,14 @@ end)
 
 AddEventHandler('playerSpawned', function()
     HudMinimap.apply(true)
+    -- A respawn can rebuild the radar; re-assert the mask on the next poll.
+    shapeKey = nil
+end)
+
+-- A texture dict streamed after this resource started is picked up on the next
+-- poll instead of staying failed.
+AddEventHandler('onClientResourceStart', function()
+    shapeFailedKey = nil
 end)
 
 -- Resolution, aspect ratio and the GTA safezone slider have no change event,
@@ -181,6 +246,7 @@ end)
 CreateThread(function()
     while true do
         pcall(HudMinimap.apply)
+        pcall(HudMinimap.applyShape)
         Wait(1000)
     end
 end)

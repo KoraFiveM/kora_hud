@@ -296,6 +296,19 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   `enabled` (default `true`), `remember` (default `true`, saved in client KVP
   `kora_hud:minimapHidden`) and `defaultVisible` (default `true`) are live.
   Players get a Kora notification on each toggle.
+- `Config.hud.hideOnPauseMenu` (default `true`, live) — hides the whole NUI
+  (gauges, job/cash pills, status effects such as Bleeding/Limping, vehicle
+  bar) while the pause menu or full map (ESC, P) is open and shows it again
+  when it closes. Polled on the HUD scheduler (`Config.poll.minimapInterval`),
+  one NUI message per open/close; forced hides, logout and the minimap toggle
+  are independent and unaffected.
+- `Config.hud.minimapLayout` — off by default. `enabled` positions the minimap,
+  mask and border together (aspect ratio / safezone aware). `shape = 'square'`
+  (default `'stock'`) additionally swaps `radarmasksm`/`radarmask1g` for the
+  masks in the streamed texture dict `squareTextureDict` (default
+  `'squaremap'`) and sets the square clip type so rotated map tiles stay inside
+  a square border. kora_hud does not ship that `.ytd`; stream one from any
+  resource, otherwise the shape stays stock.
 - `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
   `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD

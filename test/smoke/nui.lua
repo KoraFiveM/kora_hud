@@ -148,6 +148,8 @@ local function loadHud(opts)
     -- The scheduler decides what is due from the game clock, so the clock is
     -- what a test advances (see `tick` below) -- not the number of resumes.
     _G.GetGameTimer = function() return clock end
+    local paused = false
+    _G.IsPauseMenuActive = function() return paused end
 
     _G.Config = {
         hud = {
@@ -165,6 +167,7 @@ local function loadHud(opts)
             minimap = opts.minimap or 'always',
             hideMinimapWhenForcedHidden = opts.hideMinimapWhenForcedHidden,
             minimapToggle = opts.minimapToggle,
+            hideOnPauseMenu = opts.hideOnPauseMenu,
         },
         layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
         voice = { enabled = true, interval = 200 },
@@ -336,6 +339,7 @@ local function loadHud(opts)
             harness.assertTrue(binding ~= nil, 'missing kora_lib config binding for ' .. resource)
             binding.handler(settings)
         end,
+        setPaused = function(value) paused = value end,
         -- The most recent qbhud:visibility payload, or nil if none was sent.
         lastVisibility = function()
             for i = #sent, 1, -1 do
@@ -1506,6 +1510,57 @@ harness.test('stop releases only acquired HUD assets and preserves unowned focus
     harness.assertEqual(#hud.nativeCalls, before, 'a failed acquisition produces no release or unowned focus changes')
     harness.assertEqual(#hud.radar, 0, 'always mode continues to leave radar ownership alone')
     harness.assertEqual(hud.exported.isVisible(), false, 'the HUD still closes on own stop')
+end)
+
+harness.test('the pause menu hides the NUI and restores it, one message per change', function()
+    local hud = loadHud()
+    hud.tick()
+    hud.reset()
+    hud.setPaused(true)
+    hud.tick()
+    harness.assertEqual(hud.lastVisibility(), false, 'opening the pause menu hides the NUI')
+    harness.assertEqual(hud.exported.isVisible(), true, 'the HUD itself is still visible for everything else')
+    hud.reset()
+    hud.tick(); hud.tick()
+    harness.assertEqual(hud.countAction('qbhud:visibility'), 0, 'no repeated visibility messages while paused')
+    hud.setPaused(false)
+    hud.tick()
+    harness.assertEqual(hud.lastVisibility(), true, 'closing the pause menu shows the NUI again')
+    harness.assertEqual(hud.countAction('qbhud:visibility'), 1, 'exactly one message on close')
+end)
+
+harness.test('closing the pause menu does not undo another hide reason', function()
+    local hud = loadHud()
+    hud.tick()
+    hud.setPaused(true)
+    hud.tick()
+    hud.exported.hide()
+    hud.setPaused(false)
+    hud.tick()
+    harness.assertEqual(hud.lastVisibility(), false, 'forced hide survives the pause menu closing')
+    hud.exported.show()
+    harness.assertEqual(hud.lastVisibility(), true, 'show() restores once nothing hides it')
+end)
+
+harness.test('showing while the pause menu is open keeps the NUI hidden', function()
+    local hud = loadHud({ loggedIn = false })
+    hud.setPaused(true)
+    hud.setLoggedIn(true)
+    harness.assertEqual(hud.lastVisibility(), false, 'login during pause is not drawn over the map')
+end)
+
+harness.test('hideOnPauseMenu = false leaves the HUD alone and is live', function()
+    local hud = loadHud({ hideOnPauseMenu = false })
+    hud.tick()
+    hud.reset()
+    hud.setPaused(true)
+    hud.tick()
+    harness.assertEqual(hud.countAction('qbhud:visibility'), 0, 'option off: nothing sent')
+    local live = loadHud()
+    live.tick()
+    live.setPaused(true)
+    live.tick()
+    harness.assertEqual(live.lastVisibility(), false, 'sanity: on by default')
 end)
 
 harness.report('nui')

@@ -98,6 +98,17 @@ Config.hud = {
         live = true,
     }) or true,
 
+    -- Hide every HUD element (gauges, job/cash pills, status effects such as
+    -- Bleeding/Limping, vehicle bar) while the pause menu or the full map
+    -- (ESC, P) is open, and show them again, exactly as before, when it closes.
+    -- Other reasons the HUD is hidden (forced hide, logout, minimap toggle) are
+    -- unaffected. Read live.
+    hideOnPauseMenu = configBoolean and configBoolean(true, {
+        label = 'Hide HUD on pause menu / map',
+        description = 'Hides the whole HUD while the pause menu or the full map is open so it does not draw over the map and its legend, and restores it when the menu closes.',
+        live = true,
+    }) or true,
+
     -- Optional minimap layout. When enabled, kora_hud positions the minimap,
     -- its mask and its border/blur frame from one calculation (vanilla 16:9
     -- sizes, widths scaled for other aspect ratios) so they stay aligned at
@@ -113,6 +124,15 @@ Config.hud = {
             description = 'Off by default, which leaves the stock GTA minimap alone. When on, the HUD positions the minimap, mask and border together at vanilla size so the map stays inside its frame across aspect ratios and safezone sizes. Leave off if another resource positions the minimap.',
             live = true,
         }) or false,
+        -- Map mask shape. 'stock' (default) leaves the radar masks alone.
+        -- 'square' replaces radarmasksm/radarmask1g with the masks from the
+        -- streamed texture dict below and sets the square clip type, so the
+        -- rotating map tiles stay inside a square border. Needs a resource that
+        -- streams that dict (a .ytd holding square radarmasksm and radarmask1g
+        -- textures); without it the shape stays stock. Use together with
+        -- `enabled = true` so the mask and the border line up. Read live.
+        shape = 'stock',
+        squareTextureDict = 'squaremap',
         -- Screen-fraction offsets applied to the whole minimap (positive x is
         -- right, positive y is down). Default 0: the calculated position.
         x = configNumber and configNumber(0.0, {
