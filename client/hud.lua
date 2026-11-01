@@ -1154,6 +1154,7 @@ sendInitialState = function()
     })
 
     send("qbhud:visibility", nuiVisible())
+    send("qbhud:compat", HudCompat.state)
 
     if visible then
         -- Direct, un-throttled and unconditional: this is a REMOUNT, so the
@@ -1164,6 +1165,22 @@ sendInitialState = function()
         pushVehicleUpdate(true)
     end
 end
+
+HudCompat.attach({
+    overlay = function(fields)
+        local merged = {}
+        for key, value in pairs(latestBridgeSnapshot) do merged[key] = value end
+        for key, value in pairs(fields) do merged[key] = value end
+        latestBridgeSnapshot = merged
+        requestPlayer()
+    end,
+    snapshot = function() return latestBridgeSnapshot end,
+    push = function() send("qbhud:compat", HudCompat.state) end,
+    applyMinimap = function()
+        Wait(50)
+        HudMinimap.apply(true)
+    end,
+})
 
 -- Bridge-sourced fields (job/cash/hunger/etc.) are PUSHED when the adapter can
 -- push them. The kora_core adapter drives this straight off kora_core's delta stream

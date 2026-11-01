@@ -6,6 +6,7 @@ use_experimental_fxv2_oal 'yes'
 name 'kora_hud'
 -- Keep the legacy resource name resolvable for exports['qbhud'] callers.
 provide 'qbhud'
+provide 'qb-hud'
 author 'Jamie'
 version '0.1.0'
 description 'Configurable HUD built on kora_lib and qbtheme'
@@ -37,6 +38,7 @@ client_scripts {
     'client/seatbelt_sound.lua',
     'client/minimap.lua',
     'client/stress.lua',
+    'client/compat.lua',
     'client/hud.lua'
 }
 
