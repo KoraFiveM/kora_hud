@@ -181,6 +181,20 @@ These commands are registered by `client/bridge/stub.lua` only — they don't
 exist when the kora_core adapter is loaded, since job/cash/etc. there come from
 kora_core itself (`exports.kora_core:addMoney`, `exports.kora_core:setJob`, ...).
 
+### qb-hud compatibility
+
+kora_hud provides `qb-hud` and listens to the stock client events
+`hud:client:UpdateNeeds`, `UpdateStress`, `UpdateNitrous`, `UpdateHarness`,
+`ToggleHealth`, `ToggleAirHud`, `ToggleShowSeatbelt`, `LoadMap`,
+`hud:client:ShowAccounts` and `seatbelt:client:ToggleCruise`. They are display
+only and never write server state or metadata: needs and stress overlay the local
+snapshot until the next kora_core update replaces them, `LoadMap` re-applies the
+minimap layout, and the other flags are sent to the NUI as `qbhud:compat`
+(the shipped NUI build does not render nitrous, harness, cruise or altitude yet).
+`/cash` and `/bank` (and `ShowAccounts`) show the player's own balance from the
+kora_core snapshot as a feed notification; the amount a caller passes is ignored.
+`hud:server:getMenu` and the `menu`, `dev` and `resethud` commands are not provided.
+
 ### Seatbelt sounds
 
 kora_hud plays a buckle / unbuckle sound for the local player whenever the

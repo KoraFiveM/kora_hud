@@ -223,6 +223,8 @@ local function loadHud(opts)
         sample = function() voiceSamples = voiceSamples + 1 end,
     }
 
+    _G.HudCompat = { state = {}, attach = function() end }
+
     _G.Kora = {
         nui = FORBIDDEN_NUI,
         cache = {
