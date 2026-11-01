@@ -81,13 +81,9 @@ end
 local RECONCILE_WAIT_FRAMES = 200
 local RECONCILE_MAX_ROUNDS = 3
 
--- pcall'd: kora_core may itself be mid-restart (its export table not yet
--- published, or its own resource not fully started) at the exact moment this
--- thread runs -- e.g. a supervisor restarting kora_core and kora_hud together. An
--- uncaught error from a cross-resource export call would otherwise silently
--- kill this CreateThread body (standard Lua coroutine behaviour), leaving
--- `loggedIn` stuck at whatever it last was. Treat a failed call the same as
--- "no data yet" -- the retry loop below already handles that.
+-- pcall'd: kora_core may be mid-restart (export table not yet published) when
+-- this thread runs; an uncaught error would kill the thread and leave `loggedIn`
+-- stuck. Treat a failed call as "no data yet" -- the retry loop handles that.
 local function tryGetPlayerData()
     local ok, data = pcall(function() return exports.kora_core:getPlayerData() end)
     if ok then return data end
@@ -271,7 +267,7 @@ local function snapshotFrom(data)
         onDuty = job.onduty ~= false,
     }
 
-    local gangSnap = nil
+    local gangSnap
     if gang and gang.name and gang.name ~= 'none' then
         gangSnap = {
             name = gang.name,

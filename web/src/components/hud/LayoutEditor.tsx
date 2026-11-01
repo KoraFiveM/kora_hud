@@ -125,12 +125,6 @@ function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: numbe
     return `${sectionTransform(offset, centered)} scale(${scale})`
 }
 
-function clampScale(value: number): number {
-    if (value > SCALE_MAX) return SCALE_MAX
-    if (value < SCALE_MIN) return SCALE_MIN
-    return value
-}
-
 interface MovableSectionProps {
     /** A key of HUD_SECTIONS -- see the note there before changing one. */
     id: string
@@ -285,7 +279,7 @@ export function MovableSection({
             // resize consistently regardless of which fixed corner it grows
             // from. A full viewport-width drag spans the complete 75–150%
             // range, while smaller adjustments remain easy to control.
-            latest = clampScale(base + (moveEvent.clientX - startX) / window.innerWidth)
+            latest = clampDelta(base + (moveEvent.clientX - startX) / window.innerWidth, SCALE_MIN, SCALE_MAX)
             const node = nodeRef.current
             if (node) node.style.transform = scaleTransform(offset, centerX, latest)
         }
@@ -369,17 +363,15 @@ export function MovableSection({
                             <Maximize2 className="h-3.5 w-3.5" aria-hidden />
                         </button>
                         {!editorOnly && (
-                            <>
-                                <button
-                                    type="button"
-                                    aria-label={`Content alignment: ${justification}. Click to cycle alignment.`}
-                                    title="Cycle content alignment: Left, Centre, Right"
-                                    onClick={cycleJustification}
-                                    className="flex h-7 w-7 items-center justify-center rounded-full text-primary"
-                                >
-                                    <AlignmentIcon className="h-3.5 w-3.5" aria-hidden />
-                                </button>
-                            </>
+                            <button
+                                type="button"
+                                aria-label={`Content alignment: ${justification}. Click to cycle alignment.`}
+                                title="Cycle content alignment: Left, Centre, Right"
+                                onClick={cycleJustification}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-primary"
+                            >
+                                <AlignmentIcon className="h-3.5 w-3.5" aria-hidden />
+                            </button>
                         )}
                     </div>
                     <div className="pointer-events-none absolute -inset-2 rounded-2xl border border-dashed border-[hsl(var(--primary)/55%)]" />
