@@ -194,13 +194,17 @@ end
 ---or hand-edited KVP value must cost the player their layout, not their HUD.
 ---@return table
 local function readLayout()
-    if LAYOUT.movable == false then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
+    local function emptyLayout()
+        return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true }
+    end
+
+    if LAYOUT.movable == false then return emptyLayout() end
 
     local raw = GetResourceKvpString(LAYOUT_KVP)
-    if type(raw) ~= 'string' or raw == '' then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
+    if type(raw) ~= 'string' or raw == '' then return emptyLayout() end
 
     local ok, decoded = pcall(json.decode, raw)
-    if not ok or type(decoded) ~= 'table' then return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true } end
+    if not ok or type(decoded) ~= 'table' then return emptyLayout() end
 
     local offsets, scales, justifications = {}, {}, {}
     local gaugesBottomAnchored = not (type(decoded.gauges) == 'table' and decoded.gauges.bottomAnchored == false)
@@ -317,8 +321,7 @@ RegisterCommand(LAYOUT.command or 'hudlayout', function()
         return
     end
 
-    -- While visible, the player confirms or cancels in the NUI. Running the
-    -- command again must not silently
+    -- Running the command again while the editor is open must not silently
     -- commit or discard a layout whose result is still being reviewed.
     if not visible or layoutEditing then return end
 
@@ -732,7 +735,6 @@ local MINIMAP_MODE = (type(Config.hud.minimap) == 'string' and Config.hud.minima
 -- pause, phone and forced-hidden HUD keep going through their existing paths.
 local MINIMAP_TOGGLE = Config.hud.minimapToggle or {}
 local MINIMAP_KVP = 'kora_hud:minimapHidden'
-local minimapHiddenChoice
 
 local function minimapToggleEnabled()
     return MINIMAP_TOGGLE.enabled ~= false
@@ -747,7 +749,7 @@ local function loadMinimapChoice()
     end
     return MINIMAP_TOGGLE.defaultVisible == false
 end
-minimapHiddenChoice = loadMinimapChoice()
+local minimapHiddenChoice = loadMinimapChoice()
 
 ---Whether the player's choice is currently hiding the radar.
 local function minimapPlayerHidden()
@@ -1077,7 +1079,7 @@ local function refreshVisibility()
         -- And the radar itself, for the same reason -- see minimapRelease.
         if wantsRadarHeldHidden(loggedIn, forcedHidden, resourceStopping) then
             holdRadarHidden()
-        elseif minimapRelease then
+        else
             minimapRelease()
         end
     end
@@ -1272,7 +1274,7 @@ local function applyConfig(settings)
     if not minimapChoiceSet then minimapHiddenChoice = loadMinimapChoice() end
     local previousMinimapMode = MINIMAP_MODE
     MINIMAP_MODE = type(Config.hud.minimap) == 'string' and Config.hud.minimap or 'always'
-    if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' and minimapRelease then
+    if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' then
         minimapRelease()
     end
     if previousPlayerHidden ~= minimapPlayerHidden() then minimapChoiceChanged() end
