@@ -36,6 +36,7 @@ client_scripts {
     'client/vehicle.lua',
     'client/seatbelt_sound.lua',
     'client/minimap.lua',
+    'client/stress.lua',
     'client/hud.lua'
 }
 

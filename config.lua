@@ -302,6 +302,38 @@ Config.poll = {
     minimapInterval = 250,
 }
 
+-- Stress gain. kora_hud only displayed stress before; this restores the
+-- qb-hud behaviour of gaining it from fast driving and shooting (client/stress.lua).
+-- Values are written through kora_core metadata (QBCore:Server:SetMetaData, which
+-- needs Config.compat.clientMetadataKeys.stress = true in kora_core -- its default).
+-- Set enabled = false to turn the whole feature off.
+Config.stress = {
+    enabled = true,
+    -- Job names that never gain stress (e.g. { 'police', 'ambulance' }).
+    whitelistedJobs = { 'police' },
+    notify = true, -- fire kora_hud:client:stressGained (at most every 10 s) for notification resources
+
+    speed = {
+        enabled = true,
+        unit = 'kmh',   -- 'kmh' or 'mph'; threshold is compared in this unit
+        threshold = 180,  -- vehicle speed at or above which stress is gained
+        driverOnly = true,
+        interval = 10000, -- ms between speed checks
+        gainMin = 1,
+        gainMax = 3,
+    },
+
+    shooting = {
+        enabled = true,
+        chance = 50,      -- percent chance per shooting check to gain stress
+        gainMin = 1,
+        gainMax = 3,
+        cooldown = 3000,  -- ms to wait after a shot that was checked
+        -- Weapon hashes that never cause stress, e.g. { [`WEAPON_STUNGUN`] = true }.
+        whitelistedWeapons = {},
+    },
+}
+
 -- Registers this resource-owned configuration with kora_lib without changing its public Config table.
 if Kora and Kora.config and Kora.config.object then
     Config.poll = Kora.config.object(Config.poll, { advanced = true })
