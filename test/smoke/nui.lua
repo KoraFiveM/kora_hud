@@ -580,8 +580,6 @@ harness.test('the HUD sends the ped-specific maximum health for percentage conve
         'female freemode peds use a 175 maximum rather than the male 200 maximum')
 end)
 
--- --- event-driven updates (no constant polling) ---
-
 harness.test('bridge fields are pushed via HudBridge.onChange, never polled', function()
     local hud = loadHud({ bridgePush = true })
     hud.reset()
@@ -669,8 +667,6 @@ harness.test('a player already in a vehicle at resource start gets telemetry', f
         'restarting mid-drive must not leave the vehicle panel dead until the player gets out')
 end)
 
--- --- visibility: login transitions and the show/hide exports ---
-
 harness.test('a login shows the HUD and a logout hides it', function()
     local hud = loadHud({ loggedIn = false })
     harness.assertEqual(hud.lastVisibility(), false, 'logged out at start means the HUD starts hidden')
@@ -724,8 +720,6 @@ harness.test('show cannot reveal the HUD while logged out', function()
     harness.assertEqual(hud.lastVisibility(), nil, 'show() clears the override but login still gates')
     harness.assertEqual(hud.exported.isVisible(), false, 'the HUD stays hidden during character select')
 end)
-
--- --- cost: nothing per frame, nothing re-read across the export boundary ---
 
 harness.test('every periodic job shares ONE thread', function()
     -- FiveM's scheduler walks every live coroutine each frame to decide what
@@ -969,8 +963,6 @@ harness.test('the HUD subscribes to exactly the cache keys it mirrors', function
         'a new subscription here is a new hot path -- add it deliberately')
 end)
 
--- --- per-player layout -----------------------------------------------------
-
 local function configPayload(hud)
     local latest
     for _, message in ipairs(hud.sent) do
@@ -1198,8 +1190,6 @@ harness.test('a pinned layout accepts nothing', function()
     harness.assertEqual(#hud.notices, 1, 'the player is told why the command did nothing')
 end)
 
--- --- minimap ----------------------------------------------------------------
-
 harness.test("minimap 'always' never touches the radar at all", function()
     local hud = loadHud({ bridgePush = true, minimap = 'always' })
     hud.tick()
@@ -1311,8 +1301,6 @@ harness.test('stopping while force hidden releases the held radar', function()
     hud.stopResource('kora_hud')
     harness.assertEqual(hud.radar[#hud.radar], true, 'a stopped resource must not leave the radar forced off')
 end)
-
--- --- player minimap toggle -------------------------------------------------
 
 harness.test('the minimap toggle changes nothing until a player uses it', function()
     local hud = loadHud({ bridgePush = true, minimap = 'always' })
