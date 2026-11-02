@@ -118,6 +118,16 @@ local function jobName(data)
     return type(job) == "table" and job.name or nil
 end
 
+-- Guns and throwables (IsPedArmed flags 4 | 2). IsPedShooting can only be true
+-- with one of those selected, so the fast shot sampling is skipped otherwise.
+local ARMED_FLAGS = 6
+
+local function armed(ped)
+    if type(IsPedArmed) ~= "function" then return true end
+    local result = IsPedArmed(ped, ARMED_FLAGS)
+    return result == true or result == 1
+end
+
 CreateThread(function()
     while true do
         Wait(math.max(500, tonumber(cfg().speed and cfg().speed.interval) or 10000))
