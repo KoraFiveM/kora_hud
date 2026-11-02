@@ -1220,11 +1220,19 @@ harness.test("minimap 'vehicle' follows the player in and out of a vehicle", fun
     harness.assertEqual(hud.radar[#hud.radar], true, 'shown once they are in one')
 end)
 
-harness.test('a vehicle-only minimap reads the cache once per visibility check', function()
+harness.test('a vehicle-only minimap reads the cache at most once, then follows the mirror', function()
     local hud = loadHud({ bridgePush = true, minimap = 'vehicle', inVehicle = true })
     local before = hud.cacheReads().vehicle
     hud.tick()
-    harness.assertEqual(hud.cacheReads().vehicle - before, 1, 'one visibility check needs only one export call')
+    harness.assertTrue(hud.cacheReads().vehicle - before <= 1, 'the first visibility check seeds the mirror')
+    before = hud.cacheReads().vehicle
+    for _ = 1, 10 do hud.tick() end
+    harness.assertEqual(hud.cacheReads().vehicle - before, 0,
+        'later visibility checks must not cross the export boundary every 250ms')
+    harness.assertEqual(hud.radar[#hud.radar], true, 'shown while in a vehicle')
+
+    hud.setVehicle(nil)
+    harness.assertEqual(hud.radar[#hud.radar], false, 'leaving the vehicle hides the radar on the change itself')
 end)
 
 harness.test('hiding the HUD hands the radar back', function()

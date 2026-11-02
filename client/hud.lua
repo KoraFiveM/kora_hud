@@ -63,6 +63,8 @@ local sendInitialState
 local minimapRelease
 -- Set once the minimap visibility block below has run.
 local minimapChoiceChanged
+-- The minimap visibility block's vehicle mirror (see radarVehicle below).
+local radarVehicle
 
 -- FiveM delivers SendNUIMessage like postMessage, not like a mailbox: if the
 -- NUI page hasn't finished mounting (and attaching its "message" listener)
@@ -815,6 +817,36 @@ local function minimapManaged()
     return MINIMAP_MODE ~= 'always' or minimapPlayerHidden() or minimapVehicleOnly()
 end
 
+-- The vehicle the radar decision is made from, mirrored from the cache rather
+-- than read across the export boundary on every 250ms visibility pass (cost
+-- model rule 3). Subscribed lazily, the first time a mode actually needs it, so
+-- a server in 'always' mode with nobody using "only in vehicle" never pays for
+-- the notification. Falls back to the direct read if subscribing failed (e.g.
+-- kora_lib mid-restart) and retries the subscription on the next pass.
+local radarVehicleMirror -- nil until subscribed, then the vehicle or false
+local onRadarVehicleChange -- assigned in the visibility block below
+
+---@return integer|false|nil
+radarVehicle = function()
+    if radarVehicleMirror ~= nil then return radarVehicleMirror end
+    local subscribed = pcall(function()
+        Kora.cache.onChange("vehicle", function(vehicle)
+            radarVehicleMirror = vehicle or false
+            if onRadarVehicleChange then onRadarVehicleChange() end
+        end)
+    end)
+    local ok, vehicle = pcall(function() return Kora.cache.vehicle() end)
+    vehicle = ok and vehicle or nil
+    if subscribed then radarVehicleMirror = vehicle or false end
+    return vehicle
+end
+
+-- A kora_lib restart drops its onChange listeners, so forget the mirror and
+-- resubscribe on the next pass instead of trusting a value that no longer updates.
+AddEventHandler("onClientResourceStart", function(resource)
+    if resource == "kora_lib" then radarVehicleMirror = nil end
+end)
+
 ---Whether the radar should be on screen right now, or nil for "not our call".
 ---The player's hide choice and 'never' win over everything; 'vehicle' mode and
 ---the per-player vehicle-only option share one test (any seat of a vehicle).
@@ -823,8 +855,8 @@ local function minimapShouldShow()
     if minimapPlayerHidden() then return false end
     if MINIMAP_MODE == 'never' then return false end
     if MINIMAP_MODE == 'vehicle' or minimapVehicleOnly() then
-        local vehicle = Kora.cache.vehicle()
-        return vehicle ~= nil and vehicle ~= 0
+        local vehicle = radarVehicle()
+        return vehicle ~= nil and vehicle ~= false and vehicle ~= 0
     end
     return nil
 end
@@ -853,6 +885,12 @@ do
         active = minimapManaged,
         run = applyMinimap,
     })
+
+    -- Entering or leaving a vehicle applies the radar on the spot; the task's
+    -- next pass then finds nothing changed.
+    onRadarVehicleChange = function()
+        if visible and not radarHeldHidden and minimapManaged() then applyMinimap() end
+    end
 
     ---Applies a changed player choice at once instead of on the next tick.
     ---With nothing managing the radar there is no task running, so un-hiding

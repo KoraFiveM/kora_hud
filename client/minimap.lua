@@ -166,7 +166,7 @@ local stopped, settled, failed = false, false, false
 local committed = false
 local failures, retryAt = 0, 0
 local requestedDict
-local lastKey
+local lastKey -- snapshot of the last applied screen + config, nil forces a pass
 local bigmapSeen = 0
 
 ---The safezone only matters when safezoneCompensation is used; otherwise the
@@ -177,10 +177,46 @@ local function safezoneFor(cfg)
     return ok and tonumber(zone) or 1.0
 end
 
-local function snapshotKey(cfg)
+-- The change check runs on every poll (once a second, for the whole session),
+-- so it compares against a saved deep copy instead of building a json.encode
+-- key: while nothing changed it allocates nothing. Config may be edited in
+-- place, so table identity alone is not enough.
+local MAX_DEPTH = 8
+
+local function copyValue(value, depth)
+    if type(value) ~= 'table' or depth >= MAX_DEPTH then return value end
+    local out = {}
+    for k, v in pairs(value) do out[k] = copyValue(v, depth + 1) end
+    return out
+end
+
+local function sameValue(a, b, depth)
+    if a == b then return true end
+    if a ~= a and b ~= b then return true end -- NaN
+    if type(a) ~= 'table' or type(b) ~= 'table' or depth >= MAX_DEPTH then return false end
+    for k, v in pairs(a) do
+        if not sameValue(v, b[k], depth + 1) then return false end
+    end
+    for k in pairs(b) do
+        if a[k] == nil then return false end
+    end
+    return true
+end
+
+local function near(a, b, eps)
+    if a == b then return true end
+    return type(a) == 'number' and type(b) == 'number' and math.abs(a - b) < eps
+end
+
+---Whether resolution, aspect, safezone or config differ from the last snapshot.
+local function snapshotChanged(snap, cfg)
     local aspect, w, h = screen()
     local safezone = safezoneFor(cfg)
-    return string.format('%s|%s|%.5f|%.4f|%s', tostring(w), tostring(h), aspect, safezone, json.encode(cfg))
+    if snap and snap.w == w and snap.h == h and near(snap.aspect, aspect, 5e-6)
+        and near(snap.safezone, safezone, 5e-5) and sameValue(cfg, snap.cfg, 0) then
+        return false, snap
+    end
+    return true, { w = w, h = h, aspect = aspect, safezone = safezone, cfg = copyValue(cfg, 0) }
 end
 
 -- The radar exists once the player ped does, the loading screen is gone and the
@@ -383,9 +419,9 @@ function HudMinimap.apply(force)
         return false
     end
     local active = shapeName(cfg) ~= 'stock'
-    local key = snapshotKey(cfg)
-    if not force and key == lastKey then return active end
-    lastKey = key
+    local changed, snap = snapshotChanged(lastKey, cfg)
+    if not force and not changed then return active end
+    lastKey = snap
     if active or state.applied then schedule() end
     return active
 end
@@ -404,11 +440,17 @@ end
 -- layout, are not refreshing ourselves and the pause menu is closed; it must be
 -- seen on twice in a row so a short toggle by another script is left alone.
 local function guard(cfg)
-    if cfg.guardBigmap == false or not state.applied or running or refreshing or paused() then
+    if cfg.guardBigmap == false or not state.applied or running or refreshing then
         bigmapSeen = 0
         return
     end
+    -- Bigmap first: it is almost always off, so the pause-menu native is only
+    -- read on the rare pass that could actually act.
     local ok, active = pcall(IsBigmapActive)
+    if ok and active == true and paused() then
+        bigmapSeen = 0
+        return
+    end
     if ok and active == true then
         bigmapSeen = bigmapSeen + 1
         if bigmapSeen >= 2 then
@@ -460,17 +502,19 @@ end)
 -- so poll the cheap natives. Re-applying only happens when the answer changes.
 -- Not part of the HUD scheduler because that stops while the HUD is hidden
 -- (character select), when the layout should still be right.
+local function poll()
+    local cfg = settings()
+    if cfg and failed and failures <= number(cfg.maxRetries, 3, 0, 100) and now() >= retryAt then
+        failed, lastKey = false, nil
+    end
+    HudMinimap.apply()
+    cfg = settings()
+    if cfg then guard(cfg) end
+end
+
 CreateThread(function()
     while not stopped do
-        pcall(function()
-            local cfg = settings()
-            if cfg and failed and failures <= number(cfg.maxRetries, 3, 0, 100) and now() >= retryAt then
-                failed, lastKey = false, nil
-            end
-            HudMinimap.apply()
-            cfg = settings()
-            if cfg then guard(cfg) end
-        end)
+        pcall(poll)
         Wait(number((layoutConfig() or {}).pollMs, 1000, 250, 60000))
     end
 end)
