@@ -82,23 +82,112 @@ harness.test("speed gain only looks up the job once the speed checks pass", func
     harness.assertEqual(lookups, 1, "whitelisted job is still honoured")
 end)
 
-harness.test("the shooting loop only samples fast while armed", function()
-    _G.Config = { stress = copy(base) }
-    local threads = {}
-    _G.CreateThread = function(fn) threads[#threads + 1] = coroutine.create(fn) end
+local mocks = require("mocks")
+
+local PISTOL, KNIFE, UNARMED = 453432689, 2578778090, 2725352035
+local GROUPS = { [PISTOL] = 416676503, [KNIFE] = 3566412244, [UNARMED] = 2685387236 }
+
+-- Loads the module with a controllable thread list and Kora.cache, and
+-- returns handles for driving the event-driven shooting thread.
+local function loadShooting(initial, config)
+    _G.Config = { stress = config or copy(base) }
+    _G.Kora = nil
+    local env = { threads = {}, handlers = {}, shooting = false, natives = 0 }
+    env.cache = mocks.installKoraCache(initial)
+    _G.CreateThread = function(fn)
+        local co = coroutine.create(fn)
+        env.threads[#env.threads + 1] = co
+        local ok, ms = coroutine.resume(co)
+        assert(ok, ms)
+        env.lastWait = ms
+    end
     _G.Wait = function(ms) coroutine.yield(ms) end
-    local isArmed = false
+    _G.AddEventHandler = function(name, fn)
+        env.handlers[name] = env.handlers[name] or {}
+        table.insert(env.handlers[name], fn)
+    end
     _G.PlayerPedId = function() return 1 end
-    _G.IsPedArmed = function() return isArmed end
-    _G.IsPedShooting = function() return false end
+    _G.GetWeapontypeGroup = function(w) return GROUPS[w] or 0 end
+    _G.IsPedShooting = function() env.natives = env.natives + 1; return env.shooting end
+    _G.IsPedInAnyVehicle = function() return false end
+    function env.alive()
+        local n = 0
+        for _, co in ipairs(env.threads) do
+            if coroutine.status(co) == "suspended" then n = n + 1 end
+        end
+        return n
+    end
+    -- Resumes every live thread once (the speed thread is always one of them).
+    function env.step()
+        for _, co in ipairs(env.threads) do
+            if coroutine.status(co) == "suspended" then assert(coroutine.resume(co)) end
+        end
+    end
     assert(loadfile(repoRoot .. "client/stress.lua"))()
-    local shooting = threads[2]
-    local _, ms = coroutine.resume(shooting)
-    harness.assertEqual(ms, 500, "unarmed: idle sleep")
-    isArmed = true
-    _, ms = coroutine.resume(shooting)
-    harness.assertEqual(ms, 50, "armed: shots are sampled")
-    _G.CreateThread, _G.Wait, _G.IsPedArmed, _G.IsPedShooting, _G.PlayerPedId = nil, nil, nil, nil, nil
+    return env
+end
+
+local function cleanup()
+    _G.CreateThread, _G.Wait, _G.AddEventHandler, _G.PlayerPedId = nil, nil, nil, nil
+    _G.GetWeapontypeGroup, _G.IsPedShooting, _G.IsPedInAnyVehicle, _G.Kora = nil, nil, nil, nil
+end
+
+harness.test("no shooting thread while unarmed or holding melee", function()
+    local env = loadShooting({ weapon = UNARMED })
+    harness.assertEqual(env.alive(), 1, "only the speed thread runs")
+    env.cache.set("weapon", KNIFE)
+    harness.assertEqual(env.alive(), 1, "melee does not start sampling")
+    harness.assertEqual(env.natives, 0, "no IsPedShooting calls at all")
+    cleanup()
+end)
+
+harness.test("a gun starts the 50ms sampling thread, unarmed ends it", function()
+    local env = loadShooting({ weapon = UNARMED })
+    env.cache.set("weapon", PISTOL)
+    harness.assertEqual(env.alive(), 2, "sampling thread started")
+    harness.assertEqual(env.lastWait, 50, "shots are sampled every 50ms")
+    env.cache.set("weapon", UNARMED)
+    env.step()
+    harness.assertEqual(env.alive(), 1, "sampling thread exited")
+    cleanup()
+end)
+
+harness.test("a gun held at load starts sampling; swapping guns keeps one thread", function()
+    local env = loadShooting({ weapon = PISTOL })
+    harness.assertEqual(env.alive(), 2)
+    GROUPS[123] = 970310034 -- a rifle
+    env.cache.set("weapon", 123)
+    env.step()
+    harness.assertEqual(env.alive(), 2, "still exactly one sampling thread")
+    GROUPS[123] = nil
+    cleanup()
+end)
+
+harness.test("shooting disabled or dead: no thread", function()
+    local c = copy(base)
+    c.shooting.enabled = false
+    local env = loadShooting({ weapon = PISTOL }, c)
+    harness.assertEqual(env.alive(), 1, "disabled in config")
+    cleanup()
+    env = loadShooting({ weapon = PISTOL })
+    env.cache.set("isDead", true)
+    env.step()
+    harness.assertEqual(env.alive(), 1, "death stops sampling")
+    env.cache.set("isDead", false)
+    harness.assertEqual(env.alive(), 2, "respawn with a gun resumes it")
+    cleanup()
+end)
+
+harness.test("kora_lib restart re-registers the weapon listener", function()
+    local env = loadShooting({ weapon = UNARMED })
+    harness.assertEqual(env.cache.listenerCount("weapon"), 1)
+    env.cache.restart()
+    harness.assertEqual(env.cache.listenerCount("weapon"), 0)
+    for _, fn in ipairs(env.handlers.onClientResourceStart) do fn("kora_lib") end
+    harness.assertEqual(env.cache.listenerCount("weapon"), 1, "listener registered again")
+    env.cache.set("weapon", PISTOL)
+    harness.assertEqual(env.alive(), 2, "new listener drives the thread")
+    cleanup()
 end)
 
 harness.report("stress")
