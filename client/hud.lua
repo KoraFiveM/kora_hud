@@ -1011,8 +1011,9 @@ end
 -- new value from its own ARGUMENT: kora_lib's cache passes (new, old), so there
 -- is no reason to call back across the export boundary to ask for what we
 -- were just handed.
-Kora.cache.onChange("health", function(value) setVital('health', round(value)) end)
-Kora.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
+-- Cache listeners live in kora_lib and are dropped when it restarts, so they
+-- are registered from subscribeCache() (defined below, called at load and again
+-- on every kora_lib start) rather than once at file scope.
 Voice.onChange(function(value) setVital('talking', value == true) end)
 Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 
@@ -1022,9 +1023,6 @@ Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 -- cross-resource funcref invocation. So it is subscribed ONLY when something
 -- actually renders it: a server with the stamina ring switched off pays
 -- nothing for it, rather than paying to receive and discard it.
-if ELEMENTS.stamina then
-    Kora.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
-end
 
 -- Maximum health is per-ped (freemode male 200, female 175) and only ever
 -- changes when the ped itself does -- a respawn, a model change, a script
@@ -1042,13 +1040,13 @@ local function refreshMaxHealth(ped)
     setVital('maxHealth', maxHealth)
 end
 
-Kora.cache.onChange("ped", function(ped)
+local function onPedChange(ped)
     refreshMaxHealth(ped)
     -- A respawn rebuilds the minimap, which is the one moment the suppression
     -- above is most likely to have been dropped. Re-assert it now rather than
     -- leaving the stock cluster on screen until the next interval.
     if visible then setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end
-end)
+end
 
 -- Vehicle lifecycle is announced; only the telemetry inside it is sampled.
 -- Both edges push on the spot rather than waiting for the sampling task's next
@@ -1056,13 +1054,23 @@ end)
 -- and getting out should clear it just as fast (that push is the null payload
 -- the NUI reads as "on foot"). The task's own next run is deduplicated against
 -- this one, so the immediacy costs no extra message.
-if ELEMENTS.vehicle then
-    Kora.cache.onChange("vehicle", function(vehicle)
-        currentVehicle = vehicle or false
-        pushVehicleUpdate()
-        if currentVehicle then startScheduler() end
-    end)
+local function onVehicleChange(vehicle)
+    currentVehicle = vehicle or false
+    pushVehicleUpdate()
+    if currentVehicle then startScheduler() end
 end
+
+local function subscribeCache()
+    Kora.cache.onChange("health", function(value) setVital('health', round(value)) end)
+    Kora.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
+    if ELEMENTS.stamina then
+        Kora.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
+    end
+    Kora.cache.onChange("ped", onPedChange)
+    if ELEMENTS.vehicle then Kora.cache.onChange("vehicle", onVehicleChange) end
+end
+
+subscribeCache()
 
 -- Seeds the mirrors above with the values the change handlers will keep current
 -- from here on. Runs at CHUNK LOAD rather than in the start-up thread below,
@@ -1083,6 +1091,23 @@ local function seedFromCache()
 end
 
 pcall(seedFromCache)
+
+-- After a kora_lib restart: register the listeners again and catch up on any
+-- change missed while it was down (onChange never reports the current value).
+-- setVital and onVehicleChange are no-ops when nothing changed.
+AddEventHandler("onClientResourceStart", function(resource)
+    if resource ~= "kora_lib" then return end
+    if not pcall(subscribeCache) then return end
+    pcall(function()
+        setVital('health', round(Kora.cache.health()))
+        setVital('armour', round(Kora.cache.armour()))
+        if ELEMENTS.stamina then setVital('stamina', round(Kora.cache.stamina())) end
+        onPedChange(Kora.cache.ped())
+        if ELEMENTS.vehicle and (Kora.cache.vehicle() or false) ~= currentVehicle then
+            onVehicleChange(Kora.cache.vehicle())
+        end
+    end)
+end)
 
 -- Kora.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
 -- in spirit (it's read directly from kora_lib, not through HudBridge's own
