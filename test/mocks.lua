@@ -207,4 +207,34 @@ function M.install()
     }
 end
 
+---Attaches a kora_lib-style Kora.cache to _G.Kora (creating it if needed):
+---getters for each key plus an onChange registry. `set(key, value)` updates a
+---value and fires its listeners with (new, old) like kora_lib's cache does;
+---`restart()` drops every listener, as a kora_lib stop does.
+---@param initial table|nil starting values by key
+function M.installKoraCache(initial)
+    local values, listeners = {}, {}
+    for k, v in pairs(initial or {}) do values[k] = v end
+    local cache = {}
+    for _, key in ipairs({ "ped", "vehicle", "seat", "weapon", "health", "isDead", "armour", "stamina" }) do
+        cache[key] = function() return values[key] end
+    end
+    function cache.onChange(key, fn)
+        listeners[key] = listeners[key] or {}
+        table.insert(listeners[key], fn)
+    end
+    _G.Kora = _G.Kora or {}
+    _G.Kora.cache = cache
+    return {
+        set = function(key, value)
+            local old = values[key]
+            values[key] = value
+            if old == value then return end
+            for _, fn in ipairs(listeners[key] or {}) do fn(value, old) end
+        end,
+        restart = function() listeners = {} end,
+        listenerCount = function(key) return #(listeners[key] or {}) end,
+    }
+end
+
 return M

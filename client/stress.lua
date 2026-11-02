@@ -152,24 +152,109 @@ CreateThread(function()
     end
 end)
 
-CreateThread(function()
-    while true do
-        local wait = 500
-        if cfg().enabled ~= false and sub(cfg().shooting).enabled ~= false then
-            local ped = PlayerPedId()
-            -- Unarmed (on foot or driving) keeps the 500ms idle sleep; the 50ms
-            -- shot sampling only runs while a gun or throwable is selected.
-            if armed(ped) then
-                wait = 50
-                if IsPedShooting(ped) then
-                    local data = playerData()
-                    gain(Stress.shootingGain({ weapon = GetSelectedPedWeapon(ped), job = jobName(data) }), data)
-                    wait = math.max(100, tonumber(cfg().shooting and cfg().shooting.cooldown) or 3000)
-                end
+-- Shooting stress is driven by kora_lib's cached weapon rather than polled:
+-- IsPedShooting can only be true with a gun or throwable selected, so the fast
+-- shot sampling thread runs ONLY while one is held and nothing at all runs
+-- otherwise. Weapon groups (GetWeapontypeGroup) that can fire; melee, unarmed,
+-- petrol can, fire extinguisher, parachute, etc. are deliberately absent.
+local WEAPON_UNARMED = 2725352035
+local SHOOTING_GROUPS = {
+    [416676503] = true,  -- GROUP_PISTOL
+    [3337201093] = true, -- GROUP_SMG
+    [970310034] = true,  -- GROUP_RIFLE
+    [1159398588] = true, -- GROUP_MG
+    [860033945] = true,  -- GROUP_SHOTGUN
+    [3082541095] = true, -- GROUP_SNIPER
+    [2725924767] = true, -- GROUP_HEAVY
+    [1548507267] = true, -- GROUP_THROWN
+    [690389602] = true,  -- GROUP_STUNGUN
+}
+
+-- Natives and the cache may hand hashes back signed; compare them unsigned.
+local function unsigned(hash)
+    hash = tonumber(hash)
+    if hash and hash < 0 then hash = hash + 4294967296 end
+    return hash
+end
+
+---@param weapon any
+---@return boolean
+local function shootingWeapon(weapon)
+    weapon = unsigned(weapon)
+    if not weapon or weapon == 0 or weapon == WEAPON_UNARMED then return false end
+    if type(GetWeapontypeGroup) ~= "function" then return false end
+    return SHOOTING_GROUPS[unsigned(GetWeapontypeGroup(weapon))] == true
+end
+
+local function shootingEnabled()
+    return cfg().enabled ~= false and sub(cfg().shooting).enabled ~= false
+end
+
+local currentWeapon, dead = nil, false
+-- Bumped whenever the sampling thread should stop; a thread only keeps looping
+-- while the generation it was started with is still current.
+local shootingGen, shootingActive = 0, false
+
+local function evaluateShooting()
+    local want = not dead and shootingEnabled() and shootingWeapon(currentWeapon)
+    if want == shootingActive then return end
+    shootingGen = shootingGen + 1
+    shootingActive = want
+    if not want then return end
+    local gen = shootingGen
+    CreateThread(function()
+        while gen == shootingGen do
+            if not shootingEnabled() then
+                -- Re-evaluated on the next weapon change.
+                shootingActive = false
+                return
             end
+            local wait = 50
+            local ped = PlayerPedId()
+            if IsPedShooting(ped) then
+                local data = playerData()
+                gain(Stress.shootingGain({ weapon = GetSelectedPedWeapon(ped), job = jobName(data) }), data)
+                wait = math.max(100, tonumber(cfg().shooting and cfg().shooting.cooldown) or 3000)
+            end
+            Wait(wait)
         end
-        Wait(wait)
-    end
+    end)
+end
+
+-- Re-reads the cached state (load, kora_lib restart) and re-evaluates.
+local function refreshShooting()
+    local ok, weapon = pcall(function() return Kora.cache.weapon() end)
+    if ok then currentWeapon = weapon end
+    local okDead, isDead = pcall(function() return Kora.cache.isDead() end)
+    if okDead then dead = isDead == true end
+    evaluateShooting()
+end
+
+-- A ped change needs no listener of its own: the cached weapon is read from
+-- the current ped, so a different weapon arrives as a weapon change, and the
+-- sampling thread resolves PlayerPedId() on every pass.
+local function subscribeShooting()
+    pcall(function()
+        Kora.cache.onChange("weapon", function(weapon)
+            currentWeapon = weapon
+            evaluateShooting()
+        end)
+    end)
+    pcall(function()
+        Kora.cache.onChange("isDead", function(isDead)
+            dead = isDead == true
+            evaluateShooting()
+        end)
+    end)
+    refreshShooting()
+end
+
+subscribeShooting()
+
+-- A kora_lib restart drops its onChange listeners; register them again and
+-- re-read the weapon rather than trusting a value that no longer updates.
+AddEventHandler("onClientResourceStart", function(resource)
+    if resource == "kora_lib" then subscribeShooting() end
 end)
 
 return Stress
