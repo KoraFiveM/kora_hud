@@ -57,8 +57,12 @@ function Stress.speedGain(state, random)
     local c, speed = cfg(), sub(cfg().speed)
     if c.enabled == false or speed.enabled == false then return 0 end
     if speed.driverOnly ~= false and not state.isDriver then return 0 end
-    if listed(c.whitelistedJobs, state.job) then return 0 end
     if Stress.speedInUnit(state.speed) < (tonumber(speed.threshold) or 180) then return 0 end
+    -- `job` may be a function so the caller only pays for the player-data
+    -- export once the cheap speed checks have passed.
+    local job = state.job
+    if type(job) == "function" then job = job() end
+    if listed(c.whitelistedJobs, job) then return 0 end
     return rollAmount(speed.gainMin or 1, speed.gainMax or 3, random)
 end
 
@@ -93,9 +97,10 @@ end
 local lastSent = 0
 
 ---@param delta number
-local function gain(delta)
+---@param data table|nil player data already fetched this tick
+local function gain(delta, data)
     if delta <= 0 then return end
-    local data = playerData()
+    data = data or playerData()
     if not data then return end
     local meta = type(data.metadata) == "table" and data.metadata or {}
     local current = tonumber(meta.stress) or 0
@@ -108,25 +113,41 @@ local function gain(delta)
     end
 end
 
-local function jobName()
-    local data = playerData()
+local function jobName(data)
     local job = data and data.job
     return type(job) == "table" and job.name or nil
+end
+
+-- Guns and throwables (IsPedArmed flags 4 | 2). IsPedShooting can only be true
+-- with one of those selected, so the fast shot sampling is skipped otherwise.
+local ARMED_FLAGS = 6
+
+local function armed(ped)
+    if type(IsPedArmed) ~= "function" then return true end
+    local result = IsPedArmed(ped, ARMED_FLAGS)
+    return result == true or result == 1
 end
 
 CreateThread(function()
     while true do
         Wait(math.max(500, tonumber(cfg().speed and cfg().speed.interval) or 10000))
-        if cfg().enabled ~= false and LocalPlayer.state.isLoggedIn ~= false then
-            local ped = PlayerPedId()
-            if IsPedInAnyVehicle(ped, false) then
-                local veh = GetVehiclePedIsIn(ped, false)
-                gain(Stress.speedGain({
-                    speed = GetEntitySpeed(veh),
-                    isDriver = GetPedInVehicleSeat(veh, -1) == ped,
-                    job = jobName(),
-                }))
-            end
+        -- On foot first: it is the common case and costs one native, before
+        -- the state bag read. Player data (a full cross-resource export) is
+        -- only fetched once speed and seat say stress may be gained, and is
+        -- then reused by gain() instead of being fetched a second time.
+        local ped = PlayerPedId()
+        if cfg().enabled ~= false and IsPedInAnyVehicle(ped, false) and LocalPlayer.state.isLoggedIn ~= false then
+            local veh = GetVehiclePedIsIn(ped, false)
+            local data
+            local amount = Stress.speedGain({
+                speed = GetEntitySpeed(veh),
+                isDriver = GetPedInVehicleSeat(veh, -1) == ped,
+                job = function()
+                    data = playerData()
+                    return jobName(data)
+                end,
+            })
+            gain(amount, data)
         end
     end
 end)
@@ -136,10 +157,15 @@ CreateThread(function()
         local wait = 500
         if cfg().enabled ~= false and sub(cfg().shooting).enabled ~= false then
             local ped = PlayerPedId()
-            wait = 50
-            if IsPedShooting(ped) then
-                gain(Stress.shootingGain({ weapon = GetSelectedPedWeapon(ped), job = jobName() }))
-                wait = math.max(100, tonumber(cfg().shooting and cfg().shooting.cooldown) or 3000)
+            -- Unarmed (on foot or driving) keeps the 500ms idle sleep; the 50ms
+            -- shot sampling only runs while a gun or throwable is selected.
+            if armed(ped) then
+                wait = 50
+                if IsPedShooting(ped) then
+                    local data = playerData()
+                    gain(Stress.shootingGain({ weapon = GetSelectedPedWeapon(ped), job = jobName(data) }), data)
+                    wait = math.max(100, tonumber(cfg().shooting and cfg().shooting.cooldown) or 3000)
+                end
             end
         end
         Wait(wait)

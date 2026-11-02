@@ -71,4 +71,34 @@ harness.test("apply clamps to 0-100", function()
     harness.assertEqual(S.apply(nil, 3), 3)
 end)
 
+harness.test("speed gain only looks up the job once the speed checks pass", function()
+    local S = load(copy(base))
+    local lookups = 0
+    local job = function() lookups = lookups + 1; return "police" end
+    harness.assertEqual(S.speedGain({ speed = 40, isDriver = true, job = job }, fixedRandom()), 0)
+    harness.assertEqual(S.speedGain({ speed = 80, isDriver = false, job = job }, fixedRandom()), 0)
+    harness.assertEqual(lookups, 0, "slow or passenger: no player-data export")
+    harness.assertEqual(S.speedGain({ speed = 80, isDriver = true, job = job }, fixedRandom()), 0)
+    harness.assertEqual(lookups, 1, "whitelisted job is still honoured")
+end)
+
+harness.test("the shooting loop only samples fast while armed", function()
+    _G.Config = { stress = copy(base) }
+    local threads = {}
+    _G.CreateThread = function(fn) threads[#threads + 1] = coroutine.create(fn) end
+    _G.Wait = function(ms) coroutine.yield(ms) end
+    local isArmed = false
+    _G.PlayerPedId = function() return 1 end
+    _G.IsPedArmed = function() return isArmed end
+    _G.IsPedShooting = function() return false end
+    assert(loadfile(repoRoot .. "client/stress.lua"))()
+    local shooting = threads[2]
+    local _, ms = coroutine.resume(shooting)
+    harness.assertEqual(ms, 500, "unarmed: idle sleep")
+    isArmed = true
+    _, ms = coroutine.resume(shooting)
+    harness.assertEqual(ms, 50, "armed: shots are sampled")
+    _G.CreateThread, _G.Wait, _G.IsPedArmed, _G.IsPedShooting, _G.PlayerPedId = nil, nil, nil, nil, nil
+end)
+
 harness.report("stress")

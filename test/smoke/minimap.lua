@@ -453,6 +453,21 @@ harness.test('a request during a pass runs one more pass, never an overlapping t
     harness.assertFalse(game.bigmap, 'ends off')
 end)
 
+harness.test('an idle poll allocates no json key and still sees in-place config edits', function()
+    boot(function(l) l.readySettleMs = 0; l.pollMs = 1000 end)
+    HudMinimap.apply()
+    advance(2000)
+    local encodes = 0
+    _G.json = { encode = function(v) encodes = encodes + 1; return encode(v) end }
+    clear()
+    advance(10000)
+    harness.assertEqual(encodes, 0, 'ten idle polls must not json.encode the layout config')
+    harness.assertEqual(#game.log, 0, 'and do nothing')
+    Config.hud.minimapLayout.shapes.square.rects.minimap.x = 0.01
+    advance(3000)
+    harness.assertEqual(native('bigmap'), 2, 'a nested in-place edit is still re-applied once')
+end)
+
 harness.test('a changed resolution is re-applied once, an unchanged one is not', function()
     boot(function(l) l.readySettleMs = 0; l.pollMs = 1000 end)
     HudMinimap.apply()
