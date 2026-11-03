@@ -305,10 +305,15 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
 - `Config.hud.minimapToggle` — lets players hide/show their own minimap with
   `/minimap` (`command`) or a key bound in Settings > Key Bindings ("Toggle
   minimap", `defaultKey` unbound by default). Layered on `Config.hud.minimap`:
-  the mode decides when the radar can show, the player's choice can only hide
-  it further, and menus, pause, phone and forced-hidden HUD behave as before.
+  the mode decides when the radar can show, the player's choice can hide it
+  further (or, with `allowOnFoot`, lift the vehicle-only gate for themselves),
+  and menus, pause, phone and forced-hidden HUD behave as before.
   `enabled` (default `true`), `remember` (default `true`, saved in client KVP
   `kora_hud:minimapHidden`) and `defaultVisible` (default `true`) are live.
+  `allowOnFoot` (default `true`, live) lets a player turn the minimap on while
+  on foot when the mode is `'vehicle'` (or minimap-only-in-vehicle hides it),
+  by toggling it or switching "Minimap only in vehicle" off in `/hudlayout`;
+  saved in client KVP `kora_hud:minimapOnFoot`. `'never'` is never overridden.
   Players get a Kora notification on each toggle.
 - `Config.hud.hideOnPauseMenu` (default `true`, live) — hides the whole NUI
   (gauges, job/cash pills, status effects such as Bleeding/Limping, vehicle

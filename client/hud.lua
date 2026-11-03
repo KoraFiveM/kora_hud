@@ -390,10 +390,11 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
     if not layoutEditing then return end
 
     if type(payload) == 'table' and payload.confirmed == true then
-        local before = minimapVehicleOnly()
         pcall(writeLayout, payload)
         syncChatInputLayout()
-        if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
+        -- Always re-evaluate: "only in vehicle = off" can lift the on-foot gate
+        -- without changing minimapVehicleOnly() itself.
+        if minimapChoiceChanged then minimapChoiceChanged() end
     end
 
     closeLayout()
@@ -403,13 +404,12 @@ end)
 -- whose layout put a section somewhere unreachable needs a way out that does
 -- not require clicking on the HUD.
 RegisterCommand('hudlayoutreset', function()
-    local before = minimapVehicleOnly()
     DeleteResourceKvp(LAYOUT_KVP)
     vehicleOnlyChoice = nil
     closeLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
-    if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
+    if minimapChoiceChanged then minimapChoiceChanged() end
     Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end, false)
 
@@ -806,6 +806,25 @@ local function loadMinimapChoice()
 end
 local minimapHiddenChoice = loadMinimapChoice()
 
+-- On-foot override. In 'vehicle' mode (and with "minimap only in vehicle") the
+-- radar is hidden on foot, so a player who asks for the map back there needs a
+-- choice that outranks that gate. Set by the toggle when it is pressed on foot
+-- and saved next to the hide choice; also granted by an explicit "minimap only
+-- in vehicle = off" in /hudlayout. Config.hud.minimapToggle.allowOnFoot gates both.
+local MINIMAP_FOOT_KVP = 'kora_hud:minimapOnFoot'
+local function loadMinimapOnFoot()
+    return MINIMAP_TOGGLE.remember ~= false and GetResourceKvpString(MINIMAP_FOOT_KVP) == '1'
+end
+local minimapOnFootChoice = loadMinimapOnFoot()
+
+---Whether this player's own choice currently lifts the vehicle-only gate.
+local function minimapOnFootForced()
+    if MINIMAP_TOGGLE.allowOnFoot == false then return false end
+    if minimapOnFootChoice and minimapToggleEnabled() then return true end
+    local _, mayChange = minimapVehicleOnlySettings()
+    return mayChange and vehicleOnlyChoice == false
+end
+
 ---Whether the player's choice is currently hiding the radar.
 local function minimapPlayerHidden()
     return minimapToggleEnabled() and minimapHiddenChoice == true
@@ -856,7 +875,8 @@ local function minimapShouldShow()
     if MINIMAP_MODE == 'never' then return false end
     if MINIMAP_MODE == 'vehicle' or minimapVehicleOnly() then
         local vehicle = radarVehicle()
-        return vehicle ~= nil and vehicle ~= false and vehicle ~= 0
+        if vehicle ~= nil and vehicle ~= false and vehicle ~= 0 then return true end
+        return minimapOnFootForced()
     end
     return nil
 end
@@ -951,10 +971,24 @@ local function toggleMinimap()
         return
     end
 
+    -- Decide from what the player sees now, so the toggle on foot in 'vehicle'
+    -- mode turns the (hidden) map on instead of flipping an invisible flag.
+    local showing = minimapShouldShow()
+    if showing == nil then showing = not minimapPlayerHidden() end
+    local remember = MINIMAP_TOGGLE.remember ~= false
+
     minimapChoiceSet = true
-    minimapHiddenChoice = not minimapHiddenChoice
-    if MINIMAP_TOGGLE.remember ~= false then
+    minimapHiddenChoice = showing
+    -- Turning it on while the vehicle gate hides it is the on-foot override;
+    -- turning it on elsewhere, or off, leaves the gate as the mode defines it.
+    local vehicle = radarVehicle()
+    local onFoot = vehicle == nil or vehicle == false or vehicle == 0
+    local gated = not showing and onFoot and MINIMAP_MODE ~= 'never'
+        and (MINIMAP_MODE == 'vehicle' or minimapVehicleOnly())
+    minimapOnFootChoice = gated and MINIMAP_TOGGLE.allowOnFoot ~= false
+    if remember then
         SetResourceKvp(MINIMAP_KVP, minimapHiddenChoice and 'hidden' or 'visible')
+        if minimapOnFootChoice then SetResourceKvp(MINIMAP_FOOT_KVP, '1') else DeleteResourceKvp(MINIMAP_FOOT_KVP) end
     end
     minimapChoiceChanged()
 
@@ -1376,14 +1410,19 @@ local function applyConfig(settings)
     if minimapVisibilityTask then minimapVisibilityTask.interval = MINIMAP_INTERVAL end
 
     local previousPlayerHidden = minimapPlayerHidden()
+    local previousOnFoot = minimapOnFootForced()
     MINIMAP_TOGGLE = Config.hud.minimapToggle or {}
-    if not minimapChoiceSet then minimapHiddenChoice = loadMinimapChoice() end
+    if not minimapChoiceSet then
+        minimapHiddenChoice = loadMinimapChoice()
+        minimapOnFootChoice = loadMinimapOnFoot()
+    end
     local previousMinimapMode = MINIMAP_MODE
     MINIMAP_MODE = type(Config.hud.minimap) == 'string' and Config.hud.minimap or 'always'
     if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' then
         minimapRelease()
     end
-    if previousPlayerHidden ~= minimapPlayerHidden() or previousVehicleOnly ~= minimapVehicleOnly() then
+    if previousPlayerHidden ~= minimapPlayerHidden() or previousVehicleOnly ~= minimapVehicleOnly()
+        or previousOnFoot ~= minimapOnFootForced() then
         minimapChoiceChanged()
     end
 
