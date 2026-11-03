@@ -390,10 +390,11 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
     if not layoutEditing then return end
 
     if type(payload) == 'table' and payload.confirmed == true then
-        local before = minimapVehicleOnly()
         pcall(writeLayout, payload)
         syncChatInputLayout()
-        if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
+        -- Always re-evaluate: "only in vehicle = off" can lift the on-foot gate
+        -- without changing minimapVehicleOnly() itself.
+        if minimapChoiceChanged then minimapChoiceChanged() end
     end
 
     closeLayout()
@@ -403,13 +404,12 @@ end)
 -- whose layout put a section somewhere unreachable needs a way out that does
 -- not require clicking on the HUD.
 RegisterCommand('hudlayoutreset', function()
-    local before = minimapVehicleOnly()
     DeleteResourceKvp(LAYOUT_KVP)
     vehicleOnlyChoice = nil
     closeLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
-    if minimapChoiceChanged and before ~= minimapVehicleOnly() then minimapChoiceChanged() end
+    if minimapChoiceChanged then minimapChoiceChanged() end
     Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end, false)
 
@@ -806,6 +806,25 @@ local function loadMinimapChoice()
 end
 local minimapHiddenChoice = loadMinimapChoice()
 
+-- On-foot override. In 'vehicle' mode (and with "minimap only in vehicle") the
+-- radar is hidden on foot, so a player who asks for the map back there needs a
+-- choice that outranks that gate. Set by the toggle when it is pressed on foot
+-- and saved next to the hide choice; also granted by an explicit "minimap only
+-- in vehicle = off" in /hudlayout. Config.hud.minimapToggle.allowOnFoot gates both.
+local MINIMAP_FOOT_KVP = 'kora_hud:minimapOnFoot'
+local function loadMinimapOnFoot()
+    return MINIMAP_TOGGLE.remember ~= false and GetResourceKvpString(MINIMAP_FOOT_KVP) == '1'
+end
+local minimapOnFootChoice = loadMinimapOnFoot()
+
+---Whether this player's own choice currently lifts the vehicle-only gate.
+local function minimapOnFootForced()
+    if MINIMAP_TOGGLE.allowOnFoot == false then return false end
+    if minimapOnFootChoice and minimapToggleEnabled() then return true end
+    local _, mayChange = minimapVehicleOnlySettings()
+    return mayChange and vehicleOnlyChoice == false
+end
+
 ---Whether the player's choice is currently hiding the radar.
 local function minimapPlayerHidden()
     return minimapToggleEnabled() and minimapHiddenChoice == true
@@ -856,7 +875,8 @@ local function minimapShouldShow()
     if MINIMAP_MODE == 'never' then return false end
     if MINIMAP_MODE == 'vehicle' or minimapVehicleOnly() then
         local vehicle = radarVehicle()
-        return vehicle ~= nil and vehicle ~= false and vehicle ~= 0
+        if vehicle ~= nil and vehicle ~= false and vehicle ~= 0 then return true end
+        return minimapOnFootForced()
     end
     return nil
 end
@@ -951,10 +971,24 @@ local function toggleMinimap()
         return
     end
 
+    -- Decide from what the player sees now, so the toggle on foot in 'vehicle'
+    -- mode turns the (hidden) map on instead of flipping an invisible flag.
+    local showing = minimapShouldShow()
+    if showing == nil then showing = not minimapPlayerHidden() end
+    local remember = MINIMAP_TOGGLE.remember ~= false
+
     minimapChoiceSet = true
-    minimapHiddenChoice = not minimapHiddenChoice
-    if MINIMAP_TOGGLE.remember ~= false then
+    minimapHiddenChoice = showing
+    -- Turning it on while the vehicle gate hides it is the on-foot override;
+    -- turning it on elsewhere, or off, leaves the gate as the mode defines it.
+    local vehicle = radarVehicle()
+    local onFoot = vehicle == nil or vehicle == false or vehicle == 0
+    local gated = not showing and onFoot and MINIMAP_MODE ~= 'never'
+        and (MINIMAP_MODE == 'vehicle' or minimapVehicleOnly())
+    minimapOnFootChoice = gated and MINIMAP_TOGGLE.allowOnFoot ~= false
+    if remember then
         SetResourceKvp(MINIMAP_KVP, minimapHiddenChoice and 'hidden' or 'visible')
+        if minimapOnFootChoice then SetResourceKvp(MINIMAP_FOOT_KVP, '1') else DeleteResourceKvp(MINIMAP_FOOT_KVP) end
     end
     minimapChoiceChanged()
 
@@ -1011,8 +1045,9 @@ end
 -- new value from its own ARGUMENT: kora_lib's cache passes (new, old), so there
 -- is no reason to call back across the export boundary to ask for what we
 -- were just handed.
-Kora.cache.onChange("health", function(value) setVital('health', round(value)) end)
-Kora.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
+-- Cache listeners live in kora_lib and are dropped when it restarts, so they
+-- are registered from subscribeCache() (defined below, called at load and again
+-- on every kora_lib start) rather than once at file scope.
 Voice.onChange(function(value) setVital('talking', value == true) end)
 Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 
@@ -1022,9 +1057,6 @@ Voice.onModeChange(function(value) setVital('voiceMode', value) end)
 -- cross-resource funcref invocation. So it is subscribed ONLY when something
 -- actually renders it: a server with the stamina ring switched off pays
 -- nothing for it, rather than paying to receive and discard it.
-if ELEMENTS.stamina then
-    Kora.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
-end
 
 -- Maximum health is per-ped (freemode male 200, female 175) and only ever
 -- changes when the ped itself does -- a respawn, a model change, a script
@@ -1042,13 +1074,13 @@ local function refreshMaxHealth(ped)
     setVital('maxHealth', maxHealth)
 end
 
-Kora.cache.onChange("ped", function(ped)
+local function onPedChange(ped)
     refreshMaxHealth(ped)
     -- A respawn rebuilds the minimap, which is the one moment the suppression
     -- above is most likely to have been dropped. Re-assert it now rather than
     -- leaving the stock cluster on screen until the next interval.
     if visible then setupMinimapHealthArmour(MINIMAP_DRAW_NEITHER) end
-end)
+end
 
 -- Vehicle lifecycle is announced; only the telemetry inside it is sampled.
 -- Both edges push on the spot rather than waiting for the sampling task's next
@@ -1056,13 +1088,23 @@ end)
 -- and getting out should clear it just as fast (that push is the null payload
 -- the NUI reads as "on foot"). The task's own next run is deduplicated against
 -- this one, so the immediacy costs no extra message.
-if ELEMENTS.vehicle then
-    Kora.cache.onChange("vehicle", function(vehicle)
-        currentVehicle = vehicle or false
-        pushVehicleUpdate()
-        if currentVehicle then startScheduler() end
-    end)
+local function onVehicleChange(vehicle)
+    currentVehicle = vehicle or false
+    pushVehicleUpdate()
+    if currentVehicle then startScheduler() end
 end
+
+local function subscribeCache()
+    Kora.cache.onChange("health", function(value) setVital('health', round(value)) end)
+    Kora.cache.onChange("armour", function(value) setVital('armour', round(value)) end)
+    if ELEMENTS.stamina then
+        Kora.cache.onChange("stamina", function(value) setVital('stamina', round(value)) end)
+    end
+    Kora.cache.onChange("ped", onPedChange)
+    if ELEMENTS.vehicle then Kora.cache.onChange("vehicle", onVehicleChange) end
+end
+
+subscribeCache()
 
 -- Seeds the mirrors above with the values the change handlers will keep current
 -- from here on. Runs at CHUNK LOAD rather than in the start-up thread below,
@@ -1083,6 +1125,23 @@ local function seedFromCache()
 end
 
 pcall(seedFromCache)
+
+-- After a kora_lib restart: register the listeners again and catch up on any
+-- change missed while it was down (onChange never reports the current value).
+-- setVital and onVehicleChange are no-ops when nothing changed.
+AddEventHandler("onClientResourceStart", function(resource)
+    if resource ~= "kora_lib" then return end
+    if not pcall(subscribeCache) then return end
+    pcall(function()
+        setVital('health', round(Kora.cache.health()))
+        setVital('armour', round(Kora.cache.armour()))
+        if ELEMENTS.stamina then setVital('stamina', round(Kora.cache.stamina())) end
+        onPedChange(Kora.cache.ped())
+        if ELEMENTS.vehicle and (Kora.cache.vehicle() or false) ~= currentVehicle then
+            onVehicleChange(Kora.cache.vehicle())
+        end
+    end)
+end)
 
 -- Kora.status isn't part of latestBridgeSnapshot's poll-refresh cadence below
 -- in spirit (it's read directly from kora_lib, not through HudBridge's own
@@ -1376,14 +1435,19 @@ local function applyConfig(settings)
     if minimapVisibilityTask then minimapVisibilityTask.interval = MINIMAP_INTERVAL end
 
     local previousPlayerHidden = minimapPlayerHidden()
+    local previousOnFoot = minimapOnFootForced()
     MINIMAP_TOGGLE = Config.hud.minimapToggle or {}
-    if not minimapChoiceSet then minimapHiddenChoice = loadMinimapChoice() end
+    if not minimapChoiceSet then
+        minimapHiddenChoice = loadMinimapChoice()
+        minimapOnFootChoice = loadMinimapOnFoot()
+    end
     local previousMinimapMode = MINIMAP_MODE
     MINIMAP_MODE = type(Config.hud.minimap) == 'string' and Config.hud.minimap or 'always'
     if previousMinimapMode ~= MINIMAP_MODE and MINIMAP_MODE == 'always' then
         minimapRelease()
     end
-    if previousPlayerHidden ~= minimapPlayerHidden() or previousVehicleOnly ~= minimapVehicleOnly() then
+    if previousPlayerHidden ~= minimapPlayerHidden() or previousVehicleOnly ~= minimapVehicleOnly()
+        or previousOnFoot ~= minimapOnFootForced() then
         minimapChoiceChanged()
     end
 

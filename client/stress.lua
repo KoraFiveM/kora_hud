@@ -118,38 +118,64 @@ local function jobName(data)
     return type(job) == "table" and job.name or nil
 end
 
--- Guns and throwables (IsPedArmed flags 4 | 2). IsPedShooting can only be true
--- with one of those selected, so the fast shot sampling is skipped otherwise.
-local ARMED_FLAGS = 6
+-- Speed stress can only be gained in a vehicle, so instead of a session-long
+-- poll the worker is started by kora_lib's cache 'vehicle' enter edge and ends
+-- on the exit edge (generation token: rapid exit/enter or a re-registration
+-- can never leave two workers running).
+local speedGeneration = 0
+local speedInVehicle = false
 
-local function armed(ped)
-    if type(IsPedArmed) ~= "function" then return true end
-    local result = IsPedArmed(ped, ARMED_FLAGS)
-    return result == true or result == 1
+local function startSpeedWorker()
+    speedGeneration = speedGeneration + 1
+    local generation = speedGeneration
+    CreateThread(function()
+        while generation == speedGeneration do
+            Wait(math.max(500, tonumber(cfg().speed and cfg().speed.interval) or 10000))
+            if generation ~= speedGeneration then return end
+            -- In-vehicle native check kept as the per-sample gate before the
+            -- state bag read. Player data (a full cross-resource export) is
+            -- only fetched once speed and seat say stress may be gained, and is
+            -- then reused by gain() instead of being fetched a second time.
+            local ped = PlayerPedId()
+            if cfg().enabled ~= false and IsPedInAnyVehicle(ped, false) and LocalPlayer.state.isLoggedIn ~= false then
+                local veh = GetVehiclePedIsIn(ped, false)
+                local data
+                local amount = Stress.speedGain({
+                    speed = GetEntitySpeed(veh),
+                    isDriver = GetPedInVehicleSeat(veh, -1) == ped,
+                    job = function()
+                        data = playerData()
+                        return jobName(data)
+                    end,
+                })
+                gain(amount, data)
+            end
+        end
+    end)
 end
 
-CreateThread(function()
-    while true do
-        Wait(math.max(500, tonumber(cfg().speed and cfg().speed.interval) or 10000))
-        -- On foot first: it is the common case and costs one native, before
-        -- the state bag read. Player data (a full cross-resource export) is
-        -- only fetched once speed and seat say stress may be gained, and is
-        -- then reused by gain() instead of being fetched a second time.
-        local ped = PlayerPedId()
-        if cfg().enabled ~= false and IsPedInAnyVehicle(ped, false) and LocalPlayer.state.isLoggedIn ~= false then
-            local veh = GetVehiclePedIsIn(ped, false)
-            local data
-            local amount = Stress.speedGain({
-                speed = GetEntitySpeed(veh),
-                isDriver = GetPedInVehicleSeat(veh, -1) == ped,
-                job = function()
-                    data = playerData()
-                    return jobName(data)
-                end,
-            })
-            gain(amount, data)
-        end
+local function speedVehicleChanged(vehicle)
+    local inVehicle = vehicle ~= nil and vehicle ~= false and vehicle ~= 0
+    if inVehicle == speedInVehicle then return end
+    speedInVehicle = inVehicle
+    if inVehicle then
+        startSpeedWorker()
+    else
+        speedGeneration = speedGeneration + 1 -- the running worker exits on its next wake
     end
+end
+
+-- kora_lib drops onChange listeners when it restarts: re-register, and seed from
+-- the current value (onChange never reports it), at load and on every restart.
+-- pcall'd so kora_lib mid-restart cannot abort this chunk before the shooting
+-- loop below starts; the restart handler registers it once kora_lib is back.
+local function watchSpeedVehicle()
+    Kora.cache.onChange('vehicle', speedVehicleChanged)
+    speedVehicleChanged(Kora.cache.vehicle())
+end
+pcall(watchSpeedVehicle)
+AddEventHandler('onClientResourceStart', function(resource)
+    if resource == 'kora_lib' then pcall(watchSpeedVehicle) end
 end)
 
 -- Shooting stress is driven by kora_lib's cached weapon rather than polled:

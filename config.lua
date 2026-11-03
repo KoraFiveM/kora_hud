@@ -60,7 +60,8 @@ Config.hud = {
 
     -- Player minimap toggle. Lets each player hide the minimap on top of the
     -- `minimap` mode above: the mode decides when the radar CAN show, the
-    -- player's choice can only hide it further, never force it on. Menus,
+    -- player's choice can only hide it further, except that `allowOnFoot` lets
+    -- them lift the 'vehicle' gate for themselves on foot. Menus,
     -- pause, phone and forced-hidden HUD keep working as before. Enabled by
     -- default because it is harmless -- nothing changes until a player runs the
     -- command or presses a key they bound themselves (defaultKey is unbound).
@@ -90,6 +91,17 @@ Config.hud = {
         defaultVisible = boolean(true, {
             label = 'Minimap visible by default',
             description = 'When off, players without a saved choice start with the minimap hidden until they toggle it on.',
+            live = true,
+        }),
+        -- Lets a player bring the minimap back on foot when `minimap` is
+        -- 'vehicle' (or minimapVehicleOnly hides it on foot): toggling it on
+        -- while on foot, or switching "Minimap only in vehicle" off in
+        -- /hudlayout, overrides the vehicle gate for that player and is saved
+        -- with their choices. false = the toggle can only ever hide it, as
+        -- before. `minimap = 'never'` is never overridden.
+        allowOnFoot = boolean(true, {
+            label = 'Players can show the minimap on foot',
+            description = 'When the minimap mode is vehicle-only, lets a player turn their minimap on while on foot with the toggle or the /hudlayout switch. Off = the toggle can only hide it.',
             live = true,
         }),
     },
