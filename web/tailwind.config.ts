@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss"
+import defaultTheme from "tailwindcss/defaultTheme"
 
 // Token contract mirrors kora_lib's own web/tailwind.config.ts -- see
 // kora_lib/web/AGENTS.md, the shared design-system reference. No darkMode/class
@@ -45,7 +46,11 @@ export default {
         low: "0 4px 12px rgb(0 0 0 / 28%)",
       },
       fontFamily: {
-        mono: ['"SFMono-Regular"', "Consolas", '"Liberation Mono"', "monospace"],
+        // kora_theme's --font-* vars (admin-configurable, applied live by
+        // theme.js) win when set; the stacks after them are the fallbacks.
+        sans: ["var(--font-sans)", ...defaultTheme.fontFamily.sans],
+        heading: ["var(--font-heading)", "var(--font-sans)", ...defaultTheme.fontFamily.sans],
+        mono: ["var(--font-mono)", '"SFMono-Regular"', "Consolas", '"Liberation Mono"', "monospace"],
       },
       transitionDuration: {
         fast: "120ms",
