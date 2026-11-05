@@ -93,12 +93,12 @@ RegisterNetEvent('hud:client:LoadMap', function()
     if host and host.applyMinimap then host.applyMinimap() end
 end)
 
-if type(BeginTextCommandThefeedPost) == 'function' then
-    HudCompat.notify = function(label, amount)
-        BeginTextCommandThefeedPost('STRING')
-        AddTextComponentSubstringPlayerName(('%s: $%d'):format(label, amount))
-        EndTextCommandThefeedPostTicker(false, false)
-    end
+-- Balance notices go through kora_lib's notify (same as the rest of the HUD),
+-- not the GTA thefeed. pcall: kora_lib may be mid-restart.
+HudCompat.notify = function(label, amount)
+    pcall(function()
+        Kora.notify.send({ title = label, message = ('$%d'):format(amount), type = 'info' })
+    end)
 end
 
 for account in pairs(ACCOUNT_LABELS) do

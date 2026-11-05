@@ -141,8 +141,12 @@ local vehicleOnlyChoice
 local function minimapVehicleOnlySettings()
     local cfg = Config.hud.minimapVehicleOnly
     cfg = type(cfg) == 'table' and cfg or {}
+    -- minimap = 'vehicle' already limits the radar to vehicles, so that is the
+    -- effective default: the switch shows on, and switching it off is a real
+    -- (stored) choice that lifts the on-foot gate via minimapOnFootForced.
+    local default = cfg.default == true or Config.hud.minimap == 'vehicle'
     -- A pinned layout has no editor, so nobody could change it either.
-    return cfg.default == true, cfg.allowPlayerChange ~= false and LAYOUT.movable ~= false
+    return default, cfg.allowPlayerChange ~= false and LAYOUT.movable ~= false
 end
 
 ---Whether the radar is currently limited to vehicles for this player.

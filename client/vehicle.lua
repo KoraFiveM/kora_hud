@@ -22,6 +22,10 @@ function Vehicle.getSnapshot(vehicle)
     -- native is touched while the player is on foot.
     if vehicle == nil then vehicle = Kora.cache.vehicle() end
     if not vehicle then return nil end
+    -- The cached handle can briefly outlive the entity (e.g. a freshly spawned
+    -- networked vehicle settling right after a warp). FiveM's fuel native logs
+    -- "No such entity" instead of raising, so pcall below cannot hide it.
+    if type(DoesEntityExist) == 'function' and not DoesEntityExist(vehicle) then return nil end
 
     -- GetVehicleFuelLevel and GetIsVehicleEngineRunning are not guaranteed on all
     -- FiveM builds; degrade each optional value instead of losing the entire HUD.
