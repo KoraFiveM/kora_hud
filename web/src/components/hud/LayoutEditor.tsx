@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Map as MapIcon, Maximize2, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
@@ -68,16 +68,16 @@ function clamp(section: string, axis: "x" | "y", value: number): number {
  * after the root is scaled, which makes the lower and far-edge positions
  * unreachable.
  */
-function nuiScale(): number {
+export function nuiScale(): number {
     return Math.min(2, Math.max(0.5, Math.min(window.innerWidth / 1920, window.innerHeight / 1080)))
 }
 
-function layoutViewport(): { width: number; height: number } {
+export function layoutViewport(): { width: number; height: number } {
     const scale = nuiScale()
     return { width: window.innerWidth / scale, height: window.innerHeight / scale }
 }
 
-function clampDelta(value: number, minimum: number, maximum: number): number {
+export function clampDelta(value: number, minimum: number, maximum: number): number {
     return Math.max(minimum, Math.min(maximum, value))
 }
 
@@ -86,7 +86,7 @@ function clampDelta(value: number, minimum: number, maximum: number): number {
  * this in pixels preserves the apparent angle on non-square viewports before
  * the offset is converted to independent x/y viewport fractions.
  */
-function snapDragAngle(deltaX: number, deltaY: number): { x: number; y: number } {
+export function snapDragAngle(deltaX: number, deltaY: number): { x: number; y: number } {
     const distance = Math.hypot(deltaX, deltaY)
     if (distance === 0) return { x: 0, y: 0 }
 
@@ -99,7 +99,7 @@ function snapDragAngle(deltaX: number, deltaY: number): { x: number; y: number }
 }
 
 /** Snaps a viewport-fraction offset to the layout editor's 5% grid. */
-function snapOffsetToGrid(value: number): number {
+export function snapOffsetToGrid(value: number): number {
     return Math.round(value / GRID_SNAP_INCREMENT) * GRID_SNAP_INCREMENT
 }
 
@@ -114,15 +114,47 @@ function snapOffsetToGrid(value: number): number {
  * wrapper's box on top of what the player actually sees, which is what the
  * editor's outline and label are positioned against.
  */
-function sectionTransform(offset: HudLayoutOffset, centered: boolean): string {
+function sectionTransform(offset: HudLayoutOffset, centered: boolean, nudge: HudLayoutOffset = ZERO): string {
     const viewport = layoutViewport()
-    const x = `${offset.x * viewport.width}px`
-    const y = `${offset.y * viewport.height}px`
+    const x = `${offset.x * viewport.width + nudge.x}px`
+    const y = `${offset.y * viewport.height + nudge.y}px`
     return `translate(${centered ? `calc(-50% + ${x})` : x}, ${y})`
 }
 
-function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: number): string {
-    return `${sectionTransform(offset, centered)} scale(${scale})`
+function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: number, nudge: HudLayoutOffset = ZERO): string {
+    return `${sectionTransform(offset, centered, nudge)} scale(${scale})`
+}
+
+/**
+ * How far (in the HUD's root pixels) a rendered box must move to sit fully
+ * inside the viewport. Measured from the real box, so it covers a resolution
+ * or aspect change after the layout was saved, and content that grew (a
+ * second money row). `current` is the nudge already applied to the box.
+ */
+function offscreenNudge(node: HTMLElement, current: HudLayoutOffset): HudLayoutOffset {
+    const rect = node.getBoundingClientRect()
+    const scale = nuiScale()
+    const left = rect.left - current.x * scale
+    const top = rect.top - current.y * scale
+    const right = left + rect.width
+    const bottom = top + rect.height
+    const fix = (start: number, end: number, limit: number) => {
+        if (end - start >= limit || start < 0) return -start
+        if (end > limit) return limit - end
+        return 0
+    }
+    return { x: fix(left, right, window.innerWidth) / scale, y: fix(top, bottom, window.innerHeight) / scale }
+}
+
+/** Viewport-size state that follows window resizes (for re-measuring). */
+function useViewportKey(): string {
+    const [key, setKey] = useState(() => `${window.innerWidth}x${window.innerHeight}`)
+    useEffect(() => {
+        const onResize = () => setKey(`${window.innerWidth}x${window.innerHeight}`)
+        window.addEventListener("resize", onResize)
+        return () => window.removeEventListener("resize", onResize)
+    }, [])
+    return key
 }
 
 interface MovableSectionProps {
@@ -174,6 +206,10 @@ export function MovableSection({
     const layout = useHudLayout()
     const nodeRef = useRef<HTMLDivElement>(null)
     const [dragging, setDragging] = useState(false)
+    const [nudge, setNudge] = useState<HudLayoutOffset>(ZERO)
+    const viewportKey = useViewportKey()
+    const hidden = layout.editor.allowHide && layout.hidden[id] === true
+    const selected = layout.editing && layout.selected === id
 
     const offset = layout.offsets[id] ?? ZERO
     const scale = layout.scales[id] ?? 1
@@ -186,8 +222,46 @@ export function MovableSection({
         ? flippedHandlePosition
         : handlePosition
 
+    // Keep-on-screen. Outside the editor the box is nudged back into view
+    // (never persisted). Opening the editor folds that nudge into the draft
+    // instead, so the section is grabbable and a Save keeps it on screen.
+    useLayoutEffect(() => {
+        const node = nodeRef.current
+        if (!node || editorOnly) return
+        if (layout.editing) {
+            if (nudge.x !== 0 || nudge.y !== 0) setNudge(ZERO)
+            return
+        }
+        const next = offscreenNudge(node, nudge)
+        if (Math.abs(next.x - nudge.x) > 0.5 || Math.abs(next.y - nudge.y) > 0.5) setNudge(next)
+    })
+    // Content that grows (a second money row, more status effects) re-measures.
+    const [, setMeasure] = useState(0)
+    useEffect(() => {
+        const node = nodeRef.current
+        if (!node || typeof ResizeObserver === "undefined") return
+        const observer = new ResizeObserver(() => setMeasure((count) => count + 1))
+        observer.observe(node)
+        return () => observer.disconnect()
+    }, [hidden, layout.editing])
+    useEffect(() => {
+        if (!layout.editing || !layout.movable || editorOnly || hidden) return
+        const node = nodeRef.current
+        if (!node) return
+        const fix = offscreenNudge(node, ZERO)
+        if (fix.x === 0 && fix.y === 0) return
+        const viewport = layoutViewport()
+        layout.commitOffset(id, {
+            x: clamp(id, "x", offset.x + fix.x / viewport.width),
+            y: clamp(id, "y", offset.y + fix.y / viewport.height),
+        })
+        // Only on entering the editor or a resize while it is open.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [layout.editing, viewportKey])
+
     function handleMoveMouseDown(event: React.MouseEvent<HTMLElement>) {
         if (!draggable) return
+        layout.select(id)
         const node = nodeRef.current
         if (!node) return
         // Otherwise the mousedown starts a text selection and the whole drag
@@ -305,6 +379,9 @@ export function MovableSection({
     // kora_hud draws a proxy for kora_chat's composer only while arranging the
     // layout; kora_chat continues to own the real input during normal play.
     if (editorOnly && !layout.editing) return null
+    // A hidden section renders nothing in play; in the editor it is ghosted so
+    // it can still be found, moved and shown again.
+    if (hidden && !layout.editing) return null
 
     return (
         <div
@@ -313,9 +390,10 @@ export function MovableSection({
             // click-through overlay over live gameplay the rest of the time
             // (see globals.css) and has to stay that way -- only the explicit
             // control icons take pointer input while editing.
-            className={cn("fixed transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto")}
+            className={cn("fixed transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto", hidden && "opacity-40")}
+            data-ui-section={id}
             style={{
-                transform: scaleTransform(offset, centerX, scale),
+                transform: scaleTransform(offset, centerX, scale, layout.editing ? ZERO : nudge),
                 transformOrigin: scaleOrigin,
             }}
         >
@@ -374,7 +452,15 @@ export function MovableSection({
                             </button>
                         )}
                     </div>
-                    <div className="pointer-events-none absolute -inset-2 rounded-2xl border border-dashed border-[hsl(var(--primary)/55%)]" />
+                    <div className={cn(
+                        "pointer-events-none absolute -inset-2 rounded-2xl border",
+                        selected ? "border-2 border-solid border-[hsl(var(--primary))]" : "border-dashed border-[hsl(var(--primary)/55%)]",
+                    )} />
+                    {hidden && (
+                        <span className="pointer-events-none absolute -top-2 left-2 -translate-y-full rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Hidden
+                        </span>
+                    )}
                 </>
             )}
             <div className={cn("flex flex-col", inner, justification === "left" ? "items-start text-left" : justification === "center" ? "items-center text-center" : "items-end text-right")}>

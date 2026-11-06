@@ -39,6 +39,8 @@ client_scripts {
     'client/minimap.lua',
     'client/stress.lua',
     'client/compat.lua',
+    -- /ui element registry (HudUi). Before hud.lua, which owns the editor.
+    'client/uiregistry.lua',
     'client/hud.lua'
 }
 

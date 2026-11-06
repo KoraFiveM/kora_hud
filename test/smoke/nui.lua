@@ -250,6 +250,20 @@ local function loadHud(opts)
         },
     }
 
+    -- Client-local events (TriggerEvent) and the export caller, so the /ui
+    -- registry's owner checks and apply broadcasts can be asserted.
+    local events = {}
+    local invoker = opts.invoker
+    _G.TriggerEvent = function(name, ...)
+        events[#events + 1] = { name = name, args = { ... } }
+    end
+    _G.GetInvokingResource = function() return invoker end
+    _G.GetResourceState = function() return 'missing' end
+    _G.Config.uiEditor = opts.uiEditor
+
+    -- client/uiregistry.lua loads before hud.lua (fxmanifest order).
+    _G.HudUi = nil
+    if opts.noRegistry ~= true then dofile(repoRoot .. 'client/uiregistry.lua') end
     local ok, err = pcall(dofile, hudSource)
 
     local function actions()
@@ -316,6 +330,11 @@ local function loadHud(opts)
             for _, handler in ipairs(cacheHandlers[key] or {}) do handler(value, old) end
         end,
         exported = exported,
+        events = events,
+        fire = function(name, ...)
+            for _, handler in ipairs(eventHandlers[name] or {}) do handler(...) end
+        end,
+        setInvoker = function(name) invoker = name end,
         commands = commands,
         kvp = kvp,
         radar = radar,
@@ -1713,6 +1732,207 @@ harness.test('allowPlayerChange = false forces the default and hides the switch'
     saveVehicleOnly(lockedOn, false)
     lockedOn.tick()
     harness.assertEqual(lockedOn.radar[#lockedOn.radar], false, 'and a player can not opt out')
+end)
+
+-- ---------------------------------------------------------------------------
+-- Unified /ui editor (client/uiregistry.lua + hud.lua integration)
+-- ---------------------------------------------------------------------------
+
+local CHAT_DEF = {
+    id = 'chatInput', label = 'Chat', group = 'Chat',
+    rect = { x = 0.01, y = 0.01, w = 0.25, h = 0.045 },
+    hideable = false, scaleMin = 0.75, scaleMax = 1.5,
+    settings = {
+        { key = 'fadeSeconds', label = 'Fade after', type = 'range', min = 0, max = 60, step = 1, default = 8 },
+        { key = 'feedWhenClosed', label = 'Messages while closed', type = 'toggle', default = true },
+        { key = 'mode', type = 'select', options = { 'a', 'b' }, default = 'a' },
+    },
+}
+
+local function lastApply(hud, id)
+    for index = #hud.events, 1, -1 do
+        local event = hud.events[index]
+        if event.name == 'kora_hud:ui:apply' and event.args[2] == id then return event end
+    end
+end
+
+local function countEvents(hud, name)
+    local n = 0
+    for _, event in ipairs(hud.events) do if event.name == name then n = n + 1 end end
+    return n
+end
+
+harness.test('/ui, its alias and the reset command are registered next to /hudlayout', function()
+    local hud = loadHud({ bridgePush = true, uiEditor = { aliases = { 'hudsettings' } } })
+    harness.assertTrue(hud.commands.ui ~= nil, '/ui exists')
+    harness.assertTrue(hud.commands.hudsettings ~= nil, 'the /hudsettings alias exists')
+    harness.assertTrue(hud.commands.hudlayout ~= nil, '/hudlayout keeps working')
+    harness.assertTrue(hud.commands.uireset ~= nil, '/uireset exists')
+
+    local off = loadHud({ bridgePush = true, uiEditor = { enabled = false } })
+    harness.assertEqual(off.commands.ui, nil, 'a disabled editor registers no /ui')
+    harness.assertTrue(off.commands.hudlayout ~= nil, 'and leaves /hudlayout as it was')
+    harness.assertEqual(off.exported.registerUiElement and select(1, off.exported.registerUiElement(CHAT_DEF)), false,
+        'and refuses registrations')
+end)
+
+harness.test('registration is owned by the invoking resource and answered with the saved layout', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
+    local ok = hud.exported.registerUiElement(CHAT_DEF)
+    harness.assertTrue(ok, 'a valid definition registers')
+    local apply = lastApply(hud, 'chatInput')
+    harness.assertTrue(apply ~= nil, 'the owner is told its layout straight away')
+    harness.assertEqual(apply.args[1], 'kora_chat', 'addressed to the owner')
+    harness.assertEqual(apply.args[3].settings.fadeSeconds, 8, 'with schema defaults filled in')
+    harness.assertEqual(apply.args[3].scale, 1, 'and the shipped scale')
+
+    hud.setInvoker('kora_inventory')
+    local taken, why = hud.exported.registerUiElement(CHAT_DEF)
+    harness.assertFalse(taken, 'another resource cannot claim the same id')
+    harness.assertEqual(why, 'id taken', 'and is told why')
+    harness.assertFalse(hud.exported.updateUiElement('chatInput', { rect = { x = 0, y = 0, w = 0.5, h = 0.5 } }),
+        'nor change its geometry')
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'gauges', rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }),
+        'built-in HUD sections cannot be registered from outside')
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'minimap', rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }),
+        'nor can the minimap')
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'v', rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }),
+        'reserved blob keys are refused')
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'bad id!', rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }),
+        'malformed ids are refused')
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'nobox' }), 'a definition without a rect is refused')
+
+    hud.setInvoker(nil)
+    harness.assertFalse(hud.exported.registerUiElement({ id = 'anon', rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }),
+        'a call with no invoking resource is refused')
+end)
+
+harness.test('per-owner and total registration limits hold', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'spammer' })
+    local accepted = 0
+    for index = 1, 20 do
+        if hud.exported.registerUiElement({ id = 'el' .. index, rect = { x = 0, y = 0, w = 0.1, h = 0.1 } }) then
+            accepted = accepted + 1
+        end
+    end
+    harness.assertEqual(accepted, 12, 'one resource registers at most 12 elements')
+end)
+
+harness.test('preview reaches the owner only while editing, re-validated', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
+    hud.exported.registerUiElement(CHAT_DEF)
+    local before = countEvents(hud, 'kora_hud:ui:apply')
+
+    hud.callbacks['qbhud:uiPreview']({ elements = { chatInput = { x = 0.2, y = 0.1 } } }, function() end)
+    harness.assertEqual(countEvents(hud, 'kora_hud:ui:apply'), before, 'nothing is previewed with the editor closed')
+
+    hud.commands.ui()
+    harness.assertTrue(hud.contains('qbhud:uiElements'), 'opening sends the element list')
+    harness.assertTrue(countEvents(hud, 'kora_hud:ui:editing') >= 1, 'and tells owners the editor opened')
+    hud.callbacks['qbhud:uiPreview']({ elements = {
+        chatInput = { x = 7, y = -0.3, scale = 9, hidden = true, settings = { fadeSeconds = 12.4, feedWhenClosed = 'yes', mode = 'zzz', extra = 1 } },
+        unknown = { x = 0.1, y = 0.1 },
+    } }, function() end)
+    local apply = lastApply(hud, 'chatInput')
+    harness.assertEqual(apply.args[4], 'preview', 'the preview is marked as one')
+    local layout = apply.args[3]
+    harness.assertEqual(layout.x, 1, 'offsets are clamped')
+    harness.assertEqual(layout.scale, 1.5, 'scale is clamped into the element range')
+    harness.assertFalse(layout.hidden, 'a non-hideable element is never hidden')
+    harness.assertEqual(layout.settings.fadeSeconds, 12, 'range values are stepped')
+    harness.assertEqual(layout.settings.feedWhenClosed, true, 'a non-boolean toggle falls back to its default')
+    harness.assertEqual(layout.settings.mode, 'a', 'an unknown select value falls back to its default')
+    harness.assertEqual(layout.settings.extra, nil, 'unknown keys never reach the owner')
+    harness.assertEqual(lastApply(hud, 'unknown'), nil, 'unregistered ids are ignored')
+end)
+
+harness.test('save persists hidden and settings; cancel reverts owners to the saved layout', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
+    hud.exported.registerUiElement(CHAT_DEF)
+
+    hud.commands.ui()
+    hud.callbacks['qbhud:finishLayout']({
+        confirmed = true,
+        offsets = { chatInput = { x = 0.1, y = 0.2 }, gauges = { x = 0.1, y = -0.1 } },
+        hidden = { status = true, chatInput = true, gauges = 'yes' },
+        settings = { chatInput = { fadeSeconds = 20, bogus = 3 }, gauges = { anything = 1 } },
+    }, function() end)
+    harness.assertFalse(hud.nuiFocus().mouse, 'save releases focus')
+    local saved = lastApply(hud, 'chatInput').args[3]
+    harness.assertEqual(saved.x, 0.1, 'the owner gets the saved offset')
+    harness.assertEqual(saved.settings.fadeSeconds, 20, 'and its saved setting')
+
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp, invoker = 'kora_chat' })
+    reloaded.exported.registerUiElement(CHAT_DEF)
+    local config = configPayload(reloaded)
+    harness.assertTrue(config.layout.hidden.status, 'a hidden HUD section survives a reconnect')
+    harness.assertEqual(config.layout.hidden.gauges, nil, 'hidden must be exactly true')
+    harness.assertEqual(config.layout.hidden.chatInput, nil, 'a non-hideable element cannot be stored hidden')
+    harness.assertTrue(config.layout.editor.enabled, 'the page is told the editor is on')
+    local blob = reloaded.kvp['qbhud:layout']
+    harness.assertEqual(json.decode(blob).v, 2, 'the blob is versioned')
+    harness.assertEqual(json.decode(blob).chatInput.settings.bogus, nil, 'unknown settings are not stored')
+    harness.assertEqual(json.decode(blob).gauges.settings, nil, 'settings for unregistered ids are not stored')
+    harness.assertEqual(lastApply(reloaded, 'chatInput').args[3].settings.fadeSeconds, 20,
+        'a re-registering owner gets its saved settings back')
+
+    reloaded.commands.ui()
+    reloaded.callbacks['qbhud:uiPreview']({ elements = { chatInput = { x = 0.5, y = 0.5 } } }, function() end)
+    reloaded.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+    harness.assertEqual(lastApply(reloaded, 'chatInput').args[3].x, 0.1, 'cancel puts the owner back on its saved layout')
+end)
+
+harness.test('a saved element whose owner is not running is kept on save', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_inventory' })
+    hud.exported.registerUiElement({ id = 'inventory', rect = { x = 0.3, y = 0.2, w = 0.3, h = 0.6 },
+        settings = { { key = 'playerSide', type = 'select', options = { 'left', 'right' }, default = 'left' } } })
+    hud.commands.ui()
+    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { inventory = { x = -0.2, y = 0 } },
+        settings = { inventory = { playerSide = 'right' } } }, function() end)
+
+    -- Next session: kora_inventory has not started yet when the player saves.
+    local later = loadHud({ bridgePush = true, kvp = hud.kvp })
+    later.commands.ui()
+    later.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
+    local blob = json.decode(later.kvp['qbhud:layout'])
+    harness.assertEqual(blob.inventory.x, -0.2, 'the offline element keeps its position')
+    harness.assertEqual(blob.inventory.settings.playerSide, 'right', 'and its settings')
+end)
+
+harness.test('/uireset wipes the layout and resets every owner', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
+    hud.exported.registerUiElement(CHAT_DEF)
+    hud.commands.ui()
+    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { chatInput = { x = 0.3, y = 0.3 } } }, function() end)
+    hud.commands.uireset()
+    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'the KVP is deleted')
+    local apply = lastApply(hud, 'chatInput')
+    harness.assertEqual(apply.args[4], 'reset', 'owners are told it was a reset')
+    harness.assertEqual(apply.args[3].x, 0, 'and get the default layout')
+end)
+
+harness.test('a stopped owner leaves the registry', function()
+    local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
+    hud.exported.registerUiElement(CHAT_DEF)
+    harness.assertTrue(HudUi.get('chatInput') ~= nil, 'registered')
+    hud.fire('onClientResourceStop', 'kora_chat')
+    harness.assertEqual(HudUi.get('chatInput'), nil, 'dropped when its owner stops')
+end)
+
+harness.test('an oversized layout is refused rather than stored', function()
+    local hud = loadHud({ bridgePush = true })
+    hud.commands.ui()
+    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
+    local before = hud.kvp['qbhud:layout']
+    -- The mock json encoder returns short tokens, so emulate an oversized
+    -- encode for this one write.
+    local encode = json.encode
+    json.encode = function() return string.rep('x', 20000) end
+    hud.commands.ui()
+    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.2, y = 0 } } }, function() end)
+    json.encode = encode
+    harness.assertEqual(hud.kvp['qbhud:layout'], before, 'the previous layout is kept')
+    harness.assertTrue(#hud.notices > 0, 'and the player is told')
 end)
 
 harness.report('nui')

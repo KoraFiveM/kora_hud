@@ -109,7 +109,73 @@ export interface HudLayoutConfig {
     minimapVehicleOnlyDefault?: boolean
     /** Config.hud.minimapVehicleOnly.allowPlayerChange; false hides the switch. */
     minimapVehicleOnlyAllowed?: boolean
+    /** /ui editor: elements this player hid (HUD sections, minimap, registered elements). */
+    hidden?: Record<string, boolean>
+    /** /ui editor: per-element settings, validated by Lua against each owner's schema. */
+    settings?: Record<string, Record<string, UiSettingValue>>
+    /** /ui editor switches. Missing = an older client/hud.lua: the classic editor. */
+    editor?: HudEditorConfig
 }
+
+export interface HudEditorConfig {
+    /** Config.uiEditor.enabled (and the layout is movable). */
+    enabled: boolean
+    /** Config.uiEditor.allowHide. */
+    allowHide: boolean
+    /** The command shown in the editor hint. */
+    command: string
+    /** Ms between live previews sent to another resource while dragging. */
+    previewInterval: number
+}
+
+export type UiSettingValue = boolean | number | string
+
+/** One player-adjustable setting an owner declared for its element. */
+export interface UiSettingDef {
+    key: string
+    label: string
+    description?: string
+    type: "toggle" | "range" | "select"
+    default: UiSettingValue
+    min?: number
+    max?: number
+    step?: number
+    unit?: string
+    /** Label shown for the value 0 of a range (e.g. "Never"). */
+    zeroLabel?: string
+    options?: { value: string; label: string }[]
+}
+
+export interface UiRect {
+    x: number
+    y: number
+    w: number
+    h: number
+}
+
+// action: "qbhud:uiElements" -- every element another resource registered
+// through exports.kora_hud:registerUiElement, plus the minimap. The page draws
+// an outline proxy for each; the owner moves its real element.
+export interface UiElementDef {
+    id: string
+    label: string
+    group: string
+    owner: string
+    /** Zero point of the offset, viewport fractions. */
+    rect: UiRect
+    /** Where the element sits with nothing saved (relative to rect). */
+    defaultOffset: HudLayoutOffset
+    /** CSS transform-origin keywords, e.g. "left bottom". */
+    origin: string
+    movable: boolean
+    scalable: boolean
+    hideable: boolean
+    scaleMin: number
+    scaleMax: number
+    settings: UiSettingDef[]
+}
+
+export type UiElementsPayload = UiElementDef[]
 
 // action: "qbhud:layoutMode" -- the player entered layout edit mode with
 // Config.layout.command or left through Confirm/Cancel. Lua owns NUI focus (see the

@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { fetchNui } from "./fetchNui"
 import type {
     HudConfigPayload,
+    HudEditorConfig,
     HudLayoutModePayload,
     HudLayoutOffset,
     HudLayoutResetPayload,
@@ -11,6 +12,9 @@ import type {
     HudVehiclePayload,
     HudVisibilityPayload,
     HudVitalsPayload,
+    UiElementDef,
+    UiElementsPayload,
+    UiSettingValue,
 } from "./types"
 import { useNuiEvent } from "./useNuiEvent"
 
@@ -121,10 +125,54 @@ export interface HudLayoutState {
     setMinimapVehicleOnly: (vehicleOnly: boolean) => void
     /** Preview the shipped layout until the player confirms it. */
     resetToDefaults: () => void
+    /** /ui editor switches (enabled=false renders the classic editor). */
+    editor: HudEditorConfig
+    /** Elements hidden by this player (draft while editing). */
+    hidden: Record<string, boolean>
+    /** Per-element settings (draft while editing). */
+    settings: Record<string, Record<string, UiSettingValue>>
+    /** Elements registered by other resources, plus the minimap. */
+    elements: UiElementDef[]
+    /** The element picked in the editor panel (highlighted on screen). */
+    selected: string | null
+    select: (id: string | null) => void
+    setHidden: (id: string, hidden: boolean) => void
+    setSetting: (id: string, key: string, value: UiSettingValue) => void
+    /** Puts one element back to its defaults (draft until Save). */
+    resetElement: (id: string) => void
+    /**
+     * Tells the owner of a registered element where it currently is in the
+     * draft, so its real element follows the proxy. `final` marks a drop or a
+     * committed change (the minimap only re-applies on those); otherwise the
+     * call is throttled to editor.previewInterval.
+     */
+    preview: (id: string, final: boolean, override?: Partial<UiPreviewEntry>) => void
     /** Persist the preview and leave edit mode. */
     confirm: () => void
     /** Restore the positions from when editing began and leave edit mode. */
     cancel: () => void
+}
+
+export interface UiPreviewEntry {
+    x: number
+    y: number
+    scale: number
+    hidden: boolean
+    settings: Record<string, UiSettingValue>
+}
+
+const DEFAULT_EDITOR: HudEditorConfig = { enabled: false, allowHide: false, command: "hudlayout", previewInterval: 100 }
+
+/** Lua encodes an empty table as `[]`; treat anything but a plain object as empty. */
+function asRecord<T>(value: unknown): Record<string, T> {
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, T>) : {}
+}
+
+function without<T>(record: Record<string, T>, key: string): Record<string, T> {
+    if (!(key in record)) return record
+    const next = { ...record }
+    delete next[key]
+    return next
 }
 
 const DEFAULT_LAYOUT: HudLayoutState = {
@@ -143,6 +191,16 @@ const DEFAULT_LAYOUT: HudLayoutState = {
     setGaugesBottomAnchored: () => {},
     setMinimapVehicleOnly: () => {},
     resetToDefaults: () => {},
+    editor: DEFAULT_EDITOR,
+    hidden: {},
+    settings: {},
+    elements: [],
+    selected: null,
+    select: () => {},
+    setHidden: () => {},
+    setSetting: () => {},
+    resetElement: () => {},
+    preview: () => {},
     confirm: () => {},
     cancel: () => {},
 }
@@ -188,6 +246,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     const [justifications, setJustifications] = useState<Record<string, "left" | "center" | "right">>(DEFAULT_LAYOUT.justifications)
     const [gaugesBottomAnchored, setGaugesBottomAnchoredState] = useState(DEFAULT_LAYOUT.gaugesBottomAnchored)
     const [minimapVehicleOnly, setMinimapVehicleOnlyState] = useState(DEFAULT_LAYOUT.minimapVehicleOnly)
+    const [hidden, setHiddenState] = useState<Record<string, boolean>>({})
+    const [settings, setSettingsState] = useState<Record<string, Record<string, UiSettingValue>>>({})
+    const [elements, setElements] = useState<UiElementDef[]>([])
+    const [selected, setSelected] = useState<string | null>(null)
 
     // Mirrors `offsets` for the callbacks below, which run from a mouseup
     // listener and from a wire handler rather than from a render -- both need
@@ -208,6 +270,15 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // What /hudlayoutreset and the editor's reset button return to. Lua sends it
     // with the config (Config.hud.minimapVehicleOnly.default).
     const minimapVehicleOnlyDefaultRef = useRef(false)
+    const hiddenRef = useRef(hidden)
+    const initialHiddenRef = useRef<Record<string, boolean>>({})
+    const settingsRef = useRef(settings)
+    const initialSettingsRef = useRef<Record<string, Record<string, UiSettingValue>>>({})
+    const elementsRef = useRef(elements)
+    elementsRef.current = elements
+    const previewIntervalRef = useRef(DEFAULT_EDITOR.previewInterval)
+    const lastPreviewRef = useRef<Record<string, number>>({})
+    const pendingPreviewRef = useRef<Record<string, number>>({})
 
     const applyOffsets = useCallback((next: Record<string, HudLayoutOffset>) => {
         offsetsRef.current = next
@@ -253,13 +324,94 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         setMinimapVehicleOnlyState(vehicleOnly)
     }, [])
 
+    const applyHidden = useCallback((next: Record<string, boolean>) => {
+        hiddenRef.current = next
+        setHiddenState(next)
+    }, [])
+
+    const applySettings = useCallback((next: Record<string, Record<string, UiSettingValue>>) => {
+        settingsRef.current = next
+        setSettingsState(next)
+    }, [])
+
+    /** The draft entry an owner would receive for `id`. */
+    const entryFor = useCallback((id: string, override?: Partial<UiPreviewEntry>): UiPreviewEntry => {
+        const element = elementsRef.current.find((candidate) => candidate.id === id)
+        const offset = offsetsRef.current[id] ?? element?.defaultOffset ?? { x: 0, y: 0 }
+        return {
+            x: offset.x,
+            y: offset.y,
+            scale: scalesRef.current[id] ?? 1,
+            hidden: hiddenRef.current[id] === true,
+            settings: settingsRef.current[id] ?? {},
+            ...override,
+        }
+    }, [])
+
+    const sendPreview = useCallback((id: string, final: boolean, override?: Partial<UiPreviewEntry>) => {
+        lastPreviewRef.current[id] = Date.now()
+        fetchNui("qbhud:uiPreview", { final, elements: { [id]: entryFor(id, override) } }).catch((error) => {
+            console.error("[qbhud] qbhud:uiPreview failed:", error)
+        })
+    }, [entryFor])
+
+    const preview = useCallback((id: string, final: boolean, override?: Partial<UiPreviewEntry>) => {
+        if (!elementsRef.current.some((element) => element.id === id)) return
+        const pending = pendingPreviewRef.current[id]
+        if (pending !== undefined) {
+            window.clearTimeout(pending)
+            delete pendingPreviewRef.current[id]
+        }
+        if (final) {
+            sendPreview(id, true, override)
+            return
+        }
+        // Leading edge, then at most one per interval; the trailing call
+        // carries the latest position so a pause mid-drag still lands.
+        const wait = previewIntervalRef.current - (Date.now() - (lastPreviewRef.current[id] ?? 0))
+        if (wait <= 0) {
+            sendPreview(id, false, override)
+            return
+        }
+        pendingPreviewRef.current[id] = window.setTimeout(() => {
+            delete pendingPreviewRef.current[id]
+            sendPreview(id, false, override)
+        }, wait)
+    }, [sendPreview])
+
+    const select = useCallback((id: string | null) => setSelected(id), [])
+
+    const setHidden = useCallback((id: string, value: boolean) => {
+        applyHidden(value ? { ...hiddenRef.current, [id]: true } : without(hiddenRef.current, id))
+        preview(id, true)
+    }, [applyHidden, preview])
+
+    const setSetting = useCallback((id: string, key: string, value: UiSettingValue) => {
+        applySettings({ ...settingsRef.current, [id]: { ...(settingsRef.current[id] ?? {}), [key]: value } })
+        preview(id, true)
+    }, [applySettings, preview])
+
+    const resetElement = useCallback((id: string) => {
+        applyOffsets(without(offsetsRef.current, id))
+        applyScales(without(scalesRef.current, id))
+        applyJustifications(without(justificationsRef.current, id))
+        applyHidden(without(hiddenRef.current, id))
+        applySettings(without(settingsRef.current, id))
+        if (id === "gauges") setGaugesBottomAnchored(true)
+        if (id === "minimap") setMinimapVehicleOnly(minimapVehicleOnlyDefaultRef.current)
+        preview(id, true)
+    }, [applyOffsets, applyScales, applyJustifications, applyHidden, applySettings, setGaugesBottomAnchored, setMinimapVehicleOnly, preview])
+
     const resetToDefaults = useCallback(() => {
         applyOffsets({})
         applyScales({})
         applyJustifications({})
+        applyHidden({})
+        applySettings({})
         setGaugesBottomAnchored(true)
         setMinimapVehicleOnly(minimapVehicleOnlyDefaultRef.current)
-    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored, setMinimapVehicleOnly])
+        for (const element of elementsRef.current) preview(element.id, true)
+    }, [applyOffsets, applyScales, applyJustifications, applyHidden, applySettings, setGaugesBottomAnchored, setMinimapVehicleOnly, preview])
 
     const confirm = useCallback(() => {
         // The WHOLE map goes over: Lua stores one JSON blob per player and
@@ -272,6 +424,12 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             justifications: justificationsRef.current,
             gaugesBottomAnchored: gaugesBottomAnchoredRef.current,
             minimapVehicleOnly: minimapVehicleOnlyRef.current,
+            // The minimap's switch is the /minimap choice: always sent as a
+            // boolean so "Reset all" also shows a hidden minimap again.
+            hidden: elementsRef.current.some((element) => element.id === "minimap" && element.hideable)
+                ? { ...hiddenRef.current, minimap: hiddenRef.current.minimap === true }
+                : hiddenRef.current,
+            settings: settingsRef.current,
         }).catch((error) => {
             console.error("[qbhud] qbhud:finishLayout failed:", error)
         })
@@ -285,11 +443,13 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 applyJustifications(initialJustificationsRef.current)
                 setGaugesBottomAnchored(initialGaugesBottomAnchoredRef.current)
                 setMinimapVehicleOnly(initialMinimapVehicleOnlyRef.current)
+                applyHidden(initialHiddenRef.current)
+                applySettings(initialSettingsRef.current)
             })
             .catch((error) => {
                 console.error("[qbhud] qbhud:finishLayout failed:", error)
             })
-    }, [applyOffsets, applyScales, applyJustifications, setGaugesBottomAnchored, setMinimapVehicleOnly])
+    }, [applyOffsets, applyScales, applyJustifications, applyHidden, applySettings, setGaugesBottomAnchored, setMinimapVehicleOnly])
 
     useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
         if (!payload) return
@@ -307,6 +467,14 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         setGaugesBottomAnchored(payload.layout?.gaugesBottomAnchored !== false)
         minimapVehicleOnlyDefaultRef.current = payload.layout?.minimapVehicleOnlyDefault === true
         setMinimapVehicleOnly(payload.layout?.minimapVehicleOnly === true)
+        applyHidden(asRecord<boolean>(payload.layout?.hidden))
+        applySettings(asRecord<Record<string, UiSettingValue>>(payload.layout?.settings))
+        const interval = Number(payload.layout?.editor?.previewInterval)
+        previewIntervalRef.current = Number.isFinite(interval) && interval >= 50 ? interval : DEFAULT_EDITOR.previewInterval
+    })
+
+    useNuiEvent<UiElementsPayload>("qbhud:uiElements", (payload) => {
+        setElements(Array.isArray(payload) ? payload.filter((element) => element && typeof element.id === "string" && element.rect) : [])
     })
 
     useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
@@ -340,6 +508,12 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             initialJustificationsRef.current = justificationsRef.current
             initialGaugesBottomAnchoredRef.current = gaugesBottomAnchoredRef.current
             initialMinimapVehicleOnlyRef.current = minimapVehicleOnlyRef.current
+            initialHiddenRef.current = hiddenRef.current
+            initialSettingsRef.current = settingsRef.current
+        } else {
+            setSelected(null)
+            for (const timer of Object.values(pendingPreviewRef.current)) window.clearTimeout(timer)
+            pendingPreviewRef.current = {}
         }
         setLayoutEditing(payload)
     })
@@ -354,6 +528,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         applyJustifications({})
         setGaugesBottomAnchored(true)
         setMinimapVehicleOnly(minimapVehicleOnlyDefaultRef.current)
+        applyHidden({})
+        applySettings({})
     })
 
     // client/hud.lua's resource-start SendNUIMessage calls are best-effort --
@@ -390,10 +566,20 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             setGaugesBottomAnchored,
             setMinimapVehicleOnly,
             resetToDefaults,
+            editor: config.layout?.editor ?? DEFAULT_EDITOR,
+            hidden,
+            settings,
+            elements,
+            selected,
+            select,
+            setHidden,
+            setSetting,
+            resetElement,
+            preview,
             confirm,
             cancel,
         }),
-        [config.layout, layoutEditing, offsets, scales, justifications, gaugesBottomAnchored, minimapVehicleOnly, commitOffset, commitScale, commitJustification, setGaugesBottomAnchored, setMinimapVehicleOnly, resetToDefaults, confirm, cancel],
+        [config.layout, layoutEditing, offsets, scales, justifications, gaugesBottomAnchored, minimapVehicleOnly, hidden, settings, elements, selected, commitOffset, commitScale, commitJustification, setGaugesBottomAnchored, setMinimapVehicleOnly, resetToDefaults, select, setHidden, setSetting, resetElement, preview, confirm, cancel],
     )
 
     // Each provider is handed the state value itself -- no useMemo wrapper

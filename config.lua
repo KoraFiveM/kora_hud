@@ -328,6 +328,46 @@ Config.layout = {
     kvpKey = 'qbhud:layout',
 }
 
+-- Unified UI layout editor. /ui opens one editor for the HUD sections and for
+-- every element other resources register through
+-- exports.kora_hud:registerUiElement (kora_chat's chat, kora_inventory's
+-- window) plus the minimap. Each player can move, resize and hide elements and
+-- change each element's own settings; everything is saved in the same client
+-- KVP as Config.layout.kvpKey. Config.layout.movable = false still pins
+-- everything. Set enabled = false for exactly the old /hudlayout editor (HUD
+-- sections and the chat input box only, no hiding, no other resources).
+-- `command`, `aliases` and `resetCommand` are registered at resource start;
+-- the rest is read live.
+Config.uiEditor = {
+    enabled = boolean(true, {
+        label = 'Unified /ui layout editor',
+        description = 'Lets players arrange the HUD, chat, inventory and minimap from one /ui editor, with per-element visibility and settings. Off keeps the original /hudlayout editor.',
+    }),
+    -- Opens the editor. /hudlayout (Config.layout.command) keeps working too.
+    command = 'ui',
+    aliases = { 'hudsettings' },
+    -- Wipes this player's layout without opening anything (as /hudlayoutreset).
+    resetCommand = 'uireset',
+    -- Players may hide individual elements (HUD sections, the minimap, and
+    -- registered elements that allow it).
+    allowHide = boolean(true, {
+        label = 'Players can hide UI elements',
+        description = 'Shows a Visible switch in /ui for each element that supports hiding.',
+        live = true,
+    }),
+    -- Accept elements from other resources (chat, inventory). false = HUD only.
+    allowExternal = true,
+    -- Players may move and resize the minimap (needs minimapLayout.enabled and
+    -- a shape other than 'stock'; otherwise it is shown but locked).
+    minimap = boolean(true, {
+        label = 'Players can move the minimap',
+        description = 'Lets players drag and resize the minimap in /ui, on top of the server minimap layout.',
+        live = true,
+    }),
+    -- Ms between live previews sent to another resource while dragging.
+    previewInterval = 100,
+}
+
 -- Seatbelt feedback. The seatbelt itself lives in kora_utils; kora_hud only
 -- plays the sound when that state changes. All values are read each time a
 -- sound plays, so edits apply without a restart.

@@ -100,13 +100,58 @@ function HudMinimap.aspectOffset(aspect, cfg)
     return (REFERENCE_ASPECT - aspect) / number(o.divisor, 3.6, 0.1, 100.0) + number(o.bias, -0.008, -1.0, 1.0)
 end
 
+---Horizontal compression of the engine's L/B layout space on this screen: the
+---engine lays left/bottom-anchored components out in a centred 16:9 frame, so
+---on a wider screen one unit of component x covers less than one unit of
+---screen width. This is the same fact `aspectOffset` compensates for.
+---@param aspect number
+---@return number k in (0, 1]
+function HudMinimap.compression(aspect)
+    aspect = number(aspect, REFERENCE_ASPECT, 1.0, 10.0)
+    if aspect > REFERENCE_ASPECT then return REFERENCE_ASPECT / aspect end
+    return 1.0
+end
+
+-- Per-player layout from the /ui editor, on top of everything the server
+-- config does: x/y are SCREEN fractions (what the player dragged), scale a
+-- multiplier about the map's bottom-left corner. nil = server layout only.
+local playerLayout
+
+---Sanitised copy of a player layout, or nil for "no change from the server".
+local function cleanPlayer(layout)
+    if type(layout) ~= 'table' then return nil end
+    local x, y = number(layout.x, 0.0, -1.0, 1.0), number(layout.y, 0.0, -1.0, 1.0)
+    local scale = number(layout.scale, 1.0, 0.6, 1.6)
+    if x == 0 and y == 0 and scale == 1 then return nil end
+    return { x = x, y = y, scale = scale }
+end
+
+---Transforms the component rects by the player layout: scale about the map's
+---bottom-left corner (native y IS the bottom edge for 'B' alignment), then
+---move by the dragged screen offset converted into L/B units.
+local function applyPlayer(out, player, aspect)
+    if not player then return out end
+    local k = HudMinimap.compression(aspect)
+    local ax, ay = out.minimap.x, out.minimap.y
+    local dx, dy, s = player.x / k, player.y, player.scale
+    for _, name in ipairs(HudMinimap.COMPONENTS) do
+        local r = out[name]
+        r.x = ax + (r.x - ax) * s + dx
+        r.y = ay + (r.y - ay) * s + dy
+        r.w = r.w * s
+        r.h = r.h * s
+    end
+    return out
+end
+
 ---Computes the three component rects for the configured shape, or nil when the
 ---shape has no valid rects in the config.
 ---@param aspect number
 ---@param safezone number GetSafeZoneSize()
 ---@param cfg table|nil Config.hud.minimapLayout
+---@param player table|nil per-player layout { x, y, scale } (ignored for 'stock')
 ---@return table<string, {x:number, y:number, w:number, h:number}>|nil
-function HudMinimap.layout(aspect, safezone, cfg)
+function HudMinimap.layout(aspect, safezone, cfg, player)
     cfg = type(cfg) == 'table' and cfg or {}
     local shape = shapeName(cfg)
     local def = shapeDef(cfg, shape)
@@ -142,7 +187,44 @@ function HudMinimap.layout(aspect, safezone, cfg)
             h = h * scale,
         }
     end
-    return out
+    if stock then return out end
+    return applyPlayer(out, cleanPlayer(player), aspect)
+end
+
+---Screen-space box (viewport fractions, top-left origin) of a minimap
+---component rect, for the /ui editor's proxy. Inverse of the engine's L/B
+---placement: x inside the centred 16:9 frame, bottom edge at 1 - margin + y.
+---@param rect table|nil component rect; default: the current layout's map
+---@param aspect number|nil
+---@param safezone number|nil
+---@return {x:number, y:number, w:number, h:number}|nil
+function HudMinimap.screenRect(rect, aspect, safezone)
+    if not rect then
+        local cfg = layoutConfig()
+        if not cfg or cfg.enabled ~= true then cfg = { shape = 'stock', shapes = cfg and cfg.shapes } end
+        local rects
+        if cfg.shapes then
+            rects = HudMinimap.layout(aspect or (screen()), 1.0, cfg)
+        end
+        rect = rects and rects.minimap
+        if not rect then return nil end
+    end
+    aspect = aspect or (screen())
+    local zone = safezone
+    if not zone then
+        local ok, value = pcall(GetSafeZoneSize)
+        zone = ok and tonumber(value) or 1.0
+    end
+    zone = number(zone, 1.0, 0.5, 1.0)
+    local k = HudMinimap.compression(aspect)
+    local margin = (1.0 - zone) / 2.0
+    local x = (1.0 - k) / 2.0 + (margin + rect.x) * k
+    local y = 1.0 - margin - rect.h + rect.y
+    local w, h = rect.w * k, rect.h
+    -- Clamp into the screen so the proxy is always grabbable.
+    x = math.max(0.0, math.min(1.0 - math.min(w, 1.0), x))
+    y = math.max(0.0, math.min(1.0 - math.min(h, 1.0), y))
+    return { x = x, y = y, w = math.min(w, 1.0), h = math.min(h, 1.0) }
 end
 
 local function now()
@@ -312,7 +394,7 @@ local function desired(cfg)
     local shape = shapeName(cfg)
     if shape == 'stock' then return nil end
     local def = shapeDef(cfg, shape)
-    local rects = def and HudMinimap.layout((screen()), safezoneFor(cfg), cfg)
+    local rects = def and HudMinimap.layout((screen()), safezoneFor(cfg), cfg, playerLayout)
     if not rects then return nil, 'shape "' .. shape .. '" has no valid rects in Config.hud.minimapLayout.shapes, keeping the stock minimap' end
     local want = { shape = shape, rects = rects, clipType = number(def.clipType, shape == 'circle' and 1 or 0, 0, 3) }
     if shape == 'square' then
@@ -424,6 +506,31 @@ function HudMinimap.apply(force)
     lastKey = snap
     if active or state.applied then schedule() end
     return active
+end
+
+---Whether the minimap layout is managed (so a player layout can apply at all).
+---@return boolean
+function HudMinimap.isManaged()
+    local cfg = settings()
+    return cfg ~= nil and shapeName(cfg) ~= 'stock'
+end
+
+---Sets (or clears, with nil) this player's /ui minimap layout and re-applies
+---once if it changed. One call = at most one bigmap refresh.
+---@param layout table|nil { x, y, scale }
+function HudMinimap.setPlayerLayout(layout)
+    local nextLayout = cleanPlayer(layout)
+    local same = (nextLayout == nil and playerLayout == nil) or (nextLayout and playerLayout
+        and near(nextLayout.x, playerLayout.x, 1e-6) and near(nextLayout.y, playerLayout.y, 1e-6)
+        and near(nextLayout.scale, playerLayout.scale, 1e-6))
+    if same then return end
+    playerLayout = nextLayout
+    HudMinimap.apply(true)
+end
+
+---@return table|nil the active per-player layout (introspection/tests)
+function HudMinimap.playerLayout()
+    return playerLayout
 end
 
 ---True while this resource has changed the game's minimap (introspection/tests).

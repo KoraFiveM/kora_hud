@@ -171,6 +171,44 @@ untrusted input on read and re-validated/clamped on write in `client/hud.lua`
 draws its own boxes. `movable = false` makes `/hudlayout` report that moving
 sections is disabled instead of opening the editor.
 
+### Unified `/ui` layout editor
+```
+/ui               -- one editor for the HUD, chat, inventory and minimap (also /hudsettings, /hudlayout)
+/uireset          -- forget the saved layout (same as /hudlayoutreset)
+```
+With `Config.uiEditor.enabled` (default on) the editor shows a panel at the top
+of the screen (dock it to the bottom with its arrow button): pick an element
+from the dropdown, or click it on screen, then use **Visible**, **Size**, its own
+settings and **Reset <element>**. **Save**, **Cancel** (Esc) and **Reset all**
+(asks twice) apply to the whole layout. HUD sections keep their handles; elements
+other resources render get an outline box you drag, with a corner grip to resize.
+`Config.uiEditor.enabled = false` restores the classic editor above exactly.
+
+Other resources register their own elements (client side):
+```lua
+-- Add the handler BEFORE registering: registration answers at once.
+AddEventHandler('kora_hud:ui:apply', function(owner, id, layout, reason)
+    if owner ~= GetCurrentResourceName() or id ~= 'myElement' then return end
+    -- layout = { x, y, scale, hidden, placed, settings = { ... } }, already validated
+end)
+AddEventHandler('kora_hud:ui:ready', register) -- kora_hud (re)started
+exports.kora_hud:registerUiElement({
+    id = 'myElement', label = 'My element', group = 'My resource',
+    rect = { x = 0.4, y = 0.1, w = 0.2, h = 0.1 },   -- zero point, viewport fractions
+    defaultOffset = { x = 0, y = 0 },                -- optional
+    origin = 'center top', movable = true, scalable = true, hideable = true,
+    scaleMin = 0.75, scaleMax = 1.25,
+    settings = { { key = 'compact', label = 'Compact', type = 'toggle', default = false } },
+})
+```
+`updateUiElement(id, { rect, defaultOffset })`, `unregisterUiElement(id)` and
+`getUiLayout(id)` complete the API; `kora_hud:ui:editing (bool)` tells owners
+the editor opened or closed. Registrations belong to the calling resource and
+are dropped when it stops; its saved layout is kept. Everything stays in the
+same client KVP (`v = 2`, additive), and the minimap's position and size are
+applied on top of `Config.hud.minimapLayout` (its visibility is the `/minimap`
+choice).
+
 ### Drive HUD values manually for testing (stub adapter only)
 ```
 /hudtest_cash 1500

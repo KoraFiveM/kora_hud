@@ -5,6 +5,7 @@ import { JobGang } from "@/components/hud/JobGang"
 import { GaugesPreview, StatusPreview, VehiclePreview } from "@/components/hud/LayoutPreviews"
 import { HUD_SECTIONS, LayoutEditorOverlay, MovableSection } from "@/components/hud/LayoutEditor"
 import { MicIndicator } from "@/components/hud/MicIndicator"
+import { EditorPanel, ExternalProxy } from "@/components/hud/UiEditor"
 import { PlayerId } from "@/components/hud/PlayerId"
 import { SeatbeltSound } from "@/components/SeatbeltSound"
 import { Stamina } from "@/components/hud/Stamina"
@@ -109,7 +110,14 @@ function HudContent() {
 
     return (
         <div className="pointer-events-none fixed inset-0 z-hud">
-            <LayoutEditorOverlay />
+            {/* The unified /ui panel, or the classic compact editor when
+                Config.uiEditor is off (or client/hud.lua is older). */}
+            {layout.editor.enabled ? <EditorPanel /> : <LayoutEditorOverlay />}
+            {/* Outline proxies for elements other resources (and the game, for
+                the minimap) render. Only while editing. */}
+            {layout.editing && layout.editor.enabled && layout.elements.map((element) => (
+                <ExternalProxy key={element.id} def={element} />
+            ))}
             <BottomHud />
             <MovableSection
                 id={HUD_SECTIONS.identity}
@@ -140,8 +148,10 @@ function HudContent() {
             </MovableSection>
             {/* qbchat owns the live composer in a separate NUI frame. This
                 preview is only mounted while editing, but writes the shared
-                position and scale that qbchat applies after Confirm. */}
-            <MovableSection
+                position and scale that qbchat applies after Confirm. A
+                kora_chat that registers with the /ui editor gets a generic
+                proxy instead, so this one is only for an older kora_chat. */}
+            {!layout.elements.some((element) => element.id === HUD_SECTIONS.chatInput) && <MovableSection
                 id={HUD_SECTIONS.chatInput}
                 label="Chat input"
                 position="left-4 top-4 max-[520px]:left-2 max-[520px]:top-2"
@@ -153,7 +163,7 @@ function HudContent() {
                 <div className="h-12 w-[min(480px,38vw)] max-[520px]:w-[calc(100vw-1rem)] rounded-[10px] bg-background/95 px-3 text-sm leading-[3rem] text-muted-foreground">
                     Type a message or /command
                 </div>
-            </MovableSection>
+            </MovableSection>}
         </div>
     )
 }

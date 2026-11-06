@@ -169,14 +169,61 @@ end
 vehicleOnlyChoice = loadVehicleOnlyChoice()
 
 local function emptyLayout()
-    return { offsets = {}, scales = {}, justifications = {}, gaugesBottomAnchored = true, minimapVehicleOnly = minimapVehicleOnly() }
+    return {
+        offsets = {}, scales = {}, justifications = {}, hidden = {}, settings = {},
+        gaugesBottomAnchored = true, minimapVehicleOnly = minimapVehicleOnly(),
+    }
 end
 
-local function closeLayout()
+-- Unified /ui editor (Config.uiEditor). kora_hud hosts it: its NUI draws the
+-- panel and an outline proxy for every element another resource registered
+-- through exports.kora_hud:registerUiElement (client/uiregistry.lua), and the
+-- owners are told where to put their real element with the client-local event
+-- `kora_hud:ui:apply`. With the editor disabled none of this runs and
+-- /hudlayout behaves exactly as before.
+local UI = type(Config.uiEditor) == 'table' and Config.uiEditor or {}
+local function uiEnabled()
+    return HudUi ~= nil and UI.enabled ~= false and LAYOUT.movable ~= false
+end
+local function hideAllowed()
+    return uiEnabled() and UI.allowHide ~= false
+end
+local function minimapEditable()
+    return uiEnabled() and UI.minimap ~= false
+end
+-- Bounds on what a submitted layout may grow the KVP blob to.
+local MAX_LAYOUT_ENTRIES = 48
+local MAX_LAYOUT_BYTES = 16384
+local HIDEABLE_SECTIONS = { gauges = true, vehicle = true, identity = true, status = true }
+-- Filled in by the minimap visibility block further down (its locals are
+-- declared after this point): isHidden() / setHidden(bool) / toggleEnabled().
+local minimapHooks = {}
+
+---Fires a client-local event. Guarded: the smoke tests and a mid-restart
+---runtime may not have TriggerEvent, and an owner's handler erroring must not
+---abort the editor callback that triggered it.
+local function emit(name, ...)
+    if type(TriggerEvent) ~= 'function' then return end
+    local ok, err = pcall(TriggerEvent, name, ...)
+    if not ok then print(('[kora_hud] %s handler failed: %s'):format(name, tostring(err))) end
+end
+
+-- Assigned below, once the KVP helpers it needs exist.
+local applyToOwners
+
+---Leaves edit mode. Every owner then gets the STORED layout: after a Save that
+---is the new one, after a Cancel (or the HUD hiding mid-edit) it undoes the
+---previews they were sent. `skipApply` is for a caller that applies itself.
+---@param skipApply boolean|nil
+local function closeLayout(skipApply)
     if not layoutEditing then return end
     layoutEditing = false
     SetNuiFocus(false, false)
     send('qbhud:layoutMode', false)
+    if uiEnabled() then
+        emit('kora_hud:ui:editing', false)
+        if not skipApply and applyToOwners then applyToOwners('saved') end
+    end
 end
 
 -- Offsets are stored as FRACTIONS of the viewport, not pixels: a layout saved
@@ -195,7 +242,10 @@ local LAYOUT_BOUNDS = {
     -- player arranges all of their on-screen interface.
     chatInput = { minX = -0.95, maxX = 0.95, minY = -0.95, maxY = 0.95 },
 }
-local FALLBACK_LAYOUT_LIMIT = 0.45
+-- Elements registered by other resources (and the minimap) have no fixed
+-- anchor here: the editor keeps them on screen from their registered rect, so
+-- Lua only enforces "within one screen of the zero point" as a backstop.
+local FALLBACK_LAYOUT_LIMIT = 1.0
 -- Component scale is deliberately constrained to keep a large HUD useful
 -- without letting a malformed NUI payload cover the whole screen.
 local LAYOUT_SCALE_MIN = 0.75
@@ -232,6 +282,42 @@ local function layoutScale(value)
     return number
 end
 
+---Scale for any element: HUD sections and the chat composer keep their
+---75-150% range, registered elements use their own, and an element whose
+---owner is not running is held to the registry's outer 50-200% range.
+---@param section string
+---@param value any
+---@return number|nil
+local function layoutScaleFor(section, value)
+    if LAYOUT_BOUNDS[section] and not (HudUi and HudUi.get(section)) then return layoutScale(value) end
+    if HudUi then
+        local def = HudUi.get(section)
+        if def then return HudUi.clampScale(def, value) end
+        return HudUi.clampScale(nil, value)
+    end
+    return layoutScale(value)
+end
+
+---@param section any
+---@return boolean
+local function validSection(section)
+    if type(section) ~= 'string' or #section > 32 then return false end
+    if HudUi then return HudUi.validId(section) end
+    return true
+end
+
+---The decoded KVP blob, or an empty table. Untrusted: every consumer
+---re-validates the fields it reads.
+---@return table
+local function readRawLayout()
+    if LAYOUT.movable == false then return {} end
+    local raw = GetResourceKvpString(LAYOUT_KVP)
+    if type(raw) ~= 'string' or raw == '' then return {} end
+    local ok, decoded = pcall(json.decode, raw)
+    if not ok or type(decoded) ~= 'table' then return {} end
+    return decoded
+end
+
 ---This player's saved section layout, split for the NUI into offsets and scales.
 ---
 ---Returns an empty table for anything malformed rather than raising: a corrupt
@@ -241,25 +327,39 @@ local function readLayout()
     if LAYOUT.movable == false then return emptyLayout() end
 
     local raw = GetResourceKvpString(LAYOUT_KVP)
-    if type(raw) ~= 'string' or raw == '' then return emptyLayout() end
+    if type(raw) ~= 'string' or raw == '' then
+        local empty = emptyLayout()
+        if minimapHooks.isHidden then empty.hidden.minimap = minimapHooks.isHidden() or nil end
+        return empty
+    end
 
     local ok, decoded = pcall(json.decode, raw)
     if not ok or type(decoded) ~= 'table' then return emptyLayout() end
 
-    local offsets, scales, justifications = {}, {}, {}
+    local offsets, scales, justifications, hidden, settings = {}, {}, {}, {}, {}
     local gaugesBottomAnchored = not (type(decoded.gauges) == 'table' and decoded.gauges.bottomAnchored == false)
+    local allowHide = hideAllowed()
     for section, entry in pairs(decoded) do
-        if type(section) == 'string' and type(entry) == 'table' then
+        if validSection(section) and type(entry) == 'table' then
             local justification = layoutJustification(entry.justification)
             local x, y = layoutOffset(section, 'x', entry.x), layoutOffset(section, 'y', entry.y)
-            local scale = layoutScale(entry.scale)
+            local scale = layoutScaleFor(section, entry.scale)
             if x and y then offsets[section] = { x = x, y = y } end
             if scale then scales[section] = scale end
             if justification then justifications[section] = justification end
+            if allowHide and entry.hidden == true and section ~= 'minimap' then hidden[section] = true end
+            if HudUi and type(entry.settings) == 'table' then
+                local def = HudUi.get(section)
+                settings[section] = def and HudUi.cleanSettings(def, entry.settings) or (not def and HudUi.preserveSettings(entry.settings)) or nil
+            end
         end
     end
+    -- The minimap's visibility is the /minimap toggle's own choice (its own
+    -- KVP), so the editor switch and the command can never disagree.
+    if minimapHooks.isHidden then hidden.minimap = minimapHooks.isHidden() or nil end
     return {
         offsets = offsets, scales = scales, justifications = justifications,
+        hidden = hidden, settings = settings,
         gaugesBottomAnchored = gaugesBottomAnchored, minimapVehicleOnly = minimapVehicleOnly(),
     }
 end
@@ -276,14 +376,30 @@ local function writeLayout(payload)
     local offsets = type(payload.offsets) == 'table' and payload.offsets or {}
     local scales = type(payload.scales) == 'table' and payload.scales or {}
     local requestedJustifications = type(payload.justifications) == 'table' and payload.justifications or {}
+    local requestedHidden = hideAllowed() and type(payload.hidden) == 'table' and payload.hidden or {}
+    local requestedSettings = uiEnabled() and type(payload.settings) == 'table' and payload.settings or {}
     local gaugesBottomAnchored = payload.gaugesBottomAnchored ~= false
     local clean = {}
     local count = 0
+
+    -- Every entry beyond the first needs a slot; the cap keeps a malformed
+    -- submission from growing the stored blob without bound. A setting, scale
+    -- or alignment without a move still needs an entry: the zero offset
+    -- preserves the component's shipped position.
+    local function entryFor(section)
+        local entry = clean[section]
+        if not entry and count < MAX_LAYOUT_ENTRIES then
+            entry = { x = 0, y = 0 }
+            clean[section] = entry
+            count = count + 1
+        end
+        return entry
+    end
+
     for section, offset in pairs(offsets) do
-        -- Section ids come from the NUI's own fixed list; cap the key length
-        -- and the entry count so a malformed submission cannot grow the stored
-        -- blob without bound.
-        if type(section) == 'string' and #section <= 32 and type(offset) == 'table' and count < 16 then
+        -- Section ids come from the NUI's own fixed list or from the registry;
+        -- validSection caps the key length and rejects reserved keys.
+        if validSection(section) and type(offset) == 'table' and count < MAX_LAYOUT_ENTRIES then
             local x, y = layoutOffset(section, 'x', offset.x), layoutOffset(section, 'y', offset.y)
             if x and y then
                 clean[section] = { x = x, y = y }
@@ -295,30 +411,44 @@ local function writeLayout(payload)
     -- Alignment is saved even when a component was not moved or resized.
     for section, value in pairs(requestedJustifications) do
         local justification = layoutJustification(value)
-        if type(section) == 'string' and #section <= 32 and justification then
-            local entry = clean[section]
-            if not entry and count < 16 then
-                entry = { x = 0, y = 0 }
-                clean[section] = entry
-                count = count + 1
-            end
+        if validSection(section) and justification then
+            local entry = entryFor(section)
             if entry then entry.justification = justification end
         end
     end
 
     for section, value in pairs(scales) do
-        if type(section) == 'string' and #section <= 32 then
-            local scale = layoutScale(value)
+        if validSection(section) then
+            local scale = layoutScaleFor(section, value)
             if scale then
-                -- A resize without a move still needs an entry. Supplying the
-                -- zero offset preserves the component's shipped position.
-                local entry = clean[section]
-                if not entry and count < 16 then
-                    entry = { x = 0, y = 0 }
-                    clean[section] = entry
-                    count = count + 1
-                end
+                local entry = entryFor(section)
                 if entry then entry.scale = scale end
+            end
+        end
+    end
+
+    -- Hidden: HUD sections and registered elements that declared hideable.
+    -- The minimap is excluded: its visibility is the /minimap toggle's KVP.
+    for section, value in pairs(requestedHidden) do
+        if value == true and validSection(section) and section ~= 'minimap' then
+            local def = HudUi and HudUi.get(section)
+            if HIDEABLE_SECTIONS[section] or (def and def.hideable) then
+                local entry = entryFor(section)
+                if entry then entry.hidden = true end
+            end
+        end
+    end
+
+    -- Settings are only accepted for a registered element, against its schema.
+    if HudUi then
+        for section, raw in pairs(requestedSettings) do
+            local def = validSection(section) and HudUi.get(section)
+            if def and not def.internal then
+                local values = HudUi.cleanSettings(def, raw)
+                if values then
+                    local entry = entryFor(section)
+                    if entry then entry.settings = values end
+                end
             end
         end
     end
@@ -327,12 +457,28 @@ local function writeLayout(payload)
     -- Keep it beside the gauges' other saved settings rather than introducing
     -- a second preference blob for one Boolean.
     if not gaugesBottomAnchored then
-        local entry = clean.gauges
-        if not entry and count < 16 then
-            entry = { x = 0, y = 0 }
-            clean.gauges = entry
-        end
+        local entry = entryFor('gauges')
         if entry then entry.bottomAnchored = false end
+    end
+
+    -- An element whose owner is not running right now could not be shown in
+    -- the editor, so the player never had a chance to keep or change it: its
+    -- saved entry is carried over instead of silently dropped.
+    if uiEnabled() then
+        for section, entry in pairs(readRawLayout()) do
+            if clean[section] == nil and validSection(section) and type(entry) == 'table'
+                and not LAYOUT_BOUNDS[section] and section ~= 'minimap' and not HudUi.get(section)
+                and count < MAX_LAYOUT_ENTRIES then
+                local x, y = layoutOffset(section, 'x', entry.x), layoutOffset(section, 'y', entry.y)
+                if x and y then
+                    local kept = { x = x, y = y, scale = layoutScaleFor(section, entry.scale) }
+                    if entry.hidden == true then kept.hidden = true end
+                    kept.settings = HudUi.preserveSettings(entry.settings)
+                    clean[section] = kept
+                    count = count + 1
+                end
+            end
+        end
     end
 
     -- Minimap-only-in-vehicle rides in the same blob. A choice is only stored
@@ -341,12 +487,19 @@ local function writeLayout(payload)
     -- When the server forbids changing it the old saved choice is kept as it was.
     local default, mayChange = minimapVehicleOnlySettings()
     local requested = payload.minimapVehicleOnly
+    local previousChoice = vehicleOnlyChoice
     if mayChange and type(requested) == 'boolean' and (requested ~= default or vehicleOnlyChoice ~= nil) then
         vehicleOnlyChoice = requested
     end
     if vehicleOnlyChoice ~= nil then clean.minimapVehicleOnly = vehicleOnlyChoice end
+    if HudUi then clean.v = 2 end
 
-    SetResourceKvp(LAYOUT_KVP, json.encode(clean))
+    local encoded = json.encode(clean)
+    if #encoded > MAX_LAYOUT_BYTES then
+        vehicleOnlyChoice = previousChoice
+        return false
+    end
+    SetResourceKvp(LAYOUT_KVP, encoded)
     return true
 end
 
@@ -365,11 +518,68 @@ local function syncChatInputLayout()
     })
 end
 
+---Hands the minimap its per-player layout (nil = the server layout only).
+---@param entry table|nil
+local function applyMinimapPlayerLayout(entry)
+    if not (HudMinimap and HudMinimap.setPlayerLayout) then return end
+    if not minimapEditable() or type(entry) ~= 'table' then
+        HudMinimap.setPlayerLayout(nil)
+        return
+    end
+    local def = HudUi.get('minimap')
+    HudMinimap.setPlayerLayout({
+        x = tonumber(entry.x) or 0,
+        y = tonumber(entry.y) or 0,
+        scale = (def and HudUi.clampScale(def, entry.scale)) or 1,
+    })
+end
+
+---Tells every registered owner where its element goes. `entries` overrides
+---the saved blob (a reset passes {}); every value is re-validated by
+---HudUi.layoutFor, so a hand-edited KVP can never reach an owner's CSS.
+---@param reason 'saved'|'reset'
+---@param entries table|nil
+applyToOwners = function(reason, entries)
+    if not uiEnabled() then return end
+    local saved = entries or readRawLayout()
+    for id, def in HudUi.each() do
+        if not def.internal then
+            emit('kora_hud:ui:apply', def.owner, id, HudUi.layoutFor(def, saved[id]), reason)
+        end
+    end
+    applyMinimapPlayerLayout(saved.minimap)
+end
+
+-- The minimap is one of kora_hud's own elements but is drawn by the game, so
+-- the editor shows it as a proxy box like an external element. Its rect comes
+-- from the same calculation client/minimap.lua applies, so the box sits on the
+-- real radar; it is refreshed whenever the editor opens (resolution changes).
+local function registerMinimapElement()
+    if not minimapEditable() or not (HudMinimap and HudMinimap.screenRect) then
+        if HudUi and HudUi.get('minimap') then HudUi.unregister(GetCurrentResourceName(), 'minimap') end
+        return
+    end
+    local managed = HudMinimap.isManaged and HudMinimap.isManaged() or false
+    local rect = HudMinimap.screenRect() or { x = 0.01, y = 0.78, w = 0.15, h = 0.19 }
+    HudUi.register(GetCurrentResourceName(), {
+        id = 'minimap',
+        label = 'Minimap',
+        group = 'Minimap',
+        rect = rect,
+        origin = 'left bottom',
+        movable = managed,
+        scalable = managed,
+        hideable = minimapHooks.toggleEnabled and minimapHooks.toggleEnabled() or false,
+        scaleMin = 0.6,
+        scaleMax = 1.6,
+    }, true)
+end
+
 -- Layout edit mode is an explicit mode, entered by command, rather than the HUD
 -- being draggable all the time. The HUD is pointer-transparent during play and
 -- has to stay that way -- a permanently grabbable HUD would eat the clicks the
 -- game needs. The NUI takes focus only while this mode is open.
-RegisterCommand(LAYOUT.command or 'hudlayout', function()
+local function openLayoutEditor()
     if LAYOUT.movable == false then
         Kora.notify.send({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
         return
@@ -380,9 +590,57 @@ RegisterCommand(LAYOUT.command or 'hudlayout', function()
     if not visible or layoutEditing then return end
 
     layoutEditing = true
+    if uiEnabled() then
+        registerMinimapElement()
+        send('qbhud:uiElements', HudUi.list())
+        -- Owners close their own focused UI (chat input, inventory) and show
+        -- a preview of their element while the editor is open.
+        emit('kora_hud:ui:editing', true)
+    end
     SetNuiFocus(true, true)
     send('qbhud:layoutMode', true)
-end, false)
+end
+
+local function validCommandName(name)
+    return type(name) == 'string' and name:match('^[%w_]+$') ~= nil and #name <= 32
+end
+
+RegisterCommand(LAYOUT.command or 'hudlayout', openLayoutEditor, false)
+if uiEnabled() then
+    local seen = { [LAYOUT.command or 'hudlayout'] = true }
+    local names = { UI.command or 'ui' }
+    for _, alias in ipairs(type(UI.aliases) == 'table' and UI.aliases or {}) do names[#names + 1] = alias end
+    for _, name in ipairs(names) do
+        if validCommandName(name) and not seen[name] then
+            seen[name] = true
+            RegisterCommand(name, openLayoutEditor, false)
+        end
+    end
+end
+
+-- Live preview for elements another resource renders (and the minimap). The
+-- HUD's own sections preview in the page itself. Only accepted while the
+-- editor is open; values are re-validated by HudUi.layoutFor before an owner
+-- sees them. The minimap applies on `final` (the drop) only: every apply costs
+-- one bigmap refresh, which must not run at the page's drag rate.
+RegisterNUICallback('qbhud:uiPreview', function(payload, cb)
+    cb({})
+    if not layoutEditing or not uiEnabled() then return end
+    if type(payload) ~= 'table' or type(payload.elements) ~= 'table' then return end
+    local count = 0
+    for id, entry in pairs(payload.elements) do
+        count = count + 1
+        if count > MAX_LAYOUT_ENTRIES then break end
+        local def = validSection(id) and HudUi.get(id)
+        if def and type(entry) == 'table' then
+            if def.internal then
+                if id == 'minimap' and payload.final == true then applyMinimapPlayerLayout(entry) end
+            else
+                emit('kora_hud:ui:apply', def.owner, id, HudUi.layoutFor(def, entry), 'preview')
+            end
+        end
+    end
+end)
 
 -- Confirm and Cancel are deliberately one callback. Both release NUI focus;
 -- only Confirm supplies geometry to persist. Until this callback arrives all
@@ -394,28 +652,41 @@ RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
     if not layoutEditing then return end
 
     if type(payload) == 'table' and payload.confirmed == true then
-        pcall(writeLayout, payload)
+        local ok, saved = pcall(writeLayout, payload)
+        if ok and saved == false and LAYOUT.movable ~= false and type(payload) == 'table' then
+            Kora.notify.send({ title = 'UI', message = 'That layout is too large to save. Reset a few elements and try again.', type = 'error' })
+        end
+        if hideAllowed() and type(payload.hidden) == 'table' and minimapHooks.setHidden then
+            local requested = payload.hidden.minimap
+            if type(requested) == 'boolean' then minimapHooks.setHidden(requested) end
+        end
         syncChatInputLayout()
         -- Always re-evaluate: "only in vehicle = off" can lift the on-foot gate
         -- without changing minimapVehicleOnly() itself.
         if minimapChoiceChanged then minimapChoiceChanged() end
     end
 
+    -- Saved or cancelled, closeLayout hands every owner the stored layout.
     closeLayout()
 end)
 
 -- `reset` is separate from the editor rather than a button inside it: a player
 -- whose layout put a section somewhere unreachable needs a way out that does
 -- not require clicking on the HUD.
-RegisterCommand('hudlayoutreset', function()
+local function resetLayout()
     DeleteResourceKvp(LAYOUT_KVP)
     vehicleOnlyChoice = nil
-    closeLayout()
+    closeLayout(true)
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
+    applyToOwners('reset', {})
     if minimapChoiceChanged then minimapChoiceChanged() end
     Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
-end, false)
+end
+RegisterCommand('hudlayoutreset', resetLayout, false)
+if uiEnabled() and validCommandName(UI.resetCommand or 'uireset') and (UI.resetCommand or 'uireset') ~= 'hudlayoutreset' then
+    RegisterCommand(UI.resetCommand or 'uireset', resetLayout, false)
+end
 
 -- Kept as a local, session-only choice: /id is a quick way to identify
 -- yourself to another player or staff member, not a layout preference that
@@ -1005,6 +1276,23 @@ local function toggleMinimap()
     end
 end
 
+-- The /ui editor's minimap "Visible" switch is this same choice, so the switch
+-- and the command can never disagree (see minimapHooks near readLayout).
+minimapHooks.isHidden = minimapPlayerHidden
+minimapHooks.toggleEnabled = minimapToggleEnabled
+minimapHooks.setHidden = function(hidden)
+    hidden = hidden == true
+    if not minimapToggleEnabled() or hidden == (minimapHiddenChoice == true) then return end
+    minimapChoiceSet = true
+    minimapHiddenChoice = hidden
+    if hidden then minimapOnFootChoice = false end
+    if MINIMAP_TOGGLE.remember ~= false then
+        SetResourceKvp(MINIMAP_KVP, minimapHiddenChoice and 'hidden' or 'visible')
+        if minimapOnFootChoice then SetResourceKvp(MINIMAP_FOOT_KVP, '1') else DeleteResourceKvp(MINIMAP_FOOT_KVP) end
+    end
+    minimapChoiceChanged()
+end
+
 -- The plain command always exists so a live `enabled` change needs no restart;
 -- the keybind is the same action on a key the player can rebind in Settings.
 RegisterCommand(MINIMAP_TOGGLE.command or 'minimap', toggleMinimap, false)
@@ -1290,6 +1578,65 @@ end)
 -- consumer never has to read the KVP or trust its contents.
 exports('getLayout', readLayout)
 
+-- /ui element registry surface (client/uiregistry.lua). The owner is always
+-- the invoking resource, never an argument, so one resource can neither
+-- claim nor change another's element. Every registration answers at once with
+-- the player's saved layout through `kora_hud:ui:apply`, so an owner has to
+-- add its handler BEFORE it registers and needs no separate read.
+local uiElementsQueued = false
+local function queueUiElements()
+    if uiElementsQueued then return end
+    uiElementsQueued = true
+    -- Coalesced: a resource registering several elements sends one list.
+    CreateThread(function()
+        Wait(100)
+        uiElementsQueued = false
+        send('qbhud:uiElements', HudUi.list())
+    end)
+end
+if HudUi then HudUi.onChange(queueUiElements) end
+
+local function invoker()
+    local owner = type(GetInvokingResource) == 'function' and GetInvokingResource() or nil
+    if type(owner) ~= 'string' or owner == '' or owner == GetCurrentResourceName() then return nil end
+    return owner
+end
+
+exports('registerUiElement', function(def)
+    if not uiEnabled() or UI.allowExternal == false then return false, 'ui editor disabled' end
+    local owner = invoker()
+    if not owner then return false, 'unknown owner' end
+    local clean, err = HudUi.register(owner, def)
+    if not clean then return false, err end
+    emit('kora_hud:ui:apply', owner, clean.id, HudUi.layoutFor(clean, readRawLayout()[clean.id]), 'saved')
+    return true
+end)
+
+exports('updateUiElement', function(id, patch)
+    if not uiEnabled() then return false, 'ui editor disabled' end
+    local owner = invoker()
+    if not owner then return false, 'unknown owner' end
+    return HudUi.update(owner, id, patch)
+end)
+
+exports('unregisterUiElement', function(id)
+    if not HudUi then return false end
+    local owner = invoker()
+    if not owner then return false end
+    return HudUi.unregister(owner, id)
+end)
+
+exports('getUiLayout', function(id)
+    local def = uiEnabled() and HudUi.get(id)
+    if not def then return nil end
+    return HudUi.layoutFor(def, readRawLayout()[id])
+end)
+
+-- A stopped owner's elements leave the editor; their saved layout stays.
+AddEventHandler('onClientResourceStop', function(resource)
+    if HudUi and resource ~= GetCurrentResourceName() then HudUi.dropOwner(resource) end
+end)
+
 -- Assignment, NOT `local function`: that would declare a fresh local shadowing
 -- the forward declaration at the top of the file, silently leaving the
 -- qbhud:ready callback's upvalue nil.
@@ -1320,8 +1667,18 @@ sendInitialState = function()
             scales = savedLayout.scales,
             justifications = savedLayout.justifications,
             gaugesBottomAnchored = savedLayout.gaugesBottomAnchored,
+            -- /ui editor additions (all optional for the page).
+            hidden = savedLayout.hidden,
+            settings = savedLayout.settings,
+            editor = {
+                enabled = uiEnabled(),
+                allowHide = hideAllowed(),
+                command = uiEnabled() and (UI.command or 'ui') or (LAYOUT.command or 'hudlayout'),
+                previewInterval = math.max(50, math.min(1000, tonumber(UI.previewInterval) or 100)),
+            },
         },
     })
+    if uiEnabled() then send('qbhud:uiElements', HudUi.list()) end
 
     send("qbhud:visibility", nuiVisible())
     send("qbhud:compat", HudCompat.state)
@@ -1397,6 +1754,14 @@ CreateThread(function()
     -- give it the saved composer position without waiting for the next layout
     -- confirmation. If it starts later it performs the same read itself.
     syncChatInputLayout()
+    if uiEnabled() then
+        -- The minimap's own per-player layout, before its first apply pass
+        -- (that pass waits for the radar to exist, so this always wins).
+        registerMinimapElement()
+        applyMinimapPlayerLayout(readRawLayout().minimap)
+        -- Owners that started before this (re)start register again.
+        emit('kora_hud:ui:ready')
+    end
     syncVoiceSampling()
     startScheduler()
 end)
@@ -1418,6 +1783,8 @@ local function applyConfig(settings)
     Config.voice = type(settings.voice) == 'table' and settings.voice or Config.voice
     Config.poll = type(settings.poll) == 'table' and settings.poll or Config.poll
     Config.layout = type(settings.layout) == 'table' and settings.layout or Config.layout
+    Config.uiEditor = type(settings.uiEditor) == 'table' and settings.uiEditor or Config.uiEditor
+    UI = type(Config.uiEditor) == 'table' and Config.uiEditor or {}
 
     POLL = Config.poll or {}
     VITALS_INTERVAL = interval(POLL.vitalsInterval, VITALS_INTERVAL)

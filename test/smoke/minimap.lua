@@ -625,4 +625,57 @@ harness.test('the square mask ships as a streamed .ytd; the runtime PNG path is 
 end)
 
 _G.print = realPrint
+-- ------------------------------------------------------ /ui player layout
+
+harness.test('a player layout scales about the map bottom-left and moves in screen units', function()
+    boot()
+    local cfg = Config.hud.minimapLayout
+    local base = HudMinimap.layout(16 / 9, 1.0, cfg)
+    local r = HudMinimap.layout(16 / 9, 1.0, cfg, { x = 0.1, y = -0.05, scale = 1.5 })
+    harness.assertTrue(near(r.minimap.x, base.minimap.x + 0.1), 'the map moves by the dragged x at 16:9')
+    harness.assertTrue(near(r.minimap.y, base.minimap.y - 0.05), 'and by the dragged y')
+    harness.assertTrue(near(r.minimap.w, base.minimap.w * 1.5), 'width scales')
+    harness.assertTrue(near(r.minimap.h, base.minimap.h * 1.5), 'height scales')
+    harness.assertTrue(near(r.minimap_blur.x, base.minimap.x + (base.minimap_blur.x - base.minimap.x) * 1.5 + 0.1),
+        'the frame scales about the same corner, so it stays around the map')
+    local wide = HudMinimap.layout(21 / 9, 1.0, cfg, { x = 0.1, y = 0, scale = 1 })
+    local wideBase = HudMinimap.layout(21 / 9, 1.0, cfg)
+    harness.assertTrue(near(wide.minimap.x - wideBase.minimap.x, 0.1 / HudMinimap.compression(21 / 9)),
+        'on ultrawide a screen offset is converted into the compressed 16:9 frame')
+    local stock = HudMinimap.layout(16 / 9, 1.0, { shape = 'stock', shapes = cfg.shapes }, { x = 0.3, y = 0, scale = 2 })
+    exact(stock.minimap, STOCK.minimap[1], STOCK.minimap[2], STOCK.minimap[3], STOCK.minimap[4], 'stock ignores the player layout')
+end)
+
+harness.test('screenRect maps the map rect back onto the screen for the editor box', function()
+    boot()
+    local rect = HudMinimap.screenRect({ x = 0.0, y = -0.047, w = 0.1638, h = 0.183 }, 16 / 9, 1.0)
+    harness.assertTrue(near(rect.x, 0.0) and near(rect.w, 0.1638), '16:9: x and width as configured')
+    harness.assertTrue(near(rect.y, 1 - 0.183 - 0.047), 'bottom anchored: top = 1 - h + y')
+    local wide = HudMinimap.screenRect({ x = HudMinimap.aspectOffset(21 / 9, Config.hud.minimapLayout), y = 0, w = 0.15, h = 0.2 }, 21 / 9, 1.0)
+    harness.assertTrue(wide.x < 0.01, 'the ultrawide offset lands the box at the left edge')
+    harness.assertTrue(near(wide.w, 0.15 * HudMinimap.compression(21 / 9)), 'and the width is compressed')
+end)
+
+harness.test('setPlayerLayout re-applies once per change and never for the same values', function()
+    boot(settleFree)
+    HudMinimap.apply(true)
+    advance(2000)
+    clear()
+    HudMinimap.setPlayerLayout({ x = 0.05, y = -0.02, scale = 1.2 })
+    advance(2000)
+    local refreshes = 0
+    for _, line in ipairs(game.log) do if line == 'bigmap:true:false' then refreshes = refreshes + 1 end end
+    harness.assertEqual(refreshes, 1, 'one bigmap refresh for the change')
+    clear()
+    HudMinimap.setPlayerLayout({ x = 0.05, y = -0.02, scale = 1.2 })
+    advance(2000)
+    harness.assertEqual(#game.log, 0, 'the same layout again touches nothing')
+    HudMinimap.setPlayerLayout({ x = 9, y = -9, scale = 99 })
+    local p = HudMinimap.playerLayout()
+    harness.assertTrue(p.x == 1 and p.y == -1 and p.scale == 1.6, 'values are clamped')
+    HudMinimap.setPlayerLayout(nil)
+    harness.assertEqual(HudMinimap.playerLayout(), nil, 'nil clears it')
+end)
+
+_G.print = realPrint
 harness.report('minimap')
