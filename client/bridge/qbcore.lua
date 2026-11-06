@@ -249,6 +249,20 @@ function HudBridge.getSeatbelt()
     return seatbelt
 end
 
+-- The race harness is owned by kora_utils too and, like the belt, arrives as a
+-- local event plus a local state bag for a HUD restart mid-drive. The legacy
+-- hud:client:UpdateHarness use count cannot tell "no harness" from "last use
+-- spent", so the icon reads this attached flag instead.
+local harnessAttached = LocalPlayer.state.harness == true
+RegisterNetEvent('seatbelt:client:ToggleHarness', function(attached)
+    harnessAttached = attached == true
+end)
+
+---@return boolean
+function HudBridge.getHarness()
+    return harnessAttached
+end
+
 -- Map kora_core's PlayerData shape onto the HUD snapshot contract. Defensive about
 -- nils: the mirror may be empty for a moment right after join, before the first
 -- snapshot arrives.

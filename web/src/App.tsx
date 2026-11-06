@@ -91,9 +91,15 @@ function BottomHud() {
     // Layout mode always shows the vehicle preview, so reserve its bottom
     // slot there too instead of letting the two editor previews overlap.
     const vehicleActive = vehicle !== null || layout.editing
-    const gaugesPosition = layout.gaugesBottomAnchored
-        ? vehicleActive ? "bottom-20 left-1/2 max-[520px]:bottom-16" : "bottom-4 left-1/2 max-[520px]:bottom-2"
+    // kora_lib's progress bar (its own NUI frame, drawn under this one) sits
+    // at bottom-24. While one runs in a vehicle the raised gauge row would
+    // cover it, so lift that row above the bar until it ends.
+    const raised = vehicle?.progress === true && !layout.editing
+        ? "bottom-40 left-1/2 max-[520px]:bottom-36"
         : "bottom-20 left-1/2 max-[520px]:bottom-16"
+    const gaugesPosition = layout.gaugesBottomAnchored
+        ? vehicleActive ? raised : "bottom-4 left-1/2 max-[520px]:bottom-2"
+        : raised
 
     return (
         <>

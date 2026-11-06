@@ -36,6 +36,15 @@ Config.hud = {
         vehicle      = true, -- speed/fuel/engine/headlights/seatbelt, shown only while in a vehicle
     },
 
+    -- kora_lib's progress bar sits at the bottom centre in its own NUI frame,
+    -- which the game draws under this HUD. While one runs in a vehicle, lift
+    -- the gauge row above it so the bar stays readable.
+    avoidProgressBar = boolean(true, {
+        label = 'Lift gauges above progress bars',
+        description = 'While a progress bar is shown in a vehicle, the gauge row moves up so it does not cover the bar.',
+        live = true,
+    }),
+
     -- Money display. Off by default: cash and bank shown side by side is the
     -- existing behaviour, and an upgrading server should not silently start
     -- hiding half of it.
@@ -372,6 +381,16 @@ Config.uiEditor = {
 -- plays the sound when that state changes. All values are read each time a
 -- sound plays, so edits apply without a restart.
 Config.seatbelt = {
+    -- Race harness icon next to the seatbelt icon (state from kora_utils).
+    --   'attached' -- shown only while a harness is attached
+    --   'always'   -- also a dimmed icon while no harness is attached
+    --   'off'      -- never shown
+    harnessIcon = configEnum and configEnum('attached', {
+        label = 'Race harness icon',
+        description = 'Shows a race harness icon next to the seatbelt icon in the vehicle HUD: only while attached, always (dimmed when not attached), or never.',
+        options = { 'attached', 'always', 'off' },
+        live = true,
+    }) or 'attached',
     sound = {
         enabled = boolean(true, {
             label = 'Seatbelt sounds',

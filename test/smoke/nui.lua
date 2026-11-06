@@ -682,6 +682,42 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
         'the vehicle tick must not rebuild the full bridge snapshot just to read seatbelt state')
 end)
 
+harness.test('harness icon and progress-bar clearance ride the vehicle payload', function()
+    local hud = loadHud({ bridgePush = true, inVehicle = true })
+    local attached = false
+    HudBridge.getHarness = function() return attached end
+    local function latest()
+        local data
+        for _, message in ipairs(hud.sent) do
+            if message.action == 'qbhud:vehicle' then data = message.data end
+        end
+        return data
+    end
+    hud.reset(); hud.tick()
+    local first = latest()
+    harness.assertTrue(first ~= nil, 'the vehicle tick should be running')
+    harness.assertEqual(first.harness, nil, "'attached' mode sends no icon while no harness is on")
+    harness.assertFalse(first.progress, 'no progress bar API means no clearance')
+    attached = true
+    hud.reset(); hud.tick()
+    harness.assertEqual(latest().harness, true, 'an attached harness must reach the NUI while driving')
+    Config.seatbelt = { harnessIcon = 'off' }
+    hud.reset(); hud.tick()
+    harness.assertEqual(latest().harness, nil, "'off' hides the icon")
+    Config.seatbelt = { harnessIcon = 'always' }
+    attached = false
+    hud.reset(); hud.tick()
+    harness.assertEqual(latest().harness, false, "'always' sends the not-attached state")
+    Kora.progressbar = { isActive = function() return true end }
+    hud.reset(); hud.tick()
+    harness.assertTrue(latest().progress, 'an active kora_lib bar is reported')
+    Config.hud.avoidProgressBar = false
+    hud.reset(); hud.tick()
+    harness.assertFalse(latest().progress, 'avoidProgressBar = false turns the clearance off')
+    Kora.progressbar, Config.seatbelt, Config.hud.avoidProgressBar = nil, nil, nil
+    HudBridge.getHarness = nil
+end)
+
 harness.test('a player already in a vehicle at resource start gets telemetry', function()
     -- Kora.cache.onChange only observes FUTURE transitions, so `ensure kora_hud`
     -- mid-drive needs an explicit arm at startup.
@@ -1172,7 +1208,7 @@ harness.test('corner-pinned sections can cross the full screen', function()
     harness.assertEqual(config.layout.offsets.identity.x, -0.95, 'bottom-right sections reach the far left')
     harness.assertEqual(config.layout.offsets.identity.y, -0.95, 'bottom-right sections reach the top')
     harness.assertEqual(config.layout.offsets.status.x, -0.95, 'top-right sections reach the far left')
-    harness.assertEqual(config.layout.offsets.status.y, 0.95, 'top-right sections reach the bottom')
+    harness.assertEqual(config.layout.offsets.status.y, 1.0, 'top-right sections reach the bottom edge')
 end)
 
 harness.test('a corrupt stored layout costs the layout, not the HUD', function()

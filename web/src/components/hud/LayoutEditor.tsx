@@ -32,7 +32,7 @@ const SECTION_BOUNDS: Record<string, { minX: number; maxX: number; minY: number;
     [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.vehicle]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.identity]: { minX: -0.95, maxX: 0, minY: -0.95, maxY: 0 },
-    [HUD_SECTIONS.status]: { minX: -0.95, maxX: 0, minY: 0, maxY: 0.95 },
+    [HUD_SECTIONS.status]: { minX: -0.95, maxX: 0, minY: 0, maxY: 1 },
     [HUD_SECTIONS.chatInput]: { minX: -0.95, maxX: 0.95, minY: -0.95, maxY: 0.95 },
 }
 const FALLBACK_LAYOUT_LIMIT = 0.45

@@ -236,7 +236,7 @@ local LAYOUT_BOUNDS = {
     gauges = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
     vehicle = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
     identity = { minX = -0.95, maxX = 0.00, minY = -0.95, maxY = 0.00 },
-    status = { minX = -0.95, maxX = 0.00, minY = 0.00, maxY = 0.95 },
+    status = { minX = -0.95, maxX = 0.00, minY = 0.00, maxY = 1.00 }, -- reaches the bottom edge (the editor keeps it on screen)
     -- kora_chat's composer has a top-left zero point. It is rendered by a
     -- separate NUI, but shares this KVP so /hudlayout remains the one place a
     -- player arranges all of their on-screen interface.
@@ -680,6 +680,7 @@ local function resetLayout()
     send('qbhud:layoutReset', true)
     syncChatInputLayout()
     applyToOwners('reset', {})
+    if minimapHooks.sync then minimapHooks.sync(false) end -- the page clears its hidden switches
     if minimapChoiceChanged then minimapChoiceChanged() end
     Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end
@@ -939,6 +940,26 @@ local currentVehicle = false
 -- produces the same reading every tick.
 local lastVehiclePayload = nil
 
+-- Harness icon beside the belt (Config.seatbelt.harnessIcon, read live):
+-- 'attached' = only while a harness is on, 'always' = also a dimmed "none"
+-- icon, 'off' = never. nil leaves the field out of the payload (no icon).
+local function harnessIconState()
+    local mode = type(Config.seatbelt) == 'table' and Config.seatbelt.harnessIcon or 'attached'
+    if mode == 'off' or mode == false or not HudBridge.getHarness then return nil end
+    local attached = HudBridge.getHarness() == true
+    if attached or mode == 'always' then return attached end
+    return nil
+end
+
+-- kora_lib draws its progress bar in its own NUI frame at the bottom centre,
+-- under this frame, exactly where the gauge row sits while a vehicle panel is
+-- shown. Report an active bar so the NUI can lift the gauges clear of it.
+local function progressBarActive()
+    if Config.hud.avoidProgressBar == false then return false end
+    local ok, active = pcall(function() return Kora.progressbar.isActive() end)
+    return ok and active == true
+end
+
 local function buildVehiclePayload()
     local snapshot = Vehicle.getSnapshot(currentVehicle)
     if not snapshot then return nil end
@@ -971,6 +992,8 @@ local function buildVehiclePayload()
         engineOn = snapshot.engineOn,
         headlights = snapshot.headlights,
         seatbelt = seatbelt,
+        harness = harnessIconState(),
+        progress = progressBarActive(),
     }
 end
 
@@ -986,6 +1009,8 @@ local function vehiclePayloadChanged(payload)
         or payload.engineOn ~= lastVehiclePayload.engineOn
         or payload.headlights ~= lastVehiclePayload.headlights
         or payload.seatbelt ~= lastVehiclePayload.seatbelt
+        or payload.harness ~= lastVehiclePayload.harness
+        or payload.progress ~= lastVehiclePayload.progress
 end
 
 -- Sent on its own channel (not folded into qbhud:update) so vehicle telemetry
@@ -1278,14 +1303,37 @@ end
 
 -- The /ui editor's minimap "Visible" switch is this same choice, so the switch
 -- and the command can never disagree (see minimapHooks near readLayout).
-minimapHooks.isHidden = minimapPlayerHidden
+-- What the switch shows: hidden by the player's choice, or held back on foot by
+-- the vehicle gate (so a player on foot sees it Off and can turn it On).
+local function minimapEditorHidden()
+    if minimapPlayerHidden() then return true end
+    return minimapToggleEnabled() and MINIMAP_TOGGLE.allowOnFoot ~= false
+        and MINIMAP_MODE ~= 'never' and minimapShouldShow() == false
+end
+
+-- The value the editor page currently holds for the switch (what it was last
+-- sent, then what it last submitted). The page sends it back on every confirm,
+-- so only a difference from it is the player actually flipping the switch.
+local minimapEditorShown
+minimapHooks.sync = function(hidden) minimapEditorShown = hidden == true end
+minimapHooks.isHidden = minimapEditorHidden
 minimapHooks.toggleEnabled = minimapToggleEnabled
 minimapHooks.setHidden = function(hidden)
     hidden = hidden == true
-    if not minimapToggleEnabled() or hidden == (minimapHiddenChoice == true) then return end
+    local shown = minimapEditorShown
+    if shown == nil then shown = minimapEditorHidden() end
+    minimapEditorShown = hidden
+    if not minimapToggleEnabled() or hidden == shown then return end
     minimapChoiceSet = true
     minimapHiddenChoice = hidden
-    if hidden then minimapOnFootChoice = false end
+    if hidden then
+        minimapOnFootChoice = false
+    else
+        -- Turning it on while the vehicle gate would hide it is the on-foot
+        -- override, same as the toggle command does on foot.
+        local gated = MINIMAP_MODE ~= 'never' and (MINIMAP_MODE == 'vehicle' or minimapVehicleOnly())
+        minimapOnFootChoice = gated and MINIMAP_TOGGLE.allowOnFoot ~= false
+    end
     if MINIMAP_TOGGLE.remember ~= false then
         SetResourceKvp(MINIMAP_KVP, minimapHiddenChoice and 'hidden' or 'visible')
         if minimapOnFootChoice then SetResourceKvp(MINIMAP_FOOT_KVP, '1') else DeleteResourceKvp(MINIMAP_FOOT_KVP) end
@@ -1642,6 +1690,7 @@ end)
 -- qbhud:ready callback's upvalue nil.
 sendInitialState = function()
     local savedLayout = readLayout()
+    if minimapHooks.sync then minimapHooks.sync(savedLayout.hidden.minimap == true) end
     send("qbhud:config", {
         dynamic = Config.hud.dynamic == true,
         elements = Config.hud.elements,

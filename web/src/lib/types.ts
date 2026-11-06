@@ -224,6 +224,12 @@ export interface HudVehicleInfo {
     engineOn: boolean
     headlights: "off" | "low" | "high"
     seatbelt: boolean
+    /** Race harness attached (kora_utils), separate from the belt. Absent means
+     * no harness icon at all (Config.seatbelt.harnessIcon). */
+    harness?: boolean
+    /** A kora_lib progress bar is showing: its frame is drawn under this one at
+     * the bottom centre, so the gauge row lifts clear of it. */
+    progress?: boolean
 }
 
 // One entry per active kora_lib Kora.status effect (e.g. "bleeding", "limping",

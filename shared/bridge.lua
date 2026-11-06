@@ -26,6 +26,7 @@
 
 ---@class QBHudBridge
 ---@field getSnapshot fun(): QBHudBridgeSnapshot Synchronous and cheap -- called every Config.poll.bridgeInterval by client/hud.lua.
+---@field getHarness (fun(): boolean) | nil Optional cheap accessor: whether a race harness is attached (kora_utils), read by the same vehicle tick as getSeatbelt.
 ---@field getSeatbelt (fun(): boolean) | nil Optional cheap accessor for adapter-local seatbelt state. Implementations prevent the faster vehicle telemetry loop from rebuilding the full player snapshot just to read this field.
 ---@field onChange (fun(handler: fun(snapshot: QBHudBridgeSnapshot)): nil) | nil Optional. A real adapter MAY call `handler` proactively (e.g. on the framework's own job-change event) instead of relying purely on polling. The stub does not implement this -- its absence means client/hud.lua falls back to polling getSnapshot on Config.poll.bridgeInterval.
 ---@field isLoggedIn (fun(): boolean) | nil Optional. Whether the HUD should currently be visible (a player is logged into a character). Absence means "always visible" -- a framework with no login/character-select concept (e.g. the stub) has nothing to gate on, so client/hud.lua treats a missing isLoggedIn as always-true.

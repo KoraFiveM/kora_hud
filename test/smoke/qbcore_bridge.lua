@@ -330,4 +330,14 @@ harness.test('seatbelt presentation follows the gameplay owner rather than a HUD
     harness.assertFalse(fixture.bridge.getSeatbelt())
 end)
 
+harness.test('harness icon state follows the kora_utils attached flag, not the use count', function()
+    local fixture = loadBridge(true, {citizenid='TEST'})
+    harness.assertFalse(fixture.bridge.getHarness())
+    fixture.events['seatbelt:client:ToggleHarness'](true, 0)
+    harness.assertTrue(fixture.bridge.getHarness(), 'a spent last-use harness is still attached')
+    harness.assertFalse(fixture.bridge.getSeatbelt(), 'the harness never implies the belt')
+    fixture.events['seatbelt:client:ToggleHarness'](false, 0)
+    harness.assertFalse(fixture.bridge.getHarness())
+end)
+
 harness.report('qbcore_bridge')

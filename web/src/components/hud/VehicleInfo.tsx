@@ -1,4 +1,4 @@
-import { BatteryCharging, Fuel, Lightbulb, LightbulbOff, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
+import { BatteryCharging, Fuel, Lightbulb, LightbulbOff, LockKeyhole, LockKeyholeOpen, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
 import { useHudConfig, useHudVehicle } from "@/lib/hudState"
 import { cn } from "@/lib/cn"
@@ -14,7 +14,7 @@ export function VehicleInfo() {
     if (!config.elements.vehicle) return null
 
     const active = vehicle !== null
-    const { speed = 0, speedUnit = config.speedUnit, fuel = null, fuelKind = "fuel", engineOn = false, headlights = "off", seatbelt = false } = vehicle ?? {}
+    const { speed = 0, speedUnit = config.speedUnit, fuel = null, fuelKind = "fuel", engineOn = false, headlights = "off", seatbelt = false, harness } = vehicle ?? {}
     const electric = fuelKind === "charge"
     const speedLabel = speedUnit === "mph" ? "mph" : "km/h"
 
@@ -51,6 +51,13 @@ export function VehicleInfo() {
                     ) : (
                         <ShieldAlert className="h-4 w-4 shrink-0 animate-pulse text-warning" aria-label="Seatbelt off" />
                     )}
+                    {/* Race harness, its own state next to the belt. Absent
+                        unless attached or harnessIcon = 'always'. */}
+                    {harness === true ? (
+                        <LockKeyhole className="h-4 w-4 shrink-0 text-success" aria-label="Race harness attached" />
+                    ) : harness === false ? (
+                        <LockKeyholeOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="No race harness" />
+                    ) : null}
                 </div>
             </div>
         </div>
