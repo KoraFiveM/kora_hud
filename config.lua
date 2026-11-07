@@ -45,6 +45,14 @@ Config.hud = {
         live = true,
     }),
 
+    -- The race harness attach/remove bar is positioned to sit over the gauge
+    -- row's usual spot, so the gauges stay put for it instead of lifting.
+    avoidHarnessBar = boolean(false, {
+        label = 'Lift gauges above the race harness bar',
+        description = 'When off, the gauge row does not move while the race harness attach/remove bar is shown.',
+        live = true,
+    }),
+
     -- Money display. Off by default: cash and bank shown side by side is the
     -- existing behaviour, and an upgrading server should not silently start
     -- hiding half of it.

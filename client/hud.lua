@@ -954,10 +954,27 @@ end
 -- kora_lib draws its progress bar in its own NUI frame at the bottom centre,
 -- under this frame, exactly where the gauge row sits while a vehicle panel is
 -- shown. Report an active bar so the NUI can lift the gauges clear of it.
+-- The race harness bar is started by kora_utils on this same client event. Note
+-- it so that bar alone does not lift the gauges; cleared once the bar has ended,
+-- or if none appeared (use refused) within a couple of seconds.
+local harnessBar
+RegisterNetEvent('seatbelt:client:UseHarness', function()
+    harnessBar = { at = GetGameTimer(), seen = false }
+end)
+
 local function progressBarActive()
     if Config.hud.avoidProgressBar == false then return false end
     local ok, active = pcall(function() return Kora.progressbar.isActive() end)
-    return ok and active == true
+    active = ok and active == true
+    if harnessBar then
+        if active then
+            harnessBar.seen = true
+        elseif harnessBar.seen or GetGameTimer() - harnessBar.at > 2000 then
+            harnessBar = nil
+        end
+        if active and Config.hud.avoidHarnessBar ~= true then return false end
+    end
+    return active
 end
 
 local function buildVehiclePayload()
