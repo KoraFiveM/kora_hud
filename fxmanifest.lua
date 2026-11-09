@@ -60,3 +60,6 @@ files {
     'web/build/assets/**/*',
     'web/build/sounds/*.wav'
 }
+
+-- kora_qa: Gherkin test scenarios (converted legacy tests), see [kora]/kora_qa/README.md
+qa_feature 'tests/*.feature'
