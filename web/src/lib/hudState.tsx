@@ -31,11 +31,11 @@ const DEFAULT_CONFIG: HudConfigPayload = {
     },
     speedUnit: "kmh",
     // Matches client/hud.lua's own fallback, so the gauges animate correctly
-    // even in the window before the first "qbhud:config" message lands.
+    // even in the window before the first "kora_hud:config" message lands.
     vitalsInterval: 150,
     // Both of these mirror config.lua's shipped defaults for the same reason
     // as vitalsInterval: this is the state the HUD renders in before
-    // "qbhud:config" arrives, and in a plain browser (`pnpm dev`) where it
+    // "kora_hud:config" arrives, and in a plain browser (`pnpm dev`) where it
     // never does. Cash/bank side by side and an unmoved layout are the
     // pre-existing behaviour, so defaulting to them means the pre-config
     // window looks like the HUD rather than like a different one.
@@ -73,13 +73,13 @@ const DEFAULT_UPDATE: HudUpdatePayload = {
     status: [],
 }
 
-// "qbhud:vehicle" is sent independently of "qbhud:update" (see
+// "kora_hud:vehicle" is sent independently of "kora_hud:update" (see
 // client/hud.lua's pushVehicleUpdate) so vehicle telemetry can refresh on its
 // own faster cadence without dragging the rest of the HUD along with it.
 const DEFAULT_VEHICLE: HudVehiclePayload = null
 const DEFAULT_PLAYER_ID: HudPlayerIdPayload = null
 
-// Hidden until Lua says otherwise: client/hud.lua sends "qbhud:visibility"
+// Hidden until Lua says otherwise: client/hud.lua sends "kora_hud:visibility"
 // synchronously on resource start regardless of adapter (true immediately for
 // an adapter with no login concept, e.g. the stub), so this default only
 // matters for the brief window before that first message arrives -- and
@@ -89,8 +89,8 @@ const DEFAULT_VISIBLE = false
 
 /**
  * The layout editor's whole state, assembled from three different sources --
- * Config.layout (a "qbhud:config" message), the editor toggle
- * ("qbhud:layoutMode"), and the offsets the page is currently holding -- so
+ * Config.layout (a "kora_hud:config" message), the editor toggle
+ * ("kora_hud:layoutMode"), and the offsets the page is currently holding -- so
  * every movable section reads one value instead of three.
  */
 export interface HudLayoutState {
@@ -224,14 +224,14 @@ const HudVisibleContext = createContext<boolean>(DEFAULT_VISIBLE)
 const HudLayoutContext = createContext<HudLayoutState>(DEFAULT_LAYOUT)
 
 /**
- * Single subscription point for "qbhud:config", "qbhud:vitals",
- * "qbhud:update", "qbhud:vehicle", "qbhud:visibility", "qbhud:layoutMode" and
- * "qbhud:layoutReset" -- every HUD element reads its own slice through the
+ * Single subscription point for "kora_hud:config", "kora_hud:vitals",
+ * "kora_hud:update", "kora_hud:vehicle", "kora_hud:visibility", "kora_hud:layoutMode" and
+ * "kora_hud:layoutReset" -- every HUD element reads its own slice through the
  * hooks below instead of each independently subscribing to the wire messages,
  * so client/hud.lua's payloads have exactly one consumer-side entry point.
  *
- * It is also the only place that posts BACK to Lua ("qbhud:ready" and
- * "qbhud:finishLayout"), for the same reason.
+ * It is also the only place that posts BACK to Lua ("kora_hud:ready" and
+ * "kora_hud:finishLayout"), for the same reason.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
@@ -350,8 +350,8 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
 
     const sendPreview = useCallback((id: string, final: boolean, override?: Partial<UiPreviewEntry>) => {
         lastPreviewRef.current[id] = Date.now()
-        fetchNui("qbhud:uiPreview", { final, elements: { [id]: entryFor(id, override) } }).catch((error) => {
-            console.error("[qbhud] qbhud:uiPreview failed:", error)
+        fetchNui("kora_hud:uiPreview", { final, elements: { [id]: entryFor(id, override) } }).catch((error) => {
+            console.error("[kora_hud] kora_hud:uiPreview failed:", error)
         })
     }, [entryFor])
 
@@ -417,7 +417,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         // The WHOLE map goes over: Lua stores one JSON blob per player and
         // overwrites it outright, so a partial submission would delete every
         // other section's saved position.
-        fetchNui("qbhud:finishLayout", {
+        fetchNui("kora_hud:finishLayout", {
             confirmed: true,
             offsets: offsetsRef.current,
             scales: scalesRef.current,
@@ -431,12 +431,12 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 : hiddenRef.current,
             settings: settingsRef.current,
         }).catch((error) => {
-            console.error("[qbhud] qbhud:finishLayout failed:", error)
+            console.error("[kora_hud] kora_hud:finishLayout failed:", error)
         })
     }, [])
 
     const cancel = useCallback(() => {
-        fetchNui("qbhud:finishLayout", { confirmed: false })
+        fetchNui("kora_hud:finishLayout", { confirmed: false })
             .then(() => {
                 applyOffsets(initialOffsetsRef.current)
                 applyScales(initialScalesRef.current)
@@ -447,11 +447,11 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
                 applySettings(initialSettingsRef.current)
             })
             .catch((error) => {
-                console.error("[qbhud] qbhud:finishLayout failed:", error)
+                console.error("[kora_hud] kora_hud:finishLayout failed:", error)
             })
     }, [applyOffsets, applyScales, applyJustifications, applyHidden, applySettings, setGaugesBottomAnchored, setMinimapVehicleOnly])
 
-    useNuiEvent<HudConfigPayload>("qbhud:config", (payload) => {
+    useNuiEvent<HudConfigPayload>("kora_hud:config", (payload) => {
         if (!payload) return
         setConfig(payload)
         // Config only ever arrives on resource start or in answer to the ready
@@ -473,34 +473,34 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         previewIntervalRef.current = Number.isFinite(interval) && interval >= 50 ? interval : DEFAULT_EDITOR.previewInterval
     })
 
-    useNuiEvent<UiElementsPayload>("qbhud:uiElements", (payload) => {
+    useNuiEvent<UiElementsPayload>("kora_hud:uiElements", (payload) => {
         setElements(Array.isArray(payload) ? payload.filter((element) => element && typeof element.id === "string" && element.rect) : [])
     })
 
-    useNuiEvent<HudVitalsPayload>("qbhud:vitals", (payload) => {
+    useNuiEvent<HudVitalsPayload>("kora_hud:vitals", (payload) => {
         if (payload) setVitals(payload)
     })
 
-    useNuiEvent<HudUpdatePayload>("qbhud:update", (payload) => {
+    useNuiEvent<HudUpdatePayload>("kora_hud:update", (payload) => {
         if (payload) setUpdate(payload)
     })
 
     // Unlike the other handlers, `payload` legitimately being `null` (on
     // foot) is a real state, not a "message dropped" signal -- so this
-    // doesn't gate on truthiness the way qbhud:config/qbhud:update do.
-    useNuiEvent<HudVehiclePayload>("qbhud:vehicle", (payload) => {
+    // doesn't gate on truthiness the way kora_hud:config/kora_hud:update do.
+    useNuiEvent<HudVehiclePayload>("kora_hud:vehicle", (payload) => {
         setVehicle(payload ?? null)
     })
 
-    useNuiEvent<HudPlayerIdPayload>("qbhud:playerId", (payload) => {
+    useNuiEvent<HudPlayerIdPayload>("kora_hud:playerId", (payload) => {
         setPlayerId(typeof payload === "number" && payload > 0 ? payload : null)
     })
 
-    useNuiEvent<HudVisibilityPayload>("qbhud:visibility", (payload) => {
+    useNuiEvent<HudVisibilityPayload>("kora_hud:visibility", (payload) => {
         if (typeof payload === "boolean") setVisible(payload)
     })
 
-    useNuiEvent<HudLayoutModePayload>("qbhud:layoutMode", (payload) => {
+    useNuiEvent<HudLayoutModePayload>("kora_hud:layoutMode", (payload) => {
         if (typeof payload !== "boolean") return
         if (payload) {
             initialOffsetsRef.current = offsetsRef.current
@@ -518,7 +518,7 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
         setLayoutEditing(payload)
     })
 
-    useNuiEvent<HudLayoutResetPayload>("qbhud:layoutReset", () => {
+    useNuiEvent<HudLayoutResetPayload>("kora_hud:layoutReset", () => {
         // Lua has already deleted the KVP key, so this deliberately does NOT
         // post anything back -- it only drops what the page is holding, which
         // leaving edit mode does not do. Ignores the payload value: the
@@ -537,10 +537,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // "message" listener) yet, which is common for a player already logged
     // in when kora_hud (re)starts. This ping is the guaranteed half of the fix:
     // once mounted, ask Lua for a fresh push instead of hoping the first one
-    // landed. See client/hud.lua's "qbhud:ready" callback for the other half.
+    // landed. See client/hud.lua's "kora_hud:ready" callback for the other half.
     useEffect(() => {
-        fetchNui("qbhud:ready").catch((error) => {
-            console.error("[qbhud] qbhud:ready ping failed:", error)
+        fetchNui("kora_hud:ready").catch((error) => {
+            console.error("[kora_hud] kora_hud:ready ping failed:", error)
         })
     }, [])
 

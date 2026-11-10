@@ -1,8 +1,8 @@
 -- Orchestrator: the only file that talks to the NUI. Combines kora_lib's cache
 -- (health/armour/stamina, push-driven via onChange), client/voice.lua,
 -- client/vehicle.lua, and HudBridge (the configured adapter) into three
--- consolidated payloads -- qbhud:vitals (health/armour/stamina/talking),
--- qbhud:update (job/gang/money/needs/status) and qbhud:vehicle (vehicle
+-- consolidated payloads -- kora_hud:vitals (health/armour/stamina/talking),
+-- kora_hud:update (job/gang/money/needs/status) and kora_hud:vehicle (vehicle
 -- telemetry) -- rather than one NUI message per element, so the NUI side has
 -- a small, fixed wire contract to keep in sync (web/src/lib/types.ts).
 --
@@ -48,7 +48,7 @@ local function send(action, data)
     SendNUIMessage({ action = action, data = data })
 end
 
--- Forward-declared so the qbhud:ready callback can be registered as the very
+-- Forward-declared so the kora_hud:ready callback can be registered as the very
 -- FIRST statement in this chunk, ahead of everything that can throw at load
 -- (HudBridge.getSnapshot below, Kora.cache.onChange -- all cross-resource export
 -- calls that fail if kora_core/kora_lib are mid-restart). A raised error aborts the
@@ -71,13 +71,13 @@ local radarVehicle
 -- yet, a send is lost, not queued. That's silent AND permanent for a player
 -- who's already logged in when this resource (re)starts -- e.g. every
 -- `ensure kora_hud` while testing -- because refreshVisibility() below only
--- resends qbhud:visibility on a change from *Lua's* perspective, and Lua
+-- resends kora_hud:visibility on a change from *Lua's* perspective, and Lua
 -- already believes it sent `visible` once. The NUI is left stuck on its
 -- DEFAULT_VISIBLE=false forever, with nothing left to nudge it. This callback
 -- is the reliable half: web/src/lib/hudState.tsx pings it once mounted,
 -- guaranteeing a fresh push arrives after the listener is live, regardless of
 -- whether the best-effort send in CreateThread below did.
-RegisterNUICallback('qbhud:ready', function(_, cb)
+RegisterNUICallback('kora_hud:ready', function(_, cb)
     -- Answer first, unconditionally: a raw handler that errors before calling
     -- cb leaves the page's fetch promise hanging forever. Kora.nui.register-
     -- Callback used to pcall + cb({}) on our behalf; that safety net is ours
@@ -90,7 +90,7 @@ RegisterNUICallback('qbhud:ready', function(_, cb)
 
     local ok, err = pcall(sendInitialState)
     if not ok then
-        print(('[qbhud] qbhud:ready initial push failed: %s'):format(tostring(err)))
+        print(('[kora_hud] kora_hud:ready initial push failed: %s'):format(tostring(err)))
     end
 end)
 
@@ -128,7 +128,7 @@ local LAYOUT = Config.layout or {}
 -- only in this state.
 local layoutEditing = false
 local visible
-local LAYOUT_KVP = LAYOUT.kvpKey or 'qbhud:layout'
+local LAYOUT_KVP = LAYOUT.kvpKey or 'kora_hud:layout'
 
 -- "Minimap only in vehicle" (Config.hud.minimapVehicleOnly) is a per-player
 -- preference saved in the same KVP blob as the section layout, as the boolean
@@ -219,7 +219,7 @@ local function closeLayout(skipApply)
     if not layoutEditing then return end
     layoutEditing = false
     SetNuiFocus(false, false)
-    send('qbhud:layoutMode', false)
+    send('kora_hud:layoutMode', false)
     if uiEnabled() then
         emit('kora_hud:ui:editing', false)
         if not skipApply and applyToOwners then applyToOwners('saved') end
@@ -504,14 +504,14 @@ local function writeLayout(payload)
 end
 
 ---Pushes the saved chat composer layout to kora_chat when it is available.
----qbchat also reads this through getLayout when it starts after kora_hud, so
+---kora_chat also reads this through getLayout when it starts after kora_hud, so
 ---there is no ordering dependency between the two resources.
 local function syncChatInputLayout()
     if type(GetResourceState) ~= 'function' or GetResourceState('kora_chat') ~= 'started' then return end
     if type(TriggerEvent) ~= 'function' then return end
     local layout = readLayout()
     local offset = layout.offsets.chatInput or {}
-    TriggerEvent('qbchat:setInputLayout', {
+    TriggerEvent('kora_chat:setInputLayout', {
         x = offset.x or 0,
         y = offset.y or 0,
         scale = layout.scales.chatInput,
@@ -592,13 +592,13 @@ local function openLayoutEditor()
     layoutEditing = true
     if uiEnabled() then
         registerMinimapElement()
-        send('qbhud:uiElements', HudUi.list())
+        send('kora_hud:uiElements', HudUi.list())
         -- Owners close their own focused UI (chat input, inventory) and show
         -- a preview of their element while the editor is open.
         emit('kora_hud:ui:editing', true)
     end
     SetNuiFocus(true, true)
-    send('qbhud:layoutMode', true)
+    send('kora_hud:layoutMode', true)
 end
 
 local function validCommandName(name)
@@ -623,7 +623,7 @@ end
 -- editor is open; values are re-validated by HudUi.layoutFor before an owner
 -- sees them. The minimap applies on `final` (the drop) only: every apply costs
 -- one bigmap refresh, which must not run at the page's drag rate.
-RegisterNUICallback('qbhud:uiPreview', function(payload, cb)
+RegisterNUICallback('kora_hud:uiPreview', function(payload, cb)
     cb({})
     if not layoutEditing or not uiEnabled() then return end
     if type(payload) ~= 'table' or type(payload.elements) ~= 'table' then return end
@@ -646,8 +646,8 @@ end)
 -- only Confirm supplies geometry to persist. Until this callback arrives all
 -- dragging is merely a browser-side preview, so Cancel never needs a rollback
 -- write and cannot briefly persist a layout the player rejected.
-RegisterNUICallback('qbhud:finishLayout', function(payload, cb)
-    -- Answer first and unconditionally, same reasoning as qbhud:ready above.
+RegisterNUICallback('kora_hud:finishLayout', function(payload, cb)
+    -- Answer first and unconditionally, same reasoning as kora_hud:ready above.
     cb({})
     if not layoutEditing then return end
 
@@ -677,7 +677,7 @@ local function resetLayout()
     DeleteResourceKvp(LAYOUT_KVP)
     vehicleOnlyChoice = nil
     closeLayout(true)
-    send('qbhud:layoutReset', true)
+    send('kora_hud:layoutReset', true)
     syncChatInputLayout()
     applyToOwners('reset', {})
     if minimapHooks.sync then minimapHooks.sync(false) end -- the page clears its hidden switches
@@ -696,7 +696,7 @@ local playerIdVisible = false
 RegisterCommand('id', function()
     if playerIdVisible then
         playerIdVisible = false
-        send('qbhud:playerId')
+        send('kora_hud:playerId')
         return
     end
 
@@ -704,13 +704,13 @@ RegisterCommand('id', function()
     if type(serverId) ~= 'number' or serverId <= 0 then return end
 
     playerIdVisible = true
-    send('qbhud:playerId', serverId)
+    send('kora_hud:playerId', serverId)
 end, false)
 
 -- Bare cross-resource call AT CHUNK LOAD (not inside any function): if kora_core
 -- (or kora_lib, via the status export inside getSnapshot) is mid-restart right
 -- when this chunk loads, this would raise and abort the REST of this file's
--- chunk -- meaning the qbhud:ready NUI callback registered above stays
+-- chunk -- meaning the kora_hud:ready NUI callback registered above stays
 -- registered (that's why it's first), but `sendInitialState` below never gets
 -- assigned, so the ready-ping handler's existing nil-guard makes it silently
 -- no-op forever. pcall'd, falling back to the same shape snapshotFrom(nil)
@@ -765,7 +765,7 @@ visible = loggedIn and not forcedHidden
 -- tick, so an idle HUD really is idle: standing still with nothing dirty and
 -- no vehicle, the only thing left waking this thread is the minimap re-assert.
 --
----@class QBHudTask
+---@class KoraHudTask
 ---@field interval integer ms between runs
 ---@field due integer earliest GetGameTimer() value this task may run at
 ---@field active fun(): boolean whether the task has any reason to run right now
@@ -778,8 +778,8 @@ local schedulerRunning = false
 -- exists. Present so the loop can never reach Wait(nil).
 local SCHEDULER_IDLE_SLEEP = 500
 
----@param task QBHudTask
----@return QBHudTask
+---@param task KoraHudTask
+---@return KoraHudTask
 local function addTask(task)
     task.due = 0
     tasks[#tasks + 1] = task
@@ -887,7 +887,7 @@ end
 local function flushVitals()
     if not visible then return end
 
-    send("qbhud:vitals", {
+    send("kora_hud:vitals", {
         health = vitals.health,
         maxHealth = vitals.maxHealth,
         armour = vitals.armour,
@@ -913,7 +913,7 @@ local function flushPlayer()
     if not visible then return end
 
     local snapshot = latestBridgeSnapshot
-    send("qbhud:update", {
+    send("kora_hud:update", {
         job = snapshot.job,
         gang = snapshot.gang,
         cash = snapshot.cash,
@@ -1030,7 +1030,7 @@ local function vehiclePayloadChanged(payload)
         or payload.progress ~= lastVehiclePayload.progress
 end
 
--- Sent on its own channel (not folded into qbhud:update) so vehicle telemetry
+-- Sent on its own channel (not folded into kora_hud:update) so vehicle telemetry
 -- can refresh on Config.poll.vehicleInterval -- much faster than the rest of
 -- the HUD needs -- without dragging job/cash/hunger/etc. along for the ride on
 -- every tick while driving.
@@ -1042,7 +1042,7 @@ local function pushVehicleUpdate(force)
     if not force and not vehiclePayloadChanged(payload) then return end
 
     lastVehiclePayload = payload
-    send("qbhud:vehicle", payload)
+    send("kora_hud:vehicle", payload)
 end
 
 -- The minimap's own scaleform draws a health/armour/breath cluster straight
@@ -1465,7 +1465,7 @@ subscribeCache()
 
 -- Seeds the mirrors above with the values the change handlers will keep current
 -- from here on. Runs at CHUNK LOAD rather than in the start-up thread below,
--- because the qbhud:ready callback can fire first (a page that mounts before
+-- because the kora_hud:ready callback can fire first (a page that mounts before
 -- that thread is scheduled) and sendInitialState must never paint a HUD out of
 -- the zeroed defaults. pcall'd as a group -- these are cross-resource reads,
 -- and kora_lib mid-restart must leave the HUD on its defaults, not abort the rest
@@ -1505,7 +1505,7 @@ end)
 -- change notification), so a status effect applying/clearing needs its own
 -- push here rather than waiting up to Config.poll.bridgeInterval to show up.
 -- Treat it as optional: a rolling restart must not stop this script before it
--- registers qbhud:ready, otherwise the web NUI receives a 404 and can never
+-- registers kora_hud:ready, otherwise the web NUI receives a 404 and can never
 -- request the initial visibility/configuration snapshot.
 pcall(function()
     Kora.status.onChange(function()
@@ -1557,7 +1557,7 @@ local function syncPauseHidden()
     local active = pauseMenuActive()
     if active == pauseHidden then return end
     pauseHidden = active
-    if visible then send("qbhud:visibility", nuiVisible()) end
+    if visible then send("kora_hud:visibility", nuiVisible()) end
 end
 
 addTask({
@@ -1577,7 +1577,7 @@ local function refreshVisibility()
     -- Hidden HUDs do not poll, so the pause state may be stale on a show.
     pauseHidden = visible and pauseMenuActive()
     syncVoiceSampling()
-    send("qbhud:visibility", nuiVisible())
+    send("kora_hud:visibility", nuiVisible())
 
     if visible then
         -- pcall'd (via safeGetBridgeSnapshot): this runs inside the adapter's
@@ -1656,7 +1656,7 @@ local function queueUiElements()
     CreateThread(function()
         Wait(100)
         uiElementsQueued = false
-        send('qbhud:uiElements', HudUi.list())
+        send('kora_hud:uiElements', HudUi.list())
     end)
 end
 if HudUi then HudUi.onChange(queueUiElements) end
@@ -1704,11 +1704,11 @@ end)
 
 -- Assignment, NOT `local function`: that would declare a fresh local shadowing
 -- the forward declaration at the top of the file, silently leaving the
--- qbhud:ready callback's upvalue nil.
+-- kora_hud:ready callback's upvalue nil.
 sendInitialState = function()
     local savedLayout = readLayout()
     if minimapHooks.sync then minimapHooks.sync(savedLayout.hidden.minimap == true) end
-    send("qbhud:config", {
+    send("kora_hud:config", {
         dynamic = Config.hud.dynamic == true,
         elements = Config.hud.elements,
         speedUnit = SPEED_UNIT,
@@ -1744,10 +1744,10 @@ sendInitialState = function()
             },
         },
     })
-    if uiEnabled() then send('qbhud:uiElements', HudUi.list()) end
+    if uiEnabled() then send('kora_hud:uiElements', HudUi.list()) end
 
-    send("qbhud:visibility", nuiVisible())
-    send("qbhud:compat", HudCompat.state)
+    send("kora_hud:visibility", nuiVisible())
+    send("kora_hud:compat", HudCompat.state)
 
     if visible then
         -- Direct, un-throttled and unconditional: this is a REMOUNT, so the
@@ -1768,7 +1768,7 @@ HudCompat.attach({
         requestPlayer()
     end,
     snapshot = function() return latestBridgeSnapshot end,
-    push = function() send("qbhud:compat", HudCompat.state) end,
+    push = function() send("kora_hud:compat", HudCompat.state) end,
     applyMinimap = function()
         Wait(50)
         HudMinimap.apply(true)
@@ -1812,7 +1812,7 @@ CreateThread(function()
     -- Only if the load-time attempt above lost the race with a kora_lib restart.
     if not seeded then pcall(seedFromCache) end
 
-    -- Best-effort: lost if the page hasn't mounted yet (the qbhud:ready
+    -- Best-effort: lost if the page hasn't mounted yet (the kora_hud:ready
     -- callback at the top of this file covers that). pcall'd so a failure here
     -- can't abort the thread before the scheduler below is armed.
     pcall(sendInitialState)

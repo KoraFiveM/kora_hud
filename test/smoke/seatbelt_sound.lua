@@ -30,7 +30,7 @@ harness.test('buckle and unbuckle send distinct files at the configured volume',
     f.toggle(true)
     f.toggle(false)
     harness.assertEqual(#f.nui, 2)
-    harness.assertEqual(f.nui[1].action, 'qbhud:seatbeltSound')
+    harness.assertEqual(f.nui[1].action, 'kora_hud:seatbeltSound')
     harness.assertEqual(f.nui[1].data.file, 'a.wav')
     harness.assertEqual(f.nui[1].data.volume, 0.4)
     harness.assertEqual(f.nui[2].data.file, 'b.wav')

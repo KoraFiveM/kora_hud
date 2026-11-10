@@ -152,9 +152,9 @@ function HudContent() {
             >
                 {layout.editing ? <StatusPreview /> : <StatusEffects />}
             </MovableSection>
-            {/* qbchat owns the live composer in a separate NUI frame. This
+            {/* kora_chat owns the live composer in a separate NUI frame. This
                 preview is only mounted while editing, but writes the shared
-                position and scale that qbchat applies after Confirm. A
+                position and scale that kora_chat applies after Confirm. A
                 kora_chat that registers with the /ui editor gets a generic
                 proxy instead, so this one is only for an older kora_chat. */}
             {!layout.elements.some((element) => element.id === HUD_SECTIONS.chatInput) && <MovableSection
@@ -174,7 +174,7 @@ function HudContent() {
     )
 }
 
-/** Headless root; qbtheme's shared loader remains mounted outside React. */
+/** Headless root; kora_theme's shared loader remains mounted outside React. */
 export default function App() {
     return (
         <HudStateProvider>

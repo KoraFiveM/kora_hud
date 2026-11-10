@@ -342,7 +342,7 @@ Config.layout = {
     command = 'hudlayout',
     -- FiveM KVP key the saved offsets are written to, as JSON. Client-side
     -- storage only -- nothing here ever reaches the server.
-    kvpKey = 'qbhud:layout',
+    kvpKey = 'kora_hud:layout',
 }
 
 -- Unified UI layout editor. /ui opens one editor for the HUD sections and for
@@ -438,7 +438,7 @@ Config.bridge = {
     -- must satisfy). Swapping in a real framework later means writing a new
     -- client/bridge/<adapter>.lua and changing this value plus the
     -- fxmanifest.lua script list; client/hud.lua itself never changes.
-    adapter = "qbcore",
+    adapter = "kora_core",
 }
 
 Config.voice = {

@@ -5,7 +5,7 @@
 // from client/hud.lua. Keep this file in sync with that file's SendNUIMessage
 // call sites.
 //
-// The three data channels ("qbhud:vitals", "qbhud:update", "qbhud:vehicle")
+// The three data channels ("kora_hud:vitals", "kora_hud:update", "kora_hud:vehicle")
 // are split by how FAST each one changes, not by topic. Stamina moves on
 // every 100ms cache tick for the whole length of a sprint; the job label and
 // the status list change a handful of times an hour. Keeping them on one
@@ -18,7 +18,7 @@ export interface NuiWireMessage<T = unknown> {
     data: T
 }
 
-// action: "qbhud:config" -- sent once on resource start.
+// action: "kora_hud:config" -- sent once on resource start.
 export interface HudConfigPayload {
     dynamic: boolean
     elements: {
@@ -34,14 +34,14 @@ export interface HudConfigPayload {
     speedUnit?: HudSpeedUnit
     /**
      * Config.poll.vitalsInterval, in ms -- how often Lua can send a
-     * "qbhud:vitals" message at most. The gauges animate over exactly this
+     * "kora_hud:vitals" message at most. The gauges animate over exactly this
      * long so each ring interpolates from one sample to the next instead of
      * stepping, which is what lets a server raise the interval to cut message
      * rate without the HUD looking any less smooth.
      */
     vitalsInterval: number
     /**
-     * Config.hud.money. Optional, like `layout` below: a "qbhud:config"
+     * Config.hud.money. Optional, like `layout` below: a "kora_hud:config"
      * message REPLACES the whole config object (see hudState.tsx), so a
      * payload from an older client/hud.lua that never sent this key would
      * leave it genuinely absent at runtime whatever the type claimed. Typed
@@ -153,7 +153,7 @@ export interface UiRect {
     h: number
 }
 
-// action: "qbhud:uiElements" -- every element another resource registered
+// action: "kora_hud:uiElements" -- every element another resource registered
 // through exports.kora_hud:registerUiElement, plus the minimap. The page draws
 // an outline proxy for each; the owner moves its real element.
 export interface UiElementDef {
@@ -177,24 +177,24 @@ export interface UiElementDef {
 
 export type UiElementsPayload = UiElementDef[]
 
-// action: "qbhud:layoutMode" -- the player entered layout edit mode with
+// action: "kora_hud:layoutMode" -- the player entered layout edit mode with
 // Config.layout.command or left through Confirm/Cancel. Lua owns NUI focus (see the
 // SetNuiFocus call beside the send), so the NUI only reacts visually and
 // starts accepting drags; it never asks for focus itself.
 export type HudLayoutModePayload = boolean
 
-// action: "qbhud:layoutReset" -- /hudlayoutreset deleted the stored layout.
-// Separate from "qbhud:layoutMode" because a reset also has to discard
+// action: "kora_hud:layoutReset" -- /hudlayoutreset deleted the stored layout.
+// Separate from "kora_hud:layoutMode" because a reset also has to discard
 // offsets the NUI is holding in memory, which leaving edit mode does not.
 export type HudLayoutResetPayload = boolean
 
-// action: "qbhud:visibility" -- sent once on resource start (reflecting
+// action: "kora_hud:visibility" -- sent once on resource start (reflecting
 // whatever the bridge adapter's initial login state is) and again on every
 // login/logout transition. Absent an adapter with a login concept, this is
 // always true. See shared/bridge.lua's HudBridge.isLoggedIn/onLoginChange.
 export type HudVisibilityPayload = boolean
 
-// action: "qbhud:playerId" -- emitted by the local `/id` command. A missing
+// action: "kora_hud:playerId" -- emitted by the local `/id` command. A missing
 // data value means the badge should be hidden.
 export type HudPlayerIdPayload = number | null
 
@@ -219,7 +219,7 @@ export interface HudVehicleInfo {
     /** Repeated here so a speed value can never render with a stale label. */
     speedUnit: HudSpeedUnit
     fuel: number | null
-    /** `charge` for a vehicle qbfuel classifies as electric; otherwise fuel. */
+    /** `charge` for a vehicle kora_fuel classifies as electric; otherwise fuel. */
     fuelKind: "fuel" | "charge"
     engineOn: boolean
     headlights: "off" | "low" | "high"
@@ -242,7 +242,7 @@ export interface HudStatusEffect {
     severity: number | null
 }
 
-// action: "qbhud:vitals" -- the continuously-moving player stats, rate-limited
+// action: "kora_hud:vitals" -- the continuously-moving player stats, rate-limited
 // to Config.poll.vitalsInterval (see client/hud.lua's `throttle`). This is the
 // HUD's fastest non-vehicle channel: stamina alone changes on every kora_lib
 // cache tick while sprinting. Every number here is already rounded to a whole
@@ -264,7 +264,7 @@ export interface HudVoiceMode {
     range: number
 }
 
-// action: "qbhud:update" -- the slow, framework-sourced half of the player
+// action: "kora_hud:update" -- the slow, framework-sourced half of the player
 // state, pushed when the bridge adapter reports a delta (or on
 // Config.poll.bridgeInterval for an adapter with no push path). Vitals and
 // vehicle telemetry are deliberately NOT included -- see HudVitalsPayload
@@ -281,7 +281,7 @@ export interface HudUpdatePayload {
     status: HudStatusEffect[]
 }
 
-// action: "qbhud:vehicle" -- sent independently of "qbhud:update" (see
+// action: "kora_hud:vehicle" -- sent independently of "kora_hud:update" (see
 // client/hud.lua's pushVehicleUpdate), on the faster Config.poll.vehicleInterval
 // cadence while driving, and only when a value actually changed (a car idling
 // at a light sends nothing). `null` while on foot.

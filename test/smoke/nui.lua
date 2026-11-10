@@ -21,7 +21,7 @@ local hudSource = arg[1] or repoRoot .. 'client/hud.lua'
 -- than silently shipping a dead HUD.
 local FORBIDDEN_NUI = setmetatable({}, {
     __index = function(_, key)
-        error(("Kora.nui.%s would run in kora_lib's VM and target kora_lib's frame, not qbhud's -- "
+        error(("Kora.nui.%s would run in kora_lib's VM and target kora_lib's frame, not kora_hud's -- "
             .. 'use the raw SendNUIMessage/RegisterNUICallback natives'):format(tostring(key)), 2)
     end,
 })
@@ -170,7 +170,7 @@ local function loadHud(opts)
             minimapVehicleOnly = opts.minimapVehicleOnly,
             hideOnPauseMenu = opts.hideOnPauseMenu,
         },
-        layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
+        layout = opts.layout or { movable = true, command = 'hudlayout', kvpKey = 'kora_hud:layout' },
         voice = { enabled = true, interval = 200 },
         poll = {
             vitalsInterval = opts.vitalsInterval or 100,
@@ -185,7 +185,7 @@ local function loadHud(opts)
         isLoggedIn = function() return loggedIn end,
         onLoginChange = function(handler) loginHandlers[#loginHandlers + 1] = handler end,
         getSnapshot = function()
-            if opts.snapshotError then error('qbcore export not resolvable', 0) end
+            if opts.snapshotError then error('kora_core export not resolvable', 0) end
             snapshots = snapshots + 1
             return { job = {}, gang = nil, cash = 0, bank = 0, hunger = 100, thirst = 100, stress = 0,
                      seatbelt = seatbelt, status = {} }
@@ -362,10 +362,10 @@ local function loadHud(opts)
             binding.handler(settings)
         end,
         setPaused = function(value) paused = value end,
-        -- The most recent qbhud:visibility payload, or nil if none was sent.
+        -- The most recent kora_hud:visibility payload, or nil if none was sent.
         lastVisibility = function()
             for i = #sent, 1, -1 do
-                if sent[i].action == 'qbhud:visibility' then return sent[i].data end
+                if sent[i].action == 'kora_hud:visibility' then return sent[i].data end
             end
             return nil
         end,
@@ -381,36 +381,36 @@ local function loadHud(opts)
     }
 end
 
-harness.test('qbhud registers qbhud:ready on the raw native, not through the kora_lib proxy', function()
+harness.test('kora_hud registers kora_hud:ready on the raw native, not through the kora_lib proxy', function()
     local hud = loadHud()
     harness.assertTrue(hud.loaded, 'client/hud.lua should load cleanly: ' .. tostring(hud.loadError))
-    harness.assertEqual(type(hud.callbacks['qbhud:ready']), 'function',
-        'qbhud:ready must be registered via the raw RegisterNUICallback so it resolves at https://kora_hud/')
+    harness.assertEqual(type(hud.callbacks['kora_hud:ready']), 'function',
+        'kora_hud:ready must be registered via the raw RegisterNUICallback so it resolves at https://kora_hud/')
 end)
 
-harness.test('qbhud never routes NUI through Kora.nui (which targets kora_lib\'s frame)', function()
+harness.test('kora_hud never routes NUI through Kora.nui (which targets kora_lib\'s frame)', function()
     -- FORBIDDEN_NUI raises on any access, so a clean load is itself the proof.
     local hud = loadHud()
     harness.assertTrue(hud.loaded, 'a Kora.nui.* call would abort the chunk: ' .. tostring(hud.loadError))
-    harness.assertTrue(hud.contains('qbhud:config'), 'initial state should reach the frame via SendNUIMessage')
+    harness.assertTrue(hud.contains('kora_hud:config'), 'initial state should reach the frame via SendNUIMessage')
 end)
 
 harness.test('a bridge that throws at load cannot take the HUD down with it', function()
     -- Every bridge read in the chunk (initial snapshot, the polling fallback)
     -- is pcall-guarded, so a mid-restart kora_core degrades to default data
-    -- instead of aborting the chunk -- and the qbhud:ready callback (kept
+    -- instead of aborting the chunk -- and the kora_hud:ready callback (kept
     -- FIRST in the chunk as a last line of defence) still answers, so the
     -- page can never 404 forever on its ready ping.
     local hud = loadHud({ snapshotError = true })
     harness.assertTrue(hud.loaded, 'a throwing bridge must not abort the chunk: ' .. tostring(hud.loadError))
-    harness.assertEqual(type(hud.callbacks['qbhud:ready']), 'function',
-        'qbhud:ready must be registered before anything that can throw')
+    harness.assertEqual(type(hud.callbacks['kora_hud:ready']), 'function',
+        'kora_hud:ready must be registered before anything that can throw')
 
     local replies = 0
-    hud.callbacks['qbhud:ready']({}, function() replies = replies + 1 end)
+    hud.callbacks['kora_hud:ready']({}, function() replies = replies + 1 end)
     harness.assertEqual(replies, 1,
         'the handler must always answer exactly once, or the page fetch hangs forever')
-    harness.assertTrue(hud.contains('qbhud:visibility'),
+    harness.assertTrue(hud.contains('kora_hud:visibility'),
         'the ready ping must still deliver the visibility push on default data')
 end)
 
@@ -421,14 +421,14 @@ harness.test('the ready callback is idempotent and re-pushes the full initial st
     local replies = 0
     local function cb() replies = replies + 1 end
 
-    hud.callbacks['qbhud:ready']({}, cb)
+    hud.callbacks['kora_hud:ready']({}, cb)
     local first = table.concat(hud.actions(), ',')
-    harness.assertTrue(hud.contains('qbhud:config'), 'ready should push the element config')
-    harness.assertFalse(hud.contains('qbhud:theme'), 'qbtheme owns theme transport')
-    harness.assertTrue(hud.contains('qbhud:visibility'), 'ready should push current visibility')
+    harness.assertTrue(hud.contains('kora_hud:config'), 'ready should push the element config')
+    harness.assertFalse(hud.contains('kora_hud:theme'), 'kora_theme owns theme transport')
+    harness.assertTrue(hud.contains('kora_hud:visibility'), 'ready should push current visibility')
 
     hud.reset()
-    hud.callbacks['qbhud:ready']({}, cb)
+    hud.callbacks['kora_hud:ready']({}, cb)
     harness.assertEqual(table.concat(hud.actions(), ','), first,
         'a second ping (page remount / nui_reload) must produce the same push')
     harness.assertEqual(replies, 2, 'every ping gets exactly one reply')
@@ -438,7 +438,7 @@ harness.test('the HUD forwards the dynamic gauge option to the NUI', function()
     local hud = loadHud({ dynamicHud = true })
     local config
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:config' then config = message.data end
+        if message.action == 'kora_hud:config' then config = message.data end
     end
 
     harness.assertTrue(config ~= nil, 'initial state should include the HUD config')
@@ -462,8 +462,8 @@ harness.test('the HUD applies and forwards the configured speed unit', function(
         local config
         local vehicle
         for _, message in ipairs(hud.sent) do
-            if message.action == 'qbhud:config' then config = message.data end
-            if message.action == 'qbhud:vehicle' then vehicle = message.data end
+            if message.action == 'kora_hud:config' then config = message.data end
+            if message.action == 'kora_hud:vehicle' then vehicle = message.data end
         end
 
         harness.assertEqual(config.speedUnit, case.expectedUnit,
@@ -488,13 +488,13 @@ harness.test('a live kora_lib config update refreshes the speedometer without a 
         },
         voice = { enabled = true, interval = 300 },
         poll = { vitalsInterval = 200, playerInterval = 200, vehicleInterval = 400, bridgeInterval = 500, minimapInterval = 400 },
-        layout = { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
+        layout = { movable = true, command = 'hudlayout', kvpKey = 'kora_hud:layout' },
     })
 
     local config, vehicle
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:config' then config = message.data end
-        if message.action == 'qbhud:vehicle' then vehicle = message.data end
+        if message.action == 'kora_hud:config' then config = message.data end
+        if message.action == 'kora_hud:vehicle' then vehicle = message.data end
     end
     harness.assertEqual(config.speedUnit, 'mph', 'the replacement active config should reach the browser')
     harness.assertEqual(vehicle.speed, 37, 'the current vehicle should use the new unit immediately')
@@ -502,8 +502,8 @@ harness.test('a live kora_lib config update refreshes the speedometer without a 
 end)
 
 for _, channelCase in ipairs({
-    { name = 'vitals', action = 'qbhud:vitals', field = 'stamina', startupInterval = 150 },
-    { name = 'player', action = 'qbhud:update', field = 'cash', startupInterval = 100 },
+    { name = 'vitals', action = 'kora_hud:vitals', field = 'stamina', startupInterval = 150 },
+    { name = 'player', action = 'kora_hud:update', field = 'cash', startupInterval = 100 },
 }) do
     harness.test('live poll changes update the ' .. channelCase.name .. ' channel cooldown', function()
         local hud = loadHud({ bridgePush = true, vitalsInterval = 150 })
@@ -569,12 +569,12 @@ harness.test('a live config update refreshes the mounted HUD while it is hidden'
         },
         voice = { enabled = true, interval = 300 },
         poll = { vitalsInterval = 200, playerInterval = 200, vehicleInterval = 400, bridgeInterval = 500, minimapInterval = 400 },
-        layout = { movable = true, command = 'hudlayout', kvpKey = 'qbhud:layout' },
+        layout = { movable = true, command = 'hudlayout', kvpKey = 'kora_hud:layout' },
     })
 
     local config
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:config' then config = message.data end
+        if message.action == 'kora_hud:config' then config = message.data end
     end
 
     harness.assertTrue(config ~= nil,
@@ -588,9 +588,9 @@ harness.test('HUD startup no longer depends on kora_lib theme derivation', funct
     Kora.theme.tokens = function() error('kora_lib restarting', 0) end
     hud.reset()
 
-    hud.callbacks['qbhud:ready']({}, function() end)
-    harness.assertFalse(hud.contains('qbhud:theme'), 'the HUD must not duplicate qbtheme messages')
-    harness.assertTrue(hud.contains('qbhud:visibility'),
+    hud.callbacks['kora_hud:ready']({}, function() end)
+    harness.assertFalse(hud.contains('kora_hud:theme'), 'the HUD must not duplicate kora_theme messages')
+    harness.assertTrue(hud.contains('kora_hud:visibility'),
         'visibility must still be sent -- it is what makes the HUD render at all')
 end)
 
@@ -598,7 +598,7 @@ harness.test('the HUD sends the ped-specific maximum health for percentage conve
     local hud = loadHud({ maxHealth = 175 })
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vitals' then latest = message.data end
+        if message.action == 'kora_hud:vitals' then latest = message.data end
     end
 
     harness.assertTrue(latest ~= nil, 'initial state should include the vitals channel')
@@ -614,11 +614,11 @@ harness.test('bridge fields are pushed via HudBridge.onChange, never polled', fu
     hud.tick()   -- nothing should be sampling the bridge on a timer
     harness.assertEqual(hud.snapshots(), before,
         'no thread may poll getSnapshot when the adapter can push')
-    harness.assertEqual(hud.countAction('qbhud:update'), 0, 'a tick alone must not push an update')
+    harness.assertEqual(hud.countAction('kora_hud:update'), 0, 'a tick alone must not push an update')
 
     hud.pushBridge({ job = {}, cash = 999, hunger = 100, thirst = 100, stress = 0,
                      seatbelt = false, status = {} })
-    harness.assertEqual(hud.countAction('qbhud:update'), 1, 'a delta from the adapter pushes immediately')
+    harness.assertEqual(hud.countAction('kora_hud:update'), 1, 'a delta from the adapter pushes immediately')
 end)
 
 harness.test('an adapter without onChange still gets the documented polling fallback', function()
@@ -629,7 +629,7 @@ harness.test('an adapter without onChange still gets the documented polling fall
     local before = hud.snapshots()
     hud.tick()
     harness.assertTrue(hud.snapshots() > before, 'the stub adapter must still be polled')
-    harness.assertTrue(hud.countAction('qbhud:update') > 0, 'polling should still push updates')
+    harness.assertTrue(hud.countAction('kora_hud:update') > 0, 'polling should still push updates')
 end)
 
 harness.test('no vehicle telemetry thread runs while on foot', function()
@@ -637,28 +637,28 @@ harness.test('no vehicle telemetry thread runs while on foot', function()
     hud.reset()
 
     hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0,
+    harness.assertEqual(hud.countAction('kora_hud:vehicle'), 0,
         'on foot nothing should be sampling or pushing vehicle telemetry')
 end)
 
 harness.test('entering a vehicle starts the sampling thread, leaving stops it', function()
     local hud = loadHud({ bridgePush = true })
-    harness.assertTrue(hud.contains('qbhud:visibility'), 'sanity: the hud loaded')
+    harness.assertTrue(hud.contains('kora_hud:visibility'), 'sanity: the hud loaded')
     hud.reset()
 
     hud.setVehicle(42)
-    harness.assertTrue(hud.countAction('qbhud:vehicle') > 0, 'entering a vehicle pushes telemetry')
+    harness.assertTrue(hud.countAction('kora_hud:vehicle') > 0, 'entering a vehicle pushes telemetry')
 
     hud.reset()
     hud.tick()
-    harness.assertTrue(hud.countAction('qbhud:vehicle') > 0, 'the thread keeps sampling while driving')
+    harness.assertTrue(hud.countAction('kora_hud:vehicle') > 0, 'the thread keeps sampling while driving')
 
     -- Leaving: the loop condition goes false, so it drains and stops.
     hud.setVehicle(nil)
     hud.tick()
     hud.reset()
     hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0,
+    harness.assertEqual(hud.countAction('kora_hud:vehicle'), 0,
         'the sampling thread must stop once the player is out of the vehicle')
 end)
 
@@ -673,7 +673,7 @@ harness.test('seatbelt stays live while driving even though no adapter can push 
     hud.tick()
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vehicle' then latest = message.data end
+        if message.action == 'kora_hud:vehicle' then latest = message.data end
     end
     harness.assertTrue(latest ~= nil, 'the vehicle tick should be running')
     harness.assertTrue(latest.seatbelt, 'a seatbelt toggle must reach the NUI while driving')
@@ -689,7 +689,7 @@ harness.test('harness icon and progress-bar clearance ride the vehicle payload',
     local function latest()
         local data
         for _, message in ipairs(hud.sent) do
-            if message.action == 'qbhud:vehicle' then data = message.data end
+            if message.action == 'kora_hud:vehicle' then data = message.data end
         end
         return data
     end
@@ -725,7 +725,7 @@ harness.test('a player already in a vehicle at resource start gets telemetry', f
     hud.reset()
 
     hud.tick()
-    harness.assertTrue(hud.countAction('qbhud:vehicle') > 0,
+    harness.assertTrue(hud.countAction('kora_hud:vehicle') > 0,
         'restarting mid-drive must not leave the vehicle panel dead until the player gets out')
 end)
 
@@ -736,7 +736,7 @@ harness.test('a login shows the HUD and a logout hides it', function()
 
     hud.setLoggedIn(true)
     harness.assertEqual(hud.lastVisibility(), true, 'a login transition must push visibility true')
-    harness.assertTrue(hud.countAction('qbhud:update') > 0,
+    harness.assertTrue(hud.countAction('kora_hud:update') > 0,
         'showing must also push a fresh data snapshot, not leave stale defaults on screen')
 
     hud.reset()
@@ -835,7 +835,7 @@ harness.test('a proximity mode change reaches the mic indicator on the vitals ch
 
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vitals' then latest = message.data end
+        if message.action == 'kora_hud:vitals' then latest = message.data end
     end
     harness.assertTrue(latest ~= nil, 'a range change should push the mic indicator state immediately')
     harness.assertEqual(latest.voiceMode.label, 'Shout', 'the mode label reaches the NUI')
@@ -860,7 +860,7 @@ harness.test('a disabled element is never subscribed to, not merely never drawn'
     hud.reset()
     hud.tick()
     hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0, 'no vehicle telemetry is sampled or sent')
+    harness.assertEqual(hud.countAction('kora_hud:vehicle'), 0, 'no vehicle telemetry is sampled or sent')
     harness.assertEqual(hud.voiceSamples(), 0, 'no mic sampling with the indicator switched off')
 end)
 
@@ -906,13 +906,13 @@ harness.test('stamina goes out on the vitals channel, not with job/gang/status',
     hud.reset()
 
     hud.pushCache('stamina', 42)
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'a stamina change pushes vitals')
-    harness.assertEqual(hud.countAction('qbhud:update'), 0,
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 1, 'a stamina change pushes vitals')
+    harness.assertEqual(hud.countAction('kora_hud:update'), 0,
         'the job label, gang table and status list must not be re-serialized for a stamina tick')
 
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vitals' then latest = message.data end
+        if message.action == 'kora_hud:vitals' then latest = message.data end
     end
     harness.assertEqual(latest.stamina, 42, 'the pushed value is the one the cache handed us')
     harness.assertTrue(latest.job == nil, 'player data has no business on the fast channel')
@@ -925,13 +925,13 @@ harness.test('a burst of changes inside one interval collapses into a single mes
     hud.reset()
 
     hud.pushCache('stamina', 80)
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'the first change must not wait for the interval')
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 1, 'the first change must not wait for the interval')
 
     for value = 79, 70, -1 do hud.pushCache('stamina', value) end
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'ten more changes inside the interval add no messages')
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 1, 'ten more changes inside the interval add no messages')
 
     hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 2, 'the interval elapsing sends the latest value once')
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 2, 'the interval elapsing sends the latest value once')
 end)
 
 harness.test('sub-unit drift never reaches the wire', function()
@@ -942,14 +942,14 @@ harness.test('sub-unit drift never reaches the wire', function()
     hud.reset()
 
     hud.pushCache('stamina', 90.4)
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 1, 'the first whole-unit value is sent')
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 1, 'the first whole-unit value is sent')
     hud.tick()
     hud.reset()
 
     hud.pushCache('stamina', 90.1)
     hud.pushCache('stamina', 89.8)
     hud.pushCache('stamina', 90.3)
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 0,
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 0,
         'drift that rounds to the same whole unit must not send anything')
 end)
 
@@ -962,7 +962,7 @@ harness.test('maximum health is resolved on a ped change, not on every push', fu
 
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vitals' then latest = message.data end
+        if message.action == 'kora_hud:vitals' then latest = message.data end
     end
     harness.assertTrue(latest ~= nil, 'a ped change must refresh the vitals')
     harness.assertEqual(latest.maxHealth, 175, 'a respawn onto a different ped model updates the maximum')
@@ -981,7 +981,7 @@ harness.test('an unchanged vehicle reading is sampled but not re-sent', function
     hud.tick()
 
     harness.assertTrue(#hud.vehicleHandles() > sampledBefore, 'the sampler must keep running')
-    harness.assertEqual(hud.countAction('qbhud:vehicle'), 0,
+    harness.assertEqual(hud.countAction('kora_hud:vehicle'), 0,
         'a reading identical to the last one sent is not worth a NUI message')
 end)
 
@@ -1007,13 +1007,13 @@ harness.test('a hidden HUD does no work for a change nobody can see', function()
     local threadsBefore = hud.threadCount()
     for value = 99, 90, -1 do hud.pushCache('stamina', value) end
 
-    harness.assertEqual(hud.countAction('qbhud:vitals'), 0, 'a hidden HUD sends nothing')
+    harness.assertEqual(hud.countAction('kora_hud:vitals'), 0, 'a hidden HUD sends nothing')
     harness.assertEqual(hud.threadCount(), threadsBefore, 'and starts no thread to send nothing with')
 
     hud.setLoggedIn(true)
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:vitals' then latest = message.data end
+        if message.action == 'kora_hud:vitals' then latest = message.data end
     end
     harness.assertTrue(latest ~= nil, 'showing the HUD paints it immediately')
     harness.assertEqual(latest.stamina, 90, 'with the value the mirror tracked while hidden')
@@ -1028,7 +1028,7 @@ end)
 local function configPayload(hud)
     local latest
     for _, message in ipairs(hud.sent) do
-        if message.action == 'qbhud:config' then latest = message.data end
+        if message.action == 'kora_hud:config' then latest = message.data end
     end
     return latest
 end
@@ -1043,14 +1043,14 @@ harness.test('the layout editor requires an explicit confirm or cancel to releas
     hud.commands.hudlayout()
 
     harness.assertTrue(hud.nuiFocus().mouse, 'entering the editor takes mouse focus so sections can be dragged')
-    harness.assertTrue(hud.contains('qbhud:layoutMode'), 'and tells the NUI to render the editor')
+    harness.assertTrue(hud.contains('kora_hud:layoutMode'), 'and tells the NUI to render the editor')
 
     hud.commands.hudlayout()
     harness.assertTrue(hud.nuiFocus().mouse, 'running the command again cannot bypass the confirmation choice')
 
-    hud.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = false }, function() end)
     harness.assertFalse(hud.nuiFocus().mouse, 'cancel hands focus straight back -- a stuck cursor is a stuck player')
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'cancel persists none of the previewed layout')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil, 'cancel persists none of the previewed layout')
 end)
 
 harness.test('the id command toggles the local player ID badge', function()
@@ -1058,12 +1058,12 @@ harness.test('the id command toggles the local player ID badge', function()
     hud.reset()
 
     hud.commands.id()
-    harness.assertTrue(hud.contains('qbhud:playerId'), 'the first use tells the NUI to show an ID badge')
+    harness.assertTrue(hud.contains('kora_hud:playerId'), 'the first use tells the NUI to show an ID badge')
     harness.assertEqual(hud.sent[#hud.sent].data, 42, 'the badge receives this player\'s server ID')
 
     hud.reset()
     hud.commands.id()
-    harness.assertTrue(hud.contains('qbhud:playerId'), 'the second use tells the NUI to hide the badge')
+    harness.assertTrue(hud.contains('kora_hud:playerId'), 'the second use tells the NUI to hide the badge')
     harness.assertEqual(hud.sent[#hud.sent].data, nil, 'hiding deliberately sends no ID value')
 end)
 
@@ -1071,14 +1071,14 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { gauges = { x = 0.1, y = -0.2 } },
         scales = { gauges = 1.25 },
         justifications = { gauges = 'left' },
     }, function() end)
 
-    local stored = hud.kvp['qbhud:layout']
+    local stored = hud.kvp['kora_hud:layout']
     harness.assertTrue(stored ~= nil, 'the layout reaches this player\'s own KVP store')
 
     -- Reloading with that KVP already present is the real test: the offsets have
@@ -1099,7 +1099,7 @@ harness.test('gauge bottom anchoring defaults on and can be disabled per player'
         'a player with no saved layout gets the bottom-anchored gauge row')
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = {},
         gaugesBottomAnchored = false,
@@ -1113,7 +1113,7 @@ end)
 harness.test('layout alignment is validated without changing component placement', function()
     local hud = loadHud({ bridgePush = true })
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { identity = { x = 2, y = 0 } },
         justifications = { identity = 'left', status = 'not-an-alignment' },
@@ -1130,7 +1130,7 @@ harness.test('a component can be resized without moving it', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = {},
         scales = { status = 1.4 },
@@ -1146,7 +1146,7 @@ harness.test('the chat input layout is saved with the HUD layout', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { chatInput = { x = 9, y = -9 } },
         scales = { chatInput = 1.25 },
@@ -1158,14 +1158,14 @@ harness.test('the chat input layout is saved with the HUD layout', function()
     harness.assertEqual(config.layout.offsets.chatInput.y, -0.95,
         'and the top edge while retaining a recovery margin')
     harness.assertEqual(config.layout.scales.chatInput, 1.25,
-        'and its size is retained for qbchat to apply')
+        'and its size is retained for kora_chat to apply')
 end)
 
 harness.test('a submitted layout is re-validated, never merely stored', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = {
             gauges = { x = 9.0, y = -9.0 },           -- far off screen
@@ -1196,7 +1196,7 @@ harness.test('corner-pinned sections can cross the full screen', function()
     local hud = loadHud({ bridgePush = true })
 
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = {
             identity = { x = -9.0, y = -9.0 },
@@ -1214,7 +1214,7 @@ end)
 harness.test('a corrupt stored layout costs the layout, not the HUD', function()
     -- A player can edit their own KVP file, and an older version of this
     -- resource may have written a different shape.
-    local hud = loadHud({ bridgePush = true, kvp = { ['qbhud:layout'] = 'not json at all' } })
+    local hud = loadHud({ bridgePush = true, kvp = { ['kora_hud:layout'] = 'not json at all' } })
 
     harness.assertTrue(hud.loaded, 'client/hud.lua still loads: ' .. tostring(hud.loadError))
     local config = configPayload(hud)
@@ -1224,28 +1224,28 @@ end)
 harness.test('the reset command clears the stored layout', function()
     local hud = loadHud({ bridgePush = true })
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { gauges = { x = 0.1, y = 0.1 } },
         scales = { gauges = 1.2 },
     }, function() end)
-    harness.assertTrue(hud.kvp['qbhud:layout'] ~= nil, 'sanity: something was stored')
+    harness.assertTrue(hud.kvp['kora_hud:layout'] ~= nil, 'sanity: something was stored')
 
     hud.commands.hudlayoutreset()
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil,
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil,
         'reset is the way out for a player whose layout put a section somewhere unreachable')
 end)
 
 harness.test('a pinned layout accepts nothing', function()
-    local hud = loadHud({ bridgePush = true, layout = { movable = false, command = 'hudlayout', kvpKey = 'qbhud:layout' } })
+    local hud = loadHud({ bridgePush = true, layout = { movable = false, command = 'hudlayout', kvpKey = 'kora_hud:layout' } })
 
     -- A finish callback sent while no editor is open must have no authority to
     -- persist layout data, even if it claims to be a confirmation.
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { gauges = { x = 0.1, y = 0.1 } },
     }, function() end)
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'movable = false stores nothing')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil, 'movable = false stores nothing')
 
     hud.commands.hudlayout()
     harness.assertFalse(hud.nuiFocus().mouse, 'and never takes focus for an editor it will not honour')
@@ -1488,29 +1488,29 @@ end)
 harness.test('hiding or logging out closes the owned editor without saving its preview', function()
     for _, action in ipairs({ 'hide', 'logout' }) do
         local saved = json.encode({ offsets = { identity = { x = 0.1, y = 0.2 } } })
-        local hud = loadHud({ bridgePush = true, kvp = { ['qbhud:layout'] = saved } })
+        local hud = loadHud({ bridgePush = true, kvp = { ['kora_hud:layout'] = saved } })
         harness.assertTrue(hud.loaded, tostring(hud.loadError))
         hud.commands.hudlayout()
         hud.reset()
         if action == 'hide' then hud.exported.hide() else hud.setLoggedIn(false) end
         harness.assertFalse(hud.nuiFocus().keyboard, action .. ' releases editor keyboard focus')
         harness.assertFalse(hud.nuiFocus().mouse, action .. ' releases editor mouse focus')
-        harness.assertEqual(hud.sent[1].action, 'qbhud:layoutMode', 'close editing before hiding the page')
+        harness.assertEqual(hud.sent[1].action, 'kora_hud:layoutMode', 'close editing before hiding the page')
         harness.assertEqual(hud.sent[1].data, false, 'the editor exits its mode')
-        harness.assertEqual(hud.sent[2].action, 'qbhud:visibility', 'existing visibility wire follows the close')
+        harness.assertEqual(hud.sent[2].action, 'kora_hud:visibility', 'existing visibility wire follows the close')
         harness.assertEqual(hud.exported.isVisible(), false, 'the HUD is hidden')
         local replies = 0
-        hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { identity = { x = 0.4, y = 0.3 } } },
+        hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { identity = { x = 0.4, y = 0.3 } } },
             function() replies = replies + 1 end)
         harness.assertEqual(replies, 1, 'a late finish callback still receives its normal reply')
-        harness.assertEqual(hud.kvp['qbhud:layout'], saved, 'a closed editor cannot overwrite saved geometry')
+        harness.assertEqual(hud.kvp['kora_hud:layout'], saved, 'a closed editor cannot overwrite saved geometry')
         hud.exported.show()
         if action == 'logout' then hud.setLoggedIn(true) end
         hud.commands.hudlayout()
         harness.assertTrue(hud.nuiFocus().keyboard, 'the visible HUD can reopen its editor')
-        hud.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+        hud.callbacks['kora_hud:finishLayout']({ confirmed = false }, function() end)
         harness.assertFalse(hud.nuiFocus().keyboard, 'the normal cancel path still closes focus')
-        harness.assertEqual(hud.kvp['qbhud:layout'], saved, 'cancel still preserves the saved layout')
+        harness.assertEqual(hud.kvp['kora_hud:layout'], saved, 'cancel still preserves the saved layout')
     end
 end)
 
@@ -1528,14 +1528,14 @@ harness.test('a hidden HUD cannot acquire editing focus or clear another resourc
     hud.exported.hide()
     hud.setLoggedIn(false)
     harness.assertEqual(#hud.nativeCalls, before, 'already-hidden operations do not change unrelated native state')
-    harness.assertEqual(hud.countAction('qbhud:layoutMode'), 0, 'a hidden command never opens an invisible editor')
+    harness.assertEqual(hud.countAction('kora_hud:layoutMode'), 0, 'a hidden command never opens an invisible editor')
     harness.assertTrue(hud.nuiFocus().keyboard, 'another resource keeps keyboard focus')
     harness.assertTrue(hud.nuiFocus().mouse, 'another resource keeps mouse focus')
-    hud.kvp['qbhud:layout'] = 'old layout'
+    hud.kvp['kora_hud:layout'] = 'old layout'
     hud.commands.hudlayoutreset()
     harness.assertEqual(#hud.nativeCalls, before, 'reset clears focus only if this HUD owns an editor')
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'reset still clears the saved layout')
-    harness.assertTrue(hud.contains('qbhud:layoutReset'), 'reset still sends the existing reset message')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil, 'reset still clears the saved layout')
+    harness.assertTrue(hud.contains('kora_hud:layoutReset'), 'reset still sends the existing reset message')
     harness.assertEqual(hud.notices[#hud.notices].type, 'success', 'reset still reports success')
 end)
 
@@ -1569,7 +1569,7 @@ harness.test('own stop restores the owned minimap state before releasing its sca
     harness.assertEqual(hud.nativeCalls[before + 4].kind, 'release', 'release after restoring consumers')
     harness.assertEqual(hud.nativeCalls[before + 4].phase, 'onResourceStop', 'release during synchronous pre-stop')
     harness.assertEqual(hud.nativeCalls[before + 4].value, 'scaleform:minimap', 'release exactly the requested handle')
-    harness.assertEqual(hud.sent[1].action, 'qbhud:layoutMode', 'stop closes the existing editor wire')
+    harness.assertEqual(hud.sent[1].action, 'kora_hud:layoutMode', 'stop closes the existing editor wire')
     harness.assertEqual(hud.sent[1].data, false, 'stop exits editing mode')
     harness.assertEqual(hud.lastVisibility(), false, 'stop sends the existing hidden state')
     local stopped = #hud.nativeCalls
@@ -1619,11 +1619,11 @@ harness.test('the pause menu hides the NUI and restores it, one message per chan
     harness.assertEqual(hud.exported.isVisible(), true, 'the HUD itself is still visible for everything else')
     hud.reset()
     hud.tick(); hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:visibility'), 0, 'no repeated visibility messages while paused')
+    harness.assertEqual(hud.countAction('kora_hud:visibility'), 0, 'no repeated visibility messages while paused')
     hud.setPaused(false)
     hud.tick()
     harness.assertEqual(hud.lastVisibility(), true, 'closing the pause menu shows the NUI again')
-    harness.assertEqual(hud.countAction('qbhud:visibility'), 1, 'exactly one message on close')
+    harness.assertEqual(hud.countAction('kora_hud:visibility'), 1, 'exactly one message on close')
 end)
 
 harness.test('closing the pause menu does not undo another hide reason', function()
@@ -1652,7 +1652,7 @@ harness.test('hideOnPauseMenu = false leaves the HUD alone and is live', functio
     hud.reset()
     hud.setPaused(true)
     hud.tick()
-    harness.assertEqual(hud.countAction('qbhud:visibility'), 0, 'option off: nothing sent')
+    harness.assertEqual(hud.countAction('kora_hud:visibility'), 0, 'option off: nothing sent')
     local live = loadHud()
     live.tick()
     live.setPaused(true)
@@ -1663,7 +1663,7 @@ end)
 -- Per-player "Minimap only in vehicle" (Config.hud.minimapVehicleOnly).
 local function saveVehicleOnly(hud, value)
     hud.commands.hudlayout()
-    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = {}, minimapVehicleOnly = value }, function() end)
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = {}, minimapVehicleOnly = value }, function() end)
 end
 
 harness.test('minimap-only-in-vehicle is off by default and leaves the radar alone', function()
@@ -1740,7 +1740,7 @@ harness.test('/hudlayoutreset puts minimap-only-in-vehicle back to the server de
     harness.assertEqual(hud.radar[#hud.radar], false, 'sanity: on foot with the option on')
     hud.commands.hudlayoutreset()
     harness.assertEqual(hud.radar[#hud.radar], true, 'the radar is handed back at once')
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'the saved layout is gone')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil, 'the saved layout is gone')
     local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
     harness.assertFalse(configPayload(reloaded).layout.minimapVehicleOnly, 'and stays at the default')
 end)
@@ -1748,7 +1748,7 @@ end)
 harness.test('allowPlayerChange = false forces the default and hides the switch', function()
     local seeded = loadHud({ bridgePush = true })
     saveVehicleOnly(seeded, true)
-    harness.assertTrue(seeded.kvp['qbhud:layout'] ~= nil, 'sanity: an earlier choice is saved')
+    harness.assertTrue(seeded.kvp['kora_hud:layout'] ~= nil, 'sanity: an earlier choice is saved')
 
     local locked = loadHud({ bridgePush = true, minimap = 'always', kvp = seeded.kvp,
         minimapVehicleOnly = { default = false, allowPlayerChange = false } })
@@ -1859,13 +1859,13 @@ harness.test('preview reaches the owner only while editing, re-validated', funct
     hud.exported.registerUiElement(CHAT_DEF)
     local before = countEvents(hud, 'kora_hud:ui:apply')
 
-    hud.callbacks['qbhud:uiPreview']({ elements = { chatInput = { x = 0.2, y = 0.1 } } }, function() end)
+    hud.callbacks['kora_hud:uiPreview']({ elements = { chatInput = { x = 0.2, y = 0.1 } } }, function() end)
     harness.assertEqual(countEvents(hud, 'kora_hud:ui:apply'), before, 'nothing is previewed with the editor closed')
 
     hud.commands.ui()
-    harness.assertTrue(hud.contains('qbhud:uiElements'), 'opening sends the element list')
+    harness.assertTrue(hud.contains('kora_hud:uiElements'), 'opening sends the element list')
     harness.assertTrue(countEvents(hud, 'kora_hud:ui:editing') >= 1, 'and tells owners the editor opened')
-    hud.callbacks['qbhud:uiPreview']({ elements = {
+    hud.callbacks['kora_hud:uiPreview']({ elements = {
         chatInput = { x = 7, y = -0.3, scale = 9, hidden = true, settings = { fadeSeconds = 12.4, feedWhenClosed = 'yes', mode = 'zzz', extra = 1 } },
         unknown = { x = 0.1, y = 0.1 },
     } }, function() end)
@@ -1887,7 +1887,7 @@ harness.test('save persists hidden and settings; cancel reverts owners to the sa
     hud.exported.registerUiElement(CHAT_DEF)
 
     hud.commands.ui()
-    hud.callbacks['qbhud:finishLayout']({
+    hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
         offsets = { chatInput = { x = 0.1, y = 0.2 }, gauges = { x = 0.1, y = -0.1 } },
         hidden = { status = true, chatInput = true, gauges = 'yes' },
@@ -1905,7 +1905,7 @@ harness.test('save persists hidden and settings; cancel reverts owners to the sa
     harness.assertEqual(config.layout.hidden.gauges, nil, 'hidden must be exactly true')
     harness.assertEqual(config.layout.hidden.chatInput, nil, 'a non-hideable element cannot be stored hidden')
     harness.assertTrue(config.layout.editor.enabled, 'the page is told the editor is on')
-    local blob = reloaded.kvp['qbhud:layout']
+    local blob = reloaded.kvp['kora_hud:layout']
     harness.assertEqual(json.decode(blob).v, 2, 'the blob is versioned')
     harness.assertEqual(json.decode(blob).chatInput.settings.bogus, nil, 'unknown settings are not stored')
     harness.assertEqual(json.decode(blob).gauges.settings, nil, 'settings for unregistered ids are not stored')
@@ -1913,8 +1913,8 @@ harness.test('save persists hidden and settings; cancel reverts owners to the sa
         'a re-registering owner gets its saved settings back')
 
     reloaded.commands.ui()
-    reloaded.callbacks['qbhud:uiPreview']({ elements = { chatInput = { x = 0.5, y = 0.5 } } }, function() end)
-    reloaded.callbacks['qbhud:finishLayout']({ confirmed = false }, function() end)
+    reloaded.callbacks['kora_hud:uiPreview']({ elements = { chatInput = { x = 0.5, y = 0.5 } } }, function() end)
+    reloaded.callbacks['kora_hud:finishLayout']({ confirmed = false }, function() end)
     harness.assertEqual(lastApply(reloaded, 'chatInput').args[3].x, 0.1, 'cancel puts the owner back on its saved layout')
 end)
 
@@ -1923,14 +1923,14 @@ harness.test('a saved element whose owner is not running is kept on save', funct
     hud.exported.registerUiElement({ id = 'inventory', rect = { x = 0.3, y = 0.2, w = 0.3, h = 0.6 },
         settings = { { key = 'playerSide', type = 'select', options = { 'left', 'right' }, default = 'left' } } })
     hud.commands.ui()
-    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { inventory = { x = -0.2, y = 0 } },
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { inventory = { x = -0.2, y = 0 } },
         settings = { inventory = { playerSide = 'right' } } }, function() end)
 
     -- Next session: kora_inventory has not started yet when the player saves.
     local later = loadHud({ bridgePush = true, kvp = hud.kvp })
     later.commands.ui()
-    later.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
-    local blob = json.decode(later.kvp['qbhud:layout'])
+    later.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
+    local blob = json.decode(later.kvp['kora_hud:layout'])
     harness.assertEqual(blob.inventory.x, -0.2, 'the offline element keeps its position')
     harness.assertEqual(blob.inventory.settings.playerSide, 'right', 'and its settings')
 end)
@@ -1939,9 +1939,9 @@ harness.test('/uireset wipes the layout and resets every owner', function()
     local hud = loadHud({ bridgePush = true, invoker = 'kora_chat' })
     hud.exported.registerUiElement(CHAT_DEF)
     hud.commands.ui()
-    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { chatInput = { x = 0.3, y = 0.3 } } }, function() end)
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { chatInput = { x = 0.3, y = 0.3 } } }, function() end)
     hud.commands.uireset()
-    harness.assertEqual(hud.kvp['qbhud:layout'], nil, 'the KVP is deleted')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], nil, 'the KVP is deleted')
     local apply = lastApply(hud, 'chatInput')
     harness.assertEqual(apply.args[4], 'reset', 'owners are told it was a reset')
     harness.assertEqual(apply.args[3].x, 0, 'and get the default layout')
@@ -1958,16 +1958,16 @@ end)
 harness.test('an oversized layout is refused rather than stored', function()
     local hud = loadHud({ bridgePush = true })
     hud.commands.ui()
-    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
-    local before = hud.kvp['qbhud:layout']
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.1, y = 0 } } }, function() end)
+    local before = hud.kvp['kora_hud:layout']
     -- The mock json encoder returns short tokens, so emulate an oversized
     -- encode for this one write.
     local encode = json.encode
     json.encode = function() return string.rep('x', 20000) end
     hud.commands.ui()
-    hud.callbacks['qbhud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.2, y = 0 } } }, function() end)
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, offsets = { gauges = { x = 0.2, y = 0 } } }, function() end)
     json.encode = encode
-    harness.assertEqual(hud.kvp['qbhud:layout'], before, 'the previous layout is kept')
+    harness.assertEqual(hud.kvp['kora_hud:layout'], before, 'the previous layout is kept')
     harness.assertTrue(#hud.notices > 0, 'and the player is told')
 end)
 

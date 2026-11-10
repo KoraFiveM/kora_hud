@@ -7,7 +7,7 @@ local harness = require('harness')
 
 local function loadBridge(initialState, initialData, initialMode, sessionStarted)
     local handlers, threads, registeredEvents = {}, {}, {}
-    -- One entry per root client/bridge/qbcore.lua subscribes to via kora_core's
+    -- One entry per root client/bridge/kora_core.lua subscribes to via kora_core's
     -- delta stream, so a test can fire several of them in one frame the way a
     -- server-side resync does.
     local dataChangeHandlers = {}
@@ -24,7 +24,7 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
     local getPlayerDataImpl = function() return playerData end
 
     _G.HudBridge = nil
-    _G.LocalPlayer = { state = { ['qbcore:loggedIn'] = initialState == true, ['qbmultichar:mode'] = initialMode } }
+    _G.LocalPlayer = { state = { ['kora_core:loggedIn'] = initialState == true, ['kora_multichar:mode'] = initialMode } }
     _G.PlayerId = function() return 3 end
     -- The real native returns -1 until the session is live, which is the whole
     -- reason the bridge defers its state bag registration.
@@ -58,7 +58,7 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
         },
     }
 
-    dofile(repoRoot .. 'client/bridge/qbcore.lua')
+    dofile(repoRoot .. 'client/bridge/kora_core.lua')
 
     return {
         bridge = HudBridge,
@@ -78,11 +78,11 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
         end,
         setCash = function(value)
             for _, handler in ipairs(handlers) do
-                if handler.key == 'qbcore:money:cash' then
-                    handler.callback('player:17', 'qbcore:money:cash', value, nil, true)
+                if handler.key == 'kora_core:money:cash' then
+                    handler.callback('player:17', 'kora_core:money:cash', value, nil, true)
                 end
             end
-            LocalPlayer.state['qbcore:money:cash'] = value
+            LocalPlayer.state['kora_core:money:cash'] = value
         end,
         startSession = function() sessionLive = true end,
         -- REAL CFX ORDERING: a state bag change handler fires BEFORE the new
@@ -93,19 +93,19 @@ local function loadBridge(initialState, initialData, initialMode, sessionStarted
         -- did live ("HUD never shows" #2). Do not "fix" the order.
         setLoginState = function(value)
             for _, handler in ipairs(handlers) do
-                if handler.key == 'qbcore:loggedIn' then
-                    handler.callback('player:17', 'qbcore:loggedIn', value, nil, true)
+                if handler.key == 'kora_core:loggedIn' then
+                    handler.callback('player:17', 'kora_core:loggedIn', value, nil, true)
                 end
             end
-            LocalPlayer.state['qbcore:loggedIn'] = value
+            LocalPlayer.state['kora_core:loggedIn'] = value
         end,
         setCinematicMode = function(value)
             for _, handler in ipairs(handlers) do
-                if handler.key == 'qbmultichar:mode' then
-                    handler.callback('player:17', 'qbmultichar:mode', value, nil, true)
+                if handler.key == 'kora_multichar:mode' then
+                    handler.callback('player:17', 'kora_multichar:mode', value, nil, true)
                 end
             end
-            LocalPlayer.state['qbmultichar:mode'] = value
+            LocalPlayer.state['kora_multichar:mode'] = value
         end,
         step = function()
             for _, thread in ipairs(threads) do
@@ -122,7 +122,7 @@ harness.test('the bridge gates HUD login on the local replicated state bag and P
 
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'HUD should start hidden before character login')
     harness.assertEqual(#bridge.handlers, 3, 'the bridge should register login, cinematic mode, and authoritative cash handlers')
-    harness.assertEqual(bridge.handlers[1].key, 'qbcore:loggedIn', 'handler should watch qbcore login state')
+    harness.assertEqual(bridge.handlers[1].key, 'kora_core:loggedIn', 'handler should watch kora_core login state')
     harness.assertEqual(bridge.handlers[1].bagName, 'player:17', 'handler should be scoped to LocalPlayer state')
 
     bridge.setLoginState(true)
@@ -135,8 +135,8 @@ harness.test('the bridge gates HUD login on the local replicated state bag and P
     bridge.setLoginState(false)
     harness.assertFalse(bridge.bridge.isLoggedIn(), 'logout hides immediately from the state bag')
     harness.assertEqual(transitions[2], false, 'logout change should be emitted immediately')
-    harness.assertFalse(bridge.events['QBCore:Client:OnPlayerLoaded'], 'qbhud must not register the legacy loaded event')
-    harness.assertFalse(bridge.events['QBCore:Client:OnPlayerUnload'], 'qbhud must not register the legacy unload event')
+    harness.assertFalse(bridge.events['QBCore:Client:OnPlayerLoaded'], 'kora_hud must not register the legacy loaded event')
+    harness.assertFalse(bridge.events['QBCore:Client:OnPlayerUnload'], 'kora_hud must not register the legacy unload event')
 end)
 
 harness.test('the cinematic mode state keeps the HUD hidden until spawn cleanup completes', function()
@@ -225,7 +225,7 @@ harness.test('a login that lands only after the session starts still shows the H
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'the deferred reconcile must still open the HUD gate')
 end)
 
-harness.test('a qbhud restart reconciles an already-present local login state', function()
+harness.test('a kora_hud restart reconciles an already-present local login state', function()
     local bridge = loadBridge(true, { money = {}, metadata = {} })
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'an already logged-in LocalPlayer should restore the HUD bridge')
 end)
@@ -261,7 +261,7 @@ harness.test('a reconcile that times out its first 200-frame round retries via r
     end
 
     harness.assertTrue(bridge.bridge.isLoggedIn(), 'a timed-out first round must retry rather than leave loggedIn stuck false')
-    harness.assertTrue(bridge.resyncCalls() > 0, 'a timed-out round should nudge qbcore via requestResync before retrying')
+    harness.assertTrue(bridge.resyncCalls() > 0, 'a timed-out round should nudge kora_core via requestResync before retrying')
 end)
 
 harness.test('a pcall-guarded getPlayerData error does not kill the reconcile thread', function()
@@ -271,7 +271,7 @@ harness.test('a pcall-guarded getPlayerData error does not kill the reconcile th
     -- would if kora_core's resource wasn't fully started yet), then succeeds.
     bridge.setPlayerDataImpl(function()
         calls = calls + 1
-        if calls == 1 then error('qbcore export not ready') end
+        if calls == 1 then error('kora_core export not ready') end
         return { money = { cash = 7 }, metadata = {} }
     end)
 
@@ -340,4 +340,4 @@ harness.test('harness icon state follows the kora_utils attached flag, not the u
     harness.assertFalse(fixture.bridge.getHarness())
 end)
 
-harness.report('qbcore_bridge')
+harness.report('kora_core_bridge')

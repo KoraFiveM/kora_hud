@@ -1,10 +1,10 @@
--- Real QBHudBridge adapter, sourcing live player data from kora_core (see
+-- Real KoraHudBridge adapter, sourcing live player data from kora_core (see
 -- shared/bridge.lua for the contract). This is the end-to-end proof that kora_core
 -- + kora_sql work against a consumer that already existed in this repo: the HUD
 -- shows real job/gang/money/needs, driven by kora_core's DELTA replication rather
 -- than polling framework internals.
 --
--- Swapped in by setting Config.bridge.adapter = "qbcore" and listing this file
+-- Swapped in by setting Config.bridge.adapter = "kora_core" and listing this file
 -- (instead of stub.lua) in kora_hud/fxmanifest.lua's client_scripts. client/hud.lua
 -- never changes -- it only ever calls HudBridge.getSnapshot()/onChange.
 --
@@ -19,8 +19,8 @@ HudBridge = HudBridge or {}
 -- Character-session state is server-owned.  Do not use the legacy load/unload
 -- events here: they are compatibility signals, not the HUD's authority.  The
 -- state bag persists across kora_hud restarts and is replicated to LocalPlayer.
-local LOGIN_STATE = 'qbcore:loggedIn'
-local CINEMATIC_MODE_STATE = 'qbmultichar:mode'
+local LOGIN_STATE = 'kora_core:loggedIn'
+local CINEMATIC_MODE_STATE = 'kora_multichar:mode'
 
 -- kora_multichar publishes a MODE STRING while a cinematic session is open and a
 -- falsy value once cleanup has finished (`false` on a current kora_multichar, nil
@@ -30,7 +30,7 @@ local CINEMATIC_MODE_STATE = 'qbmultichar:mode'
 local function inCinematicMode()
     return LocalPlayer.state[CINEMATIC_MODE_STATE] and true or false
 end
-local CASH_STATE = 'qbcore:money:cash'
+local CASH_STATE = 'kora_core:money:cash'
 local loggedIn = false
 local loginHandlers = {}
 local loginGeneration = 0
@@ -153,7 +153,7 @@ end
 -- ever writes. Every login, cinematic-mode and cash change would then be
 -- invisible to this adapter: `loggedIn` stays false for the whole session and
 -- the HUD never appears at all. kora_multichar/client.lua defers its own
--- `qbcore:loggedIn` handler for exactly this reason.
+-- `kora_core:loggedIn` handler for exactly this reason.
 --
 -- Waiting on the server id itself as well as the session flag: Kora.cache
 -- re-reads the native on kora_lib's shared tick (Config.cache.tickInterval), so
@@ -176,7 +176,7 @@ CreateThread(function()
     -- first). reconcileLogin's show path re-reads BOTH keys from the store,
     -- so any handler-triggered reconcile that could SHOW the HUD must wait a
     -- frame or it decides on stale state. This was the second "HUD never
-    -- shows" bug: the login sequence ends with qbmultichar:mode flipping
+    -- shows" bug: the login sequence ends with kora_multichar:mode flipping
     -- 'spawn' -> false, and the release-side reconcile re-read the store
     -- synchronously, still saw 'spawn', and concluded "still cinematic" --
     -- permanently, since that clear is a login's final transition. Hide paths
@@ -239,7 +239,7 @@ RegisterNetEvent('seatbelt:client:ToggleSeatbelt', function(enabled)
     seatbelt = enabled == true
 end)
 RegisterCommand('hud_toggleseatbelt', function()
-    TriggerEvent('qbsmallresources:client:toggleSeatbelt')
+    TriggerEvent('kora_utils:client:toggleSeatbelt')
 end, false)
 
 -- Cheap hot-path accessor for the vehicle sampler. Keeping this separate from
@@ -304,7 +304,7 @@ local function snapshotFrom(data)
     }
 end
 
----@return QBHudBridgeSnapshot
+---@return KoraHudBridgeSnapshot
 function HudBridge.getSnapshot()
     return snapshotFrom(exports.kora_core:getPlayerData())
 end
@@ -312,7 +312,7 @@ end
 -- Optional push path: subscribe to the money/job/gang/metadata roots and hand
 -- the consumer a fresh snapshot the instant any of them changes. client/hud.lua
 -- uses this when present and falls back to polling getSnapshot otherwise.
----@param handler fun(snapshot: QBHudBridgeSnapshot)
+---@param handler fun(snapshot: KoraHudBridgeSnapshot)
 function HudBridge.onChange(handler)
     dataHandlers[#dataHandlers + 1] = handler
 

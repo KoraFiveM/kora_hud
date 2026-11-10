@@ -15,7 +15,7 @@ interface SeatbeltSoundPayload {
  * ./sounds/.
  */
 export function SeatbeltSound() {
-    useNuiEvent<SeatbeltSoundPayload>("qbhud:seatbeltSound", (data) => {
+    useNuiEvent<SeatbeltSoundPayload>("kora_hud:seatbeltSound", (data) => {
         const file = typeof data?.file === "string" ? data.file.replace(/[^\w.-]/g, "") : ""
         if (!file) return
         const volume = Math.min(1, Math.max(0, Number(data.volume) || 0))

@@ -36,7 +36,7 @@ function M.install()
     _G.source = nil
 
     -- Minimal kora_lib Kora stand-in -- only what a bridge adapter touches
-    -- directly (client/bridge/stub.lua and client/bridge/qbcore.lua both call
+    -- directly (client/bridge/stub.lua and client/bridge/kora_core.lua both call
     -- Kora.status.getActive() for the snapshot's `status` field).
     _G.Kora = { status = { getActive = function() return {} end } }
 

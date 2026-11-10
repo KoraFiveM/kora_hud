@@ -1,7 +1,7 @@
 -- qb-hud client events. Display only: nothing here writes server state or
 -- metadata. Needs and stress overlay the local snapshot until the next
 -- authoritative kora_core push replaces it; the rest are presentation flags
--- sent to the NUI on qbhud:compat.
+-- sent to the NUI on kora_hud:compat.
 HudCompat = {}
 
 local function clamp(value, min, max)

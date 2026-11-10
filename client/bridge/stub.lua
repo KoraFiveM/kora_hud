@@ -1,4 +1,4 @@
--- Stub QBHudBridge implementation (see shared/bridge.lua for the contract).
+-- Stub KoraHudBridge implementation (see shared/bridge.lua for the contract).
 -- Returns normalized mock data since no framework (QBCore/ESX/ox_core) is
 -- installed to source real job/gang/money/needs data from yet. Swapping this
 -- for a real adapter later means writing a new client/bridge/<name>.lua that
@@ -75,7 +75,7 @@ RegisterCommand("hudtest_stress", function(_, args)
     state.stress = math.max(0, math.min(100, tonumber(args[1]) or state.stress))
 end, false)
 
----@return QBHudBridgeSnapshot
+---@return KoraHudBridgeSnapshot
 function HudBridge.getSnapshot()
     return {
         job = state.job,

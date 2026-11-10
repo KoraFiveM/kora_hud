@@ -52,7 +52,7 @@ local function play(isBuckle)
 
     local file = isBuckle and (cfg.buckleFile or 'seatbelt_buckle.wav')
         or (cfg.unbuckleFile or 'seatbelt_unbuckle.wav')
-    SendNUIMessage({ action = 'qbhud:seatbeltSound', data = { file = file, volume = volume } })
+    SendNUIMessage({ action = 'kora_hud:seatbeltSound', data = { file = file, volume = volume } })
 end
 
 AddEventHandler('seatbelt:client:ToggleSeatbelt', function(enabled)

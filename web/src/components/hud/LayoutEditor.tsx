@@ -20,7 +20,7 @@ export const HUD_SECTIONS = {
     identity: "identity",
     /** Top-right: active kora_lib status effects. */
     status: "status",
-    /** qbchat's composer, stored by qbhud but rendered in qbchat's NUI. */
+    /** kora_chat's composer, stored by kora_hud but rendered in kora_chat's NUI. */
     chatInput: "chatInput",
 } as const
 

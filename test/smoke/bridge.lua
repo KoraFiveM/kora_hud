@@ -29,7 +29,7 @@ _G.Kora = {
 
 dofile(repoRoot .. "client/bridge/stub.lua")
 
-harness.test("getSnapshot returns every field the QBHudBridgeSnapshot contract documents", function()
+harness.test("getSnapshot returns every field the KoraHudBridgeSnapshot contract documents", function()
     local snapshot = HudBridge.getSnapshot()
 
     harness.assertTrue(type(snapshot.job) == "table", "job should be a table")

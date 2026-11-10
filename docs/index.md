@@ -10,10 +10,10 @@ through a single adapter interface (`HudBridge`, documented in
 code — `client/hud.lua` only ever calls `HudBridge.getSnapshot()` /
 `HudBridge.onChange()` / `HudBridge.isLoggedIn()`, so swapping the adapter
 never touches HUD logic. The kora_core adapter also observes the server-owned
-`LocalPlayer.state['qbmultichar:mode']` key: selection, mandatory spawning,
-and the scene studio remain hidden even after `qbcore:loggedIn` becomes true,
+`LocalPlayer.state['kora_multichar:mode']` key: selection, mandatory spawning,
+and the scene studio remain hidden even after `kora_core:loggedIn` becomes true,
 until that cinematic mode clears. Two adapters ship today:
-`client/bridge/qbcore.lua`
+`client/bridge/kora_core.lua`
 sources live data from kora_core's replicated player mirror (delta-pushed, not
 polled), and `client/bridge/stub.lua` fabricates normalized mock data with no
 framework installed at all, for standalone use or UI development. Which one
@@ -24,7 +24,7 @@ loads is a `fxmanifest.lua` `client_scripts` choice, documented by
 
 - [kora_lib](https://qbcore2.github.io/kora_lib/)
 - kora_core — **optional**. Only needed if you keep the shipped `kora_core` bridge
-  adapter (`client/bridge/qbcore.lua`) loaded. Swap `fxmanifest.lua`'s
+  adapter (`client/bridge/kora_core.lua`) loaded. Swap `fxmanifest.lua`'s
   `client_scripts` to `client/bridge/stub.lua` instead and kora_hud runs
   standalone with mock player data, no framework required.
 
@@ -38,9 +38,9 @@ ensure kora_hud
 ```
 (Drop `ensure kora_core` if you're running the stub adapter instead — see below.)
 
-By default `fxmanifest.lua` lists `client/bridge/qbcore.lua` in
+By default `fxmanifest.lua` lists `client/bridge/kora_core.lua` in
 `client_scripts`, and `config.lua`'s `Config.bridge.adapter` is set to
-`"qbcore"` to match. To run without kora_core, edit `fxmanifest.lua` to load
+`"kora_core"` to match. To run without kora_core, edit `fxmanifest.lua` to load
 `client/bridge/stub.lua` in its place and set `Config.bridge.adapter =
 "stub"` for consistency — `Config.bridge.adapter` itself is a documentation
 field (every adapter file's header comment references it), the actual load
@@ -53,7 +53,7 @@ changes either way.
 ```lua
 -- fxmanifest.lua
 client_scripts {
-    'client/bridge/stub.lua',   -- was 'client/bridge/qbcore.lua'
+    'client/bridge/stub.lua',   -- was 'client/bridge/kora_core.lua'
     'client/voice.lua',
     'client/vehicle.lua',
     'client/hud.lua'
@@ -62,7 +62,7 @@ client_scripts {
 ```lua
 -- config.lua
 Config.bridge = {
-    adapter = "stub",   -- was "qbcore"
+    adapter = "stub",   -- was "kora_core"
 }
 ```
 The stub seeds `cash = 500`, `bank = 5000`, full hunger/thirst, and slowly
@@ -126,7 +126,7 @@ values safely fall back to `kmh`.
 Config.layout = {
     movable = true,             -- false pins the layout for everyone
     command = 'hudlayout',
-    kvpKey  = 'qbhud:layout',
+    kvpKey  = 'kora_hud:layout',
 }
 ```
 Four HUD sections can be repositioned and resized (75%–150%), each persisted under a stable id: `gauges`
@@ -227,7 +227,7 @@ kora_hud provides `qb-hud` and listens to the stock client events
 `hud:client:ShowAccounts` and `seatbelt:client:ToggleCruise`. They are display
 only and never write server state or metadata: needs and stress overlay the local
 snapshot until the next kora_core update replaces them, `LoadMap` re-applies the
-minimap layout, and the other flags are sent to the NUI as `qbhud:compat`
+minimap layout, and the other flags are sent to the NUI as `kora_hud:compat`
 (the shipped NUI build does not render nitrous, harness, cruise or altitude yet).
 `/cash` and `/bank` (and `ShowAccounts`) show the player's own balance from the
 kora_core snapshot as a feed notification; the amount a caller passes is ignored.
@@ -264,7 +264,7 @@ real seatbelt system is wired into a vehicle resource.
 -- config.lua
 Config.voice = {
     enabled  = true,
-    resource = "qbvoice",
+    resource = "kora_voice",
 }
 ```
 `client/voice.lua` reads FiveM's own `NetworkIsPlayerTalking` native, which
@@ -295,7 +295,7 @@ while a character is logged in). It exposes **no client/server net events**.
 The other externally-triggerable actions are the `RegisterCommand`s listed in
 Usage examples above (`hud_toggleseatbelt` always; `hudtest_cash`/
 `hudtest_bank`/`hudtest_stress` on the stub adapter only), plus one internal
-NUI callback (`qbhud:ready`, used by the web page's own mount handshake).
+NUI callback (`kora_hud:ready`, used by the web page's own mount handshake).
 
 ### Bridge adapter interface (`shared/bridge.lua`)
 
@@ -304,14 +304,14 @@ this contract; `client/hud.lua` never reaches past it into framework
 internals:
 
 ```lua
----@class QBHudBridge
----@field getSnapshot fun(): QBHudBridgeSnapshot                        -- required
+---@class KoraHudBridge
+---@field getSnapshot fun(): KoraHudBridgeSnapshot                        -- required
 ---@field getSeatbelt (fun(): boolean) | nil                            -- optional, cheap accessor
----@field onChange (fun(handler: fun(snapshot: QBHudBridgeSnapshot)): nil) | nil  -- optional, else polled
+---@field onChange (fun(handler: fun(snapshot: KoraHudBridgeSnapshot)): nil) | nil  -- optional, else polled
 ---@field isLoggedIn (fun(): boolean) | nil                             -- optional, else always visible
 ---@field onLoginChange (fun(handler: fun(loggedIn: boolean)): nil) | nil -- optional
 
----@class QBHudBridgeSnapshot
+---@class KoraHudBridgeSnapshot
 ---@field job { name, label, grade, gradeLabel, onDuty }
 ---@field gang { name, label, grade, gradeLabel } | nil
 ---@field cash number
@@ -419,7 +419,7 @@ new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
   `'mph'`.
 - `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD
   sections, saved client-side in KVP. See "Let players move HUD sections".
-- `Config.bridge.adapter` — documents which adapter is loaded (`"qbcore"` by
+- `Config.bridge.adapter` — documents which adapter is loaded (`"kora_core"` by
   default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
 - `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and
   the voice resource used for optional `getTalkingMode()` range details.
@@ -463,7 +463,7 @@ change goes out on the frame it happened, and only a further change inside the
 interval is deferred to the scheduler's trailing pass.
 
 - `Config.poll.vitalsInterval` (150ms) — health/armour/stamina/talking
-  (`qbhud:vitals`). Stamina is the only field that moves continuously, so this
+  (`kora_hud:vitals`). Stamina is the only field that moves continuously, so this
   is the cadence that decides the resource's cost while the player is moving.
   Values are rounded to whole units first, so float drift below what the gauges
   can render never reaches the wire. The value is forwarded to the NUI, which
@@ -471,10 +471,10 @@ interval is deferred to the scheduler's trailing pass.
   rather than stepping — which makes this a pure cost knob: raise it to cut the
   message rate and the HUD looks exactly the same.
 - `Config.poll.playerInterval` (100ms) — job/gang/money/needs/status
-  (`qbhud:update`). Event-driven, so this only ever collapses a burst — e.g. a
+  (`kora_hud:update`). Event-driven, so this only ever collapses a burst — e.g. a
   kora_core resync firing the adapter's four root subscriptions in one frame.
 - `Config.poll.vehicleInterval` (250ms) — speed/fuel/engine/headlight refresh
-  while in a vehicle (`qbhud:vehicle`). The sampling task is inactive while on
+  while in a vehicle (`kora_hud:vehicle`). The sampling task is inactive while on
   foot, both edges (getting in, getting out) push immediately, and an unchanged
   reading — idling at a light — is sampled but not sent.
 - `Config.poll.bridgeInterval` (500ms) — fallback poll cadence for adapters
@@ -492,9 +492,9 @@ interval is deferred to the scheduler's trailing pass.
 Part of the [qbcore2](https://github.com/qbcore2) resource set:
 
 - [kora_lib](https://qbcore2.github.io/kora_lib/) — shared helper library
-- [qbsql](https://qbcore2.github.io/kora_sql/) — database driver
-- [qbcore](https://qbcore2.github.io/kora_core/) — framework core
-- [qbinventory](https://qbcore2.github.io/kora_inventory/) — headless inventory
-- [qbtarget](https://qbcore2.github.io/kora_target/) — targeting/interaction
-- [qbclothing](https://qbcore2.github.io/kora_clothing/) — clothing/wardrobe
+- [kora_sql](https://qbcore2.github.io/kora_sql/) — database driver
+- [kora_core](https://qbcore2.github.io/kora_core/) — framework core
+- [kora_inventory](https://qbcore2.github.io/kora_inventory/) — headless inventory
+- [kora_target](https://qbcore2.github.io/kora_target/) — targeting/interaction
+- [kora_clothing](https://qbcore2.github.io/kora_clothing/) — clothing/wardrobe
 - [full resource list ↗](https://github.com/orgs/qbcore2/repositories)

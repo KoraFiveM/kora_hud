@@ -4,16 +4,14 @@ lua54 'yes'
 use_experimental_fxv2_oal 'yes'
 
 name 'kora_hud'
--- Keep the legacy resource name resolvable for exports['qbhud'] callers.
-provide 'qbhud'
 provide 'qb-hud'
 author 'Jamie'
 version '0.1.0'
-description 'Configurable HUD built on kora_lib and qbtheme'
+description 'Configurable HUD built on kora_lib and kora_theme'
 
 dependency 'kora_theme'
 dependency 'kora_lib'
--- The HUD now sources real player data from kora_core via client/bridge/qbcore.lua
+-- The HUD now sources real player data from kora_core via client/bridge/kora_core.lua
 -- (Config.bridge.adapter = 'kora_core'). Revert to the stub by flipping both.
 dependency 'kora_core'
 dependency 'kora_fuel'
@@ -32,7 +30,7 @@ shared_scripts {
 -- own fxmanifest.lua uses for local/**.
 client_scripts {
     '@kora_theme/client/bridge.lua',
-    'client/bridge/qbcore.lua',
+    'client/bridge/kora_core.lua',
     'client/voice.lua',
     'client/vehicle.lua',
     'client/seatbelt_sound.lua',
@@ -41,7 +39,9 @@ client_scripts {
     'client/compat.lua',
     -- /ui element registry (HudUi). Before hud.lua, which owns the editor.
     'client/uiregistry.lua',
-    'client/hud.lua'
+    'client/hud.lua',
+    -- Optional FFT hooks: returns immediately unless fft_kora_hooks is true.
+    'fft_hooks.lua'
 }
 
 -- stream/kora_hud_squaremap.ytd (the square radar mask, built by
