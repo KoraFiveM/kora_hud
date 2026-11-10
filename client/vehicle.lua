@@ -39,11 +39,12 @@ function Vehicle.getSnapshot(vehicle)
         return exports.kora_fuel:isElectricVehicle(vehicle)
     end)
 
+    -- The native's BOOL* outputs reach Lua as integers (0/1), not booleans.
     local headlights = 'off'
     if lightsOk then
-        if highbeamsOn == true then
+        if highbeamsOn == true or highbeamsOn == 1 then
             headlights = 'high'
-        elseif lightsOn == true then
+        elseif lightsOn == true or lightsOn == 1 then
             headlights = 'low'
         end
     end
