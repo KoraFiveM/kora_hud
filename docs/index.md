@@ -1,0 +1,500 @@
+---
+layout: default
+title: kora_hud
+---
+
+Configurable HUD for FiveM, built on kora_lib's cache primitives and kora_theme. All
+player data (job, gang, cash, bank, hunger/thirst, stress, seatbelt) comes
+through a single adapter interface (`HudBridge`, documented in
+`shared/bridge.lua`) rather than framework calls scattered through the render
+code — `client/hud.lua` only ever calls `HudBridge.getSnapshot()` /
+`HudBridge.onChange()` / `HudBridge.isLoggedIn()`, so swapping the adapter
+never touches HUD logic. The kora_core adapter also observes the server-owned
+`LocalPlayer.state['kora_multichar:mode']` key: selection, mandatory spawning,
+and the scene studio remain hidden even after `kora_core:loggedIn` becomes true,
+until that cinematic mode clears. Two adapters ship today:
+`client/bridge/kora_core.lua`
+sources live data from kora_core's replicated player mirror (delta-pushed, not
+polled), and `client/bridge/stub.lua` fabricates normalized mock data with no
+framework installed at all, for standalone use or UI development. Which one
+loads is a `fxmanifest.lua` `client_scripts` choice, documented by
+`Config.bridge.adapter`.
+
+## Requirements
+
+- [kora_lib](https://qbcore2.github.io/kora_lib/)
+- kora_core — **optional**. Only needed if you keep the shipped `kora_core` bridge
+  adapter (`client/bridge/kora_core.lua`) loaded. Swap `fxmanifest.lua`'s
+  `client_scripts` to `client/bridge/stub.lua` instead and kora_hud runs
+  standalone with mock player data, no framework required.
+
+## Installation
+
+`server.cfg`, in this order:
+```
+ensure kora_lib
+ensure kora_core
+ensure kora_hud
+```
+(Drop `ensure kora_core` if you're running the stub adapter instead — see below.)
+
+By default `fxmanifest.lua` lists `client/bridge/kora_core.lua` in
+`client_scripts`, and `config.lua`'s `Config.bridge.adapter` is set to
+`"kora_core"` to match. To run without kora_core, edit `fxmanifest.lua` to load
+`client/bridge/stub.lua` in its place and set `Config.bridge.adapter =
+"stub"` for consistency — `Config.bridge.adapter` itself is a documentation
+field (every adapter file's header comment references it), the actual load
+is driven by which file `client_scripts` lists. `client/hud.lua` needs no
+changes either way.
+
+## Usage examples
+
+### Switch the bridge adapter (kora_core -> standalone stub)
+```lua
+-- fxmanifest.lua
+client_scripts {
+    'client/bridge/stub.lua',   -- was 'client/bridge/kora_core.lua'
+    'client/voice.lua',
+    'client/vehicle.lua',
+    'client/hud.lua'
+}
+```
+```lua
+-- config.lua
+Config.bridge = {
+    adapter = "stub",   -- was "kora_core"
+}
+```
+The stub seeds `cash = 500`, `bank = 5000`, full hunger/thirst, and slowly
+drains hunger/thirst every minute so the HUD visibly updates with nothing
+else installed.
+
+### Toggle which HUD elements render
+```lua
+-- config.lua
+Config.hud = {
+    dynamic = true,   -- hide gauges (health/stamina/hunger/thirst/fuel/armour/stress)
+                       -- while they're at their neutral value
+    elements = {
+        mic          = true,
+        cash         = true,
+        bank         = true,
+        hungerThirst = true,
+        stamina      = true,
+        stress       = false,  -- e.g. disable the stress gauge entirely
+        vehicle      = true,   -- speed/fuel/engine/headlights/seatbelt, in-vehicle only
+    },
+}
+```
+`elements.mic` also gates the voice-talking sampler thread in
+`client/voice.lua` (`Voice.setActive`) — disabling it stops
+`NetworkIsPlayerTalking` polling entirely, not just the on-screen icon.
+
+### Show cash and bank one at a time
+```lua
+-- config.lua
+Config.hud.money = {
+    scrollAccounts     = true,   -- one account at a time instead of both rows
+    scrollAccountsTime = 5000,   -- ms each account is shown for
+}
+```
+Off by default — cash and bank side by side is the pre-existing behaviour, and
+upgrading shouldn't silently hide half of it. Cycling only happens when
+**both** `elements.cash` and `elements.bank` are on; with one of them off
+there's nothing to alternate with, so the enabled account is simply shown
+permanently. The swap is a short fade/slide on the money row only, nothing
+else in the panel moves.
+
+### Choose vehicle speed units
+
+```lua
+-- config.lua
+Config.hud.speedUnit = 'kmh' -- kilometres per hour (default)
+Config.hud.speedUnit = 'mph' -- miles per hour
+```
+The selected unit controls both the speedometer value and its label. Unknown
+values safely fall back to `kmh`.
+
+### Let players move HUD sections
+```
+/hudlayout        -- enter layout edit mode; Confirm or Cancel to leave
+/hudlayoutreset   -- forget the saved layout, back to the shipped positions
+/id               -- show or hide your local server ID in the player HUD
+```
+```lua
+-- config.lua
+Config.layout = {
+    movable = true,             -- false pins the layout for everyone
+    command = 'hudlayout',
+    kvpKey  = 'kora_hud:layout',
+}
+```
+Four HUD sections can be repositioned and resized (75%–150%), each persisted under a stable id: `gauges`
+(bottom-centre — the gauge row), `vehicle` (bottom-centre — vehicle telemetry), `identity`
+(bottom-right — mic, job/gang, money) and `status` (top-right — active status
+effects), plus `chatInput` (the kora_chat composer), which can be repositioned and resized.
+The chat preview in the
+editor moves and scales only the input and its command suggestions; received messages
+stay in their normal position.
+
+`/hudlayout` is an explicit **mode**, not an always-on affordance: the HUD is a
+click-through overlay during play and has to stay that way, so it takes NUI
+focus, dims the screen and puts a move handle plus a resize grip on each resizable
+section. Drag the resize grip left or right to adjust its size. These are regular
+pointer gestures, not browser HTML5 drag-and-drop controls. **Confirm** saves the
+new positions and component sizes; **Cancel** (or Escape) restores the layout from when
+the editor opened; either action hands focus back to the game. Dragging itself
+only previews the layout and does not write it.
+
+There is no editor panel across the top of the HUD. Each resizable section has
+its own attached Move, Resize and Align icons: drag Move to reposition (hold
+Control to snap to a 5% viewport grid; hold Shift to snap to 45° angles), drag Resize left or right to scale, and click Align to cycle Left, Centre and Right
+for the elements inside it; the component itself stays where it was placed.
+The gauge row also has an Anchor toggle. It is on by default, keeping gauges
+near the bottom of the screen while on foot, then moving them above the vehicle
+panel as it slides in. Turn it off to keep gauges at their fixed layout position.
+A compact three-icon container in the centre of the screen confirms the preview,
+closes without saving, or resets to the shipped layout.
+
+Offsets are stored as **fractions of the viewport**, not pixels. The editor
+keeps each section's rendered box on screen, so a status stack can be placed
+flush with the bottom edge without its controls becoming unreachable. This also
+works correctly on scaled high-resolution displays. Each section's shipped
+corner remains its zero point, so a player with nothing saved sees exactly the
+default layout.
+
+Storage is a client-side FiveM KVP key (`Config.layout.kvpKey`), so a layout is
+per player *and per machine*: no database column, no server round trip, and
+nothing about it ever leaves the client. The stored blob is treated as
+untrusted input on read and re-validated/clamped on write in `client/hud.lua`
+— the NUI stays render-only and has no authority over anything but where it
+draws its own boxes. `movable = false` makes `/hudlayout` report that moving
+sections is disabled instead of opening the editor.
+
+### Unified `/ui` layout editor
+```
+/ui               -- one editor for the HUD, chat, inventory and minimap (also /hudsettings, /hudlayout)
+/uireset          -- forget the saved layout (same as /hudlayoutreset)
+```
+With `Config.uiEditor.enabled` (default on) the editor shows a panel at the top
+of the screen (dock it to the bottom with its arrow button): pick an element
+from the dropdown, or click it on screen, then use **Visible**, **Size**, its own
+settings and **Reset <element>**. **Save**, **Cancel** (Esc) and **Reset all**
+(asks twice) apply to the whole layout. HUD sections keep their handles; elements
+other resources render get an outline box you drag, with a corner grip to resize.
+`Config.uiEditor.enabled = false` restores the classic editor above exactly.
+
+Other resources register their own elements (client side):
+```lua
+-- Add the handler BEFORE registering: registration answers at once.
+AddEventHandler('kora_hud:ui:apply', function(owner, id, layout, reason)
+    if owner ~= GetCurrentResourceName() or id ~= 'myElement' then return end
+    -- layout = { x, y, scale, hidden, placed, settings = { ... } }, already validated
+end)
+AddEventHandler('kora_hud:ui:ready', register) -- kora_hud (re)started
+exports.kora_hud:registerUiElement({
+    id = 'myElement', label = 'My element', group = 'My resource',
+    rect = { x = 0.4, y = 0.1, w = 0.2, h = 0.1 },   -- zero point, viewport fractions
+    defaultOffset = { x = 0, y = 0 },                -- optional
+    origin = 'center top', movable = true, scalable = true, hideable = true,
+    scaleMin = 0.75, scaleMax = 1.25,
+    settings = { { key = 'compact', label = 'Compact', type = 'toggle', default = false } },
+})
+```
+`updateUiElement(id, { rect, defaultOffset })`, `unregisterUiElement(id)` and
+`getUiLayout(id)` complete the API; `kora_hud:ui:editing (bool)` tells owners
+the editor opened or closed. Registrations belong to the calling resource and
+are dropped when it stops; its saved layout is kept. Everything stays in the
+same client KVP (`v = 2`, additive), and the minimap's position and size are
+applied on top of `Config.hud.minimapLayout` (its visibility is the `/minimap`
+choice).
+
+### Drive HUD values manually for testing (stub adapter only)
+```
+/hudtest_cash 1500
+/hudtest_bank 25000
+/hudtest_stress 40
+```
+These commands are registered by `client/bridge/stub.lua` only — they don't
+exist when the kora_core adapter is loaded, since job/cash/etc. there come from
+kora_core itself (`exports.kora_core:addMoney`, `exports.kora_core:setJob`, ...).
+
+### qb-hud compatibility
+
+kora_hud provides `qb-hud` and listens to the stock client events
+`hud:client:UpdateNeeds`, `UpdateStress`, `UpdateNitrous`, `UpdateHarness`,
+`ToggleHealth`, `ToggleAirHud`, `ToggleShowSeatbelt`, `LoadMap`,
+`hud:client:ShowAccounts` and `seatbelt:client:ToggleCruise`. They are display
+only and never write server state or metadata: needs and stress overlay the local
+snapshot until the next kora_core update replaces them, `LoadMap` re-applies the
+minimap layout, and the other flags are sent to the NUI as `kora_hud:compat`
+(the shipped NUI build does not render nitrous, harness, cruise or altitude yet).
+`/cash` and `/bank` (and `ShowAccounts`) show the player's own balance from the
+kora_core snapshot as a feed notification; the amount a caller passes is ignored.
+`hud:server:getMenu` and the `menu`, `dev` and `resethud` commands are not provided.
+
+### Seatbelt sounds
+
+kora_hud plays a buckle / unbuckle sound for the local player whenever the
+seatbelt state changes (the `seatbelt:client:ToggleSeatbelt` event raised by
+kora_utils, or by the stub bridge's toggle). Entering or leaving a vehicle is
+silent. Settings in `Config.seatbelt.sound`, all read when the sound plays:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Turn the sounds off entirely. |
+| `volume` | `0.5` | 0.0-1.0, `nui` backend only. |
+| `backend` | `'nui'` | `'nui'` plays the bundled WAVs from the HUD page; `'native'` uses GTA frontend sounds (fixed volume). |
+| `buckleFile` / `unbuckleFile` | `seatbelt_buckle.wav` / `seatbelt_unbuckle.wav` | Files in `web/build/sounds` (source `web/public/sounds`); list new ones in `fxmanifest.lua` `files`. |
+| `native` | see config | `{ name, set }` per sound for the `native` backend. |
+
+The two bundled sounds were synthesised for this resource (decaying sine and
+noise clicks) and carry no third-party licence.
+
+### Toggle the seatbelt placeholder
+```
+/hud_toggleseatbelt
+```
+Bound to `B` by default via `Kora.keybind`. Stock FiveM has no seatbelt
+native at all, so both adapters own this as local placeholder state until a
+real seatbelt system is wired into a vehicle resource.
+
+### Point the mic indicator at a different voice resource
+```lua
+-- config.lua
+Config.voice = {
+    enabled  = true,
+    resource = "kora_voice",
+}
+```
+`client/voice.lua` reads FiveM's own `NetworkIsPlayerTalking` native, which
+reflects whichever Mumble-backed voice resource is running (pma-voice,
+saltychat, mumble-voip all work without extra integration). The configured
+resource may additionally expose `getTalkingMode() -> { index, name, label,
+range }`; when it does, the mic pill shows the current mode, signal level and
+range in metres. `kora_voice` provides that export. If it is absent or temporarily
+unavailable, the HUD safely falls back to the original mic-only indicator.
+`enabled = false` is a master kill switch for the whole indicator and its
+shared-scheduler sampling task.
+
+## API reference
+
+kora_hud exposes three client exports for other resources that need to take the
+HUD off screen (cutscenes, cameras, custom pause menus):
+
+```lua
+exports.kora_hud:hide()      -- force-hide the HUD regardless of login state
+exports.kora_hud:show()      -- clear the forced hide; login state still gates
+exports.kora_hud:isVisible() -- boolean: what the NUI is currently showing
+```
+
+`hide()` is an override, not a toggle of the login gate: logging in while
+force-hidden keeps the HUD hidden until `show()` clears the override, and
+`show()` during character select is a safe no-op (the HUD only ever renders
+while a character is logged in). It exposes **no client/server net events**.
+The other externally-triggerable actions are the `RegisterCommand`s listed in
+Usage examples above (`hud_toggleseatbelt` always; `hudtest_cash`/
+`hudtest_bank`/`hudtest_stress` on the stub adapter only), plus one internal
+NUI callback (`kora_hud:ready`, used by the web page's own mount handshake).
+
+### Bridge adapter interface (`shared/bridge.lua`)
+
+Every `client/bridge/<name>.lua` assigns a global `HudBridge` table satisfying
+this contract; `client/hud.lua` never reaches past it into framework
+internals:
+
+```lua
+---@class KoraHudBridge
+---@field getSnapshot fun(): KoraHudBridgeSnapshot                        -- required
+---@field getSeatbelt (fun(): boolean) | nil                            -- optional, cheap accessor
+---@field onChange (fun(handler: fun(snapshot: KoraHudBridgeSnapshot)): nil) | nil  -- optional, else polled
+---@field isLoggedIn (fun(): boolean) | nil                             -- optional, else always visible
+---@field onLoginChange (fun(handler: fun(loggedIn: boolean)): nil) | nil -- optional
+
+---@class KoraHudBridgeSnapshot
+---@field job { name, label, grade, gradeLabel, onDuty }
+---@field gang { name, label, grade, gradeLabel } | nil
+---@field cash number
+---@field bank number
+---@field hunger number     -- 0-100
+---@field thirst number     -- 0-100
+---@field stress number     -- 0-100
+---@field seatbelt boolean
+---@field status { name, severity }[] | nil   -- kora_lib Kora.status.getActive(), adapter-independent
+```
+Writing a new adapter (ESX, ox_core, ...) means implementing this table in a
+new `client/bridge/<name>.lua`, listing it in `fxmanifest.lua`'s
+`client_scripts` in place of the current adapter, and updating
+`Config.bridge.adapter` to match — `client/hud.lua`, `client/vehicle.lua`, and
+`client/voice.lua` need no changes.
+
+## Config highlights (`config.lua`)
+
+- `Config.hud.dynamic` — hide gauge elements while at their neutral value
+  (full health/stamina/hunger/thirst/fuel, empty armour/stress).
+- `Config.hud.elements.*` — per-element on/off (`mic`, `cash`, `bank`,
+  `hungerThirst`, `stamina`, `stress`, `vehicle`). Health/armour/job/gang are
+  always shown — they aren't independently toggleable.
+- `Config.hud.money.scrollAccounts` / `.scrollAccountsTime` — show one money
+  account at a time, alternating on that interval, instead of both rows. Only
+  applies while both the `cash` and `bank` elements are enabled.
+- `Config.hud.minimap` — `'always'` (never touch `DisplayRadar`), `'vehicle'`,
+  or `'never'`.
+- `Config.hud.minimapToggle` — lets players hide/show their own minimap with
+  `/minimap` (`command`) or a key bound in Settings > Key Bindings ("Toggle
+  minimap", `defaultKey` unbound by default). Layered on `Config.hud.minimap`:
+  the mode decides when the radar can show, the player's choice can hide it
+  further (or, with `allowOnFoot`, lift the vehicle-only gate for themselves),
+  and menus, pause, phone and forced-hidden HUD behave as before.
+  `enabled` (default `true`), `remember` (default `true`, saved in client KVP
+  `kora_hud:minimapHidden`) and `defaultVisible` (default `true`) are live.
+  `allowOnFoot` (default `true`, live) lets a player turn the minimap on while
+  on foot when the mode is `'vehicle'` (or minimap-only-in-vehicle hides it),
+  by toggling it or switching "Minimap only in vehicle" off in `/hudlayout`;
+  saved in client KVP `kora_hud:minimapOnFoot`. `'never'` is never overridden.
+  Players get a Kora notification on each toggle.
+- `Config.hud.hideOnPauseMenu` (default `true`, live) — hides the whole NUI
+  (gauges, job/cash pills, status effects such as Bleeding/Limping, vehicle
+  bar) while the pause menu or full map (ESC, P) is open and shows it again
+  when it closes. Polled on the HUD scheduler (`Config.poll.minimapInterval`),
+  one NUI message per open/close; forced hides, logout and the minimap toggle
+  are independent and unaffected.
+- `Config.hud.minimapVehicleOnly` — per-player "Minimap only in vehicle",
+  switched on in `/hudlayout` (a toggle under the confirm/cancel buttons) and
+  saved with that player's layout in the same client KVP (`Config.layout.kvpKey`),
+  so it survives reconnects; `/hudlayoutreset` puts it back to `default`. With
+  it on the radar is hidden on foot and shown in any seat of a vehicle (the same
+  test as `minimap = 'vehicle'`), also when `Config.hud.minimap` is `'always'`.
+  `Config.hud.minimap = 'never'`, the player's own `/minimap` hide choice and a
+  force-hidden HUD still win, and `DisplayRadar` is only called when the answer
+  changes, so other resources (such as the phone Maps app) are not fought.
+  - `default` (default `false`, live) — what a player who never chose gets;
+    `true` makes the minimap vehicle-only for everyone by default.
+  - `allowPlayerChange` (default `true`, live) — `false` hides the toggle and
+    forces `default` for every player, ignoring anything saved earlier. It is
+    also forced while `Config.layout.movable` is `false` (no editor).
+- `Config.hud.minimapLayout` — `enabled` (default `true`, `false` works) lets
+  kora_hud own the minimap: it positions the minimap, mask and blur/border
+  components from `shapes.<shape>.rects`, swaps the radar mask and refreshes the
+  radar once through a single bigmap toggle. `false` leaves the stock minimap
+  untouched (and undoes anything applied earlier).
+  - `shape` (default `'square'`): `'square'` streams `stream/kora_hud_squaremap.ytd`
+    (texture dictionary `textureDict = 'kora_hud_squaremap'`, texture
+    `maskTexture = 'radarmasksm'`, built by `python3 tools/gen_minimap_ytd.py`,
+    pure Python, our own artwork) and replaces `radarmasksm` and `radarmask1g`
+    of `platform:/textures/graphics` with it, with clip type 0. The radar reads
+    its mask from the colour channels of a *streamed* texture (black = clipped,
+    grey = visible), which is why a runtime-built PNG never worked. `'circle'`
+    keeps the stock round mask (clip type 1, no texture replaced). `'stock'`
+    touches nothing (pure vanilla).
+  - Rects are left/bottom anchored `{ x, y, w, h }`. The shipped square values
+    are `minimap 0.0, -0.047, 0.1638, 0.183`, `minimap_mask 0.0, 0.0, 0.128, 0.20`,
+    `minimap_blur -0.01, 0.025, 0.262, 0.300`. Widths and heights are **not**
+    scaled for the aspect ratio (the engine already lays out L/B components in a
+    16:9 space); only x gets `aspectOffset` for screens wider than 16:9:
+    `((16/9 - aspect) / divisor) + bias` (defaults `3.6` and `-0.008`;
+    `tolerance` treats e.g. 1919x1079 as 16:9). The aspect comes from
+    `GetActiveScreenResolution`, with `GetAspectRatio` as the fallback, and is
+    re-checked every `pollMs` (default 1000); the layout is only re-applied when
+    it changed. The engine applies the safezone to L/B anchors itself, so
+    `safezoneCompensation` stays `0.0`.
+  - `x`, `y`, `scale` (defaults `0.0`, `0.0`, `1.0`) and `offsets.map/mask/blur`
+    nudge the rects; the defaults give exactly the numbers above.
+  - Timing: `dictTimeoutMs` (5000, on timeout a warning is printed and the stock
+    minimap is kept), `bigmapWaitMs` (50, between `SetBigmapActive(true)` and
+    `(false)`), `readySettleMs` (2000) and `readyTimeoutMs` (30000) wait for the
+    player ped and minimap scaleform before the first apply, `retryMs` (10000)
+    and `maxRetries` (3) retry a failed apply.
+  - `guardBigmap` (default `true`) forces a bigmap that stays on (seen on twice
+    in a row, pause menu closed) back off while kora_hud manages the layout.
+  - One owner (`client/minimap.lua`) runs every `SetBigmapActive` refresh;
+    overlapping requests (layout, resolution change, respawn, the
+    `applyMinimapLayout` export) coalesce. On resource stop (including a txAdmin
+    restart) both mask replacements, the clip type and the component rects are
+    put back to stock and the bigmap is forced off, then re-applied on start.
+  - `exports.kora_hud:applyMinimapLayout()` re-applies the layout (for resources
+    that moved the minimap temporarily) and returns `false` when the layout is
+    disabled or `'stock'`.
+- `Config.hud.speedUnit` — vehicle speedometer unit: `'kmh'` (default) or
+  `'mph'`.
+- `Config.layout.movable` / `.command` / `.kvpKey` — per-player draggable HUD
+  sections, saved client-side in KVP. See "Let players move HUD sections".
+- `Config.bridge.adapter` — documents which adapter is loaded (`"kora_core"` by
+  default); the actual load is driven by `fxmanifest.lua`'s `client_scripts`.
+- `Config.voice.enabled` / `Config.voice.resource` — master mic toggle and
+  the voice resource used for optional `getTalkingMode()` range details.
+- `Config.voice.interval` (200ms) — mic sampling cadence. The sample task is
+  skipped entirely unless the HUD is visible and the `mic` element is on.
+- `Config.poll.*` — see "Update cadences" below.
+
+## Update cadences
+
+The HUD is written against a per-frame budget. Three rules hold everywhere in
+`client/hud.lua`:
+
+1. **Nothing runs per frame, and everything periodic shares one thread.** FiveM
+   walks every live coroutine each frame to decide what to resume, so a
+   sleeping thread costs something every frame whether or not it had work.
+   Vitals flushes, player-data flushes, vehicle telemetry, the mic sample and
+   the minimap re-assert are all *tasks* on one scheduler; each declares
+   whether it has any reason to run, and the sleep is computed from the tasks
+   themselves rather than being a fixed tick. `client/voice.lua` deliberately
+   owns no thread of its own.
+2. **Nothing polls a value something else can announce.** Health, armour,
+   stamina, ped and vehicle lifecycle arrive as kora_lib cache notifications;
+   job/money/needs arrive on the adapter's push path. Only vehicle telemetry
+   and mic state are genuinely sampled, because nothing in the stack can
+   announce them.
+3. **No hot path reads back across the export boundary.** Every
+   `Kora.<module>.<fn>` access is a cross-resource export call, not a table
+   lookup — announced values are mirrored into plain locals and kept current
+   from the change handlers' own arguments.
+
+Everything is gated on visibility: while the HUD is hidden — character select,
+a cutscene, a logout — the resource owns **no thread** and does no work at all.
+
+Element toggles decide what the HUD *subscribes to*, not just what it paints.
+`elements.stamina = false` means the highest-frequency notification in the
+resource is never subscribed to; `elements.vehicle = false` means no vehicle
+native is ever sampled.
+
+Each wire channel is rate-limited by a **leading-edge** throttle: the first
+change goes out on the frame it happened, and only a further change inside the
+interval is deferred to the scheduler's trailing pass.
+
+- `Config.poll.vitalsInterval` (150ms) — health/armour/stamina/talking
+  (`kora_hud:vitals`). Stamina is the only field that moves continuously, so this
+  is the cadence that decides the resource's cost while the player is moving.
+  Values are rounded to whole units first, so float drift below what the gauges
+  can render never reaches the wire. The value is forwarded to the NUI, which
+  sets its gauge animation to match so the rings interpolate between samples
+  rather than stepping — which makes this a pure cost knob: raise it to cut the
+  message rate and the HUD looks exactly the same.
+- `Config.poll.playerInterval` (100ms) — job/gang/money/needs/status
+  (`kora_hud:update`). Event-driven, so this only ever collapses a burst — e.g. a
+  kora_core resync firing the adapter's four root subscriptions in one frame.
+- `Config.poll.vehicleInterval` (250ms) — speed/fuel/engine/headlight refresh
+  while in a vehicle (`kora_hud:vehicle`). The sampling task is inactive while on
+  foot, both edges (getting in, getting out) push immediately, and an unchanged
+  reading — idling at a light — is sampled but not sent.
+- `Config.poll.bridgeInterval` (500ms) — fallback poll cadence for adapters
+  with no `onChange` push path (the kora_core adapter pushes instead and never
+  uses this).
+- `Config.poll.minimapInterval` (250ms) — how often `SETUP_HEALTH_ARMOUR` is
+  re-issued to suppress the minimap's own health/armour cluster, which would
+  otherwise disagree with the radial gauges. The usual snippet for this runs on
+  a `Wait(0)` loop; the flag persists in the scaleform between calls, so a few
+  times a second is enough. Set to `0` to restore per-frame behaviour if the
+  stock cluster visibly flickers back in on your build.
+
+## Related resources
+
+Part of the [qbcore2](https://github.com/qbcore2) resource set:
+
+- [kora_lib](https://qbcore2.github.io/kora_lib/) — shared helper library
+- [kora_sql](https://qbcore2.github.io/kora_sql/) — database driver
+- [kora_core](https://qbcore2.github.io/kora_core/) — framework core
+- [kora_inventory](https://qbcore2.github.io/kora_inventory/) — headless inventory
+- [kora_target](https://qbcore2.github.io/kora_target/) — targeting/interaction
+- [kora_clothing](https://qbcore2.github.io/kora_clothing/) — clothing/wardrobe
+- [full resource list ↗](https://github.com/orgs/qbcore2/repositories)
