@@ -1,11 +1,11 @@
 ---
 title: Events
-sidebar_position: 6
+sidebar_position: 7
 ---
 
 # Events
 
-`kora_hud` has no server scripts and registers no server events. Nothing here crosses to the server except the stress metadata update described on [Stress](./stress.md).
+`kora_hud` has no server scripts and registers no server events. Nothing here crosses to the server except the stress metadata update described on [Stress](./api/stress.md).
 
 ## Events raised by kora_hud (client local)
 
@@ -28,7 +28,7 @@ Handlers that error are caught and printed; they never abort the editor.
 | `seatbelt:client:UseHarness` | `kora_utils` | Marks the harness progress bar so it does not lift the gauges unless `avoidHarnessBar` is on. |
 | `playerSpawned`, `onClientResourceStart`, `onResourceStop` | FiveM | Re-apply the minimap mask and layout, restore stock state on stop. |
 | `onClientResourceStop` | FiveM | Drops UI elements registered by the stopped resource (their saved layout is kept). |
-| `hud:client:*`, `seatbelt:client:ToggleCruise` | other resources | qb-hud compatibility, see [Compatibility](./compatibility.md). |
+| `hud:client:*`, `seatbelt:client:ToggleCruise` | other resources | qb-hud compatibility, see [Compatibility](./api/compat.md). |
 
 ## State bags read
 

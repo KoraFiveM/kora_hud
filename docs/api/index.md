@@ -1,13 +1,28 @@
 ---
-title: Exports
-sidebar_position: 5
+title: "API reference"
+sidebar_position: 1
 ---
 
-# Exports
+# API reference
+
+| Module | Namespace | Realms |
+| --- | --- | --- |
+| [HUD visibility](./visibility.md) | `exports.kora_hud` | client |
+| [Layout](./layout.md) | `exports.kora_hud` | client |
+| [UI element registry](./ui-registry.md) | `exports.kora_hud` | client |
+| [Minimap](./minimap.md) | `exports.kora_hud` | client |
+| [Legacy compat events](./compat.md) | `client events` | client |
+| [Voice integration](./voice-integration.md) | `Config.voice` | client |
+| [Stress gain](./stress.md) | `Config.stress` | client |
+
+## Code-derived reference
+
+Summary of every client export, from the current code.
+
 
 All exports are client side. There are no server exports.
 
-## Visibility
+### Visibility
 
 ```lua
 exports.kora_hud:hide()      -- force-hide the HUD regardless of login state
@@ -17,7 +32,7 @@ exports.kora_hud:isVisible() -- boolean, what the HUD currently shows
 
 `hide()` is an override: logging in while hidden keeps the HUD hidden until `show()`. `show()` does not force the HUD on; it is a no-op during character selection. While hidden by `hide()`, the radar is also held hidden when `Config.hud.hideMinimapWhenForcedHidden` is true (default).
 
-## Minimap
+### Minimap
 
 ```lua
 exports.kora_hud:applyMinimapLayout() -- boolean
@@ -25,7 +40,7 @@ exports.kora_hud:applyMinimapLayout() -- boolean
 
 Re-applies the managed minimap layout (for resources that moved the minimap temporarily). Returns `false` when `Config.hud.minimapLayout.enabled` is false or the shape is `'stock'`.
 
-## Layout
+### Layout
 
 ```lua
 exports.kora_hud:getLayout()
@@ -33,9 +48,9 @@ exports.kora_hud:getLayout()
 
 Returns the player's saved layout, already validated. Intended for `kora_chat` at start-up. The shape is internal to the HUD and the editor.
 
-## UI element registry
+### UI element registry
 
-Used to make an element of your own resource appear in the `/ui` editor. See [UI editor](./ui-editor.md) for the definition fields and the events.
+Used to make an element of your own resource appear in the `/ui` editor. See [UI editor](../ui-editor.md) for the definition fields and the events.
 
 | Export | Returns | Notes |
 | --- | --- | --- |

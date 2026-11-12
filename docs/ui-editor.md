@@ -1,6 +1,6 @@
 ---
 title: UI editor
-sidebar_position: 8
+sidebar_position: 9
 ---
 
 # UI editor
@@ -70,4 +70,4 @@ AddEventHandler('kora_hud:ui:ready', register) -- kora_hud (re)started
 | `scaleMin`, `scaleMax` | Clamped to 0.5-2.0; the range always includes 1.0. Defaults 0.75 and 1.5. |
 | `settings` | Up to 8, each with `key`, `label`, optional `description` and `type`: `toggle` (`default`), `range` (`min`, `max`, `step`, `default`, `unit`, `zeroLabel`) or `select` (`options`, up to 12, `default`). Invalid settings are dropped silently. |
 
-`kora_hud:ui:editing` tells owners when the editor opens or closes. Registrations belong to the calling resource and are dropped when it stops; its saved layout is kept. Only `rect` and `defaultOffset` can be changed later with `updateUiElement`. See [Exports](./exports.md) and [Events](./events.md).
+`kora_hud:ui:editing` tells owners when the editor opens or closes. Registrations belong to the calling resource and are dropped when it stops; its saved layout is kept. Only `rect` and `defaultOffset` can be changed later with `updateUiElement`. See [Exports](./api/index.md) and [Events](./events.md).
