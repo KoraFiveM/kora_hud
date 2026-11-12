@@ -1,9 +1,65 @@
 ---
-title: Minimap
-sidebar_position: 9
+title: "Minimap"
+sidebar_position: 5
 ---
 
+
 # Minimap
+
+Owns the stock FiveM minimap's position, mask texture and clip type per `Config.hud.minimapLayout`, plus the separate visibility layers (`Config.hud.minimap` mode, the player `/minimap` toggle, and `Config.hud.minimapVehicleOnly`) — see the Config tables in How to use for the full toggle reference.
+
+Namespace: `exports.kora_hud` · Source: `client/minimap.lua`
+
+## How it works
+
+Minimap component rects and masks are only re-read by the engine on a bigmap toggle, so every change is followed by one owner-serialised `SetBigmapActive(true)` → wait → `(false)` refresh rather than one per caller. `Config.hud.minimapLayout.guardBigmap` additionally forces a stuck-on bigmap back off (two consecutive detections, so a short deliberate toggle by another script is left alone) while kora_hud manages the layout and the pause menu is closed.
+
+## Terms used on this page
+
+| Term | Meaning |
+| --- | --- |
+| Managed | True when `Config.hud.minimapLayout.enabled` is true and `shape` is not `'stock'` — kora_hud owns the component rects/mask; otherwise the stock minimap is left alone (or any earlier change undone). |
+
+## Functions
+
+One export, for the one case Lua on its own cannot cover: restoring the layout after another resource changed it.
+
+### `exports.kora_hud:applyMinimapLayout()`
+
+Re-applies kora_hud's minimap layout (position, mask, clip type) right away. Intended for a resource that moved the minimap itself temporarily (for example a phone Maps app) and needs it put back exactly as kora_hud would have it.
+
+**Parameters**
+
+
+
+**Returns**
+
+- **applied** — `true` once re-applied; `false` when `Config.hud.minimapLayout.enabled` is `false` or `shape` is `'stock'` — the caller should restore the stock layout itself in that case.
+
+**Example**
+
+```lua
+if not exports.kora_hud:applyMinimapLayout() then
+    restoreStockMinimap()
+end
+```
+
+**Representative console output**
+
+```text
+true (kora_hud repositioned the minimap/mask/border and refreshed the clip type via a bigmap toggle).
+```
+
+## Limits and related APIs
+
+Returns `false` instead of applying anything when the layout is disabled or `shape = 'stock'`. There is no export to change `Config.hud.minimapLayout` at runtime — edit `config.lua` (it is read live apart from the streamed texture file itself).
+
+## Related guides
+
+- [UI element registry](./ui-registry.md)
+- [HUD visibility](./visibility.md)
+
+
 
 kora_hud controls two things about the minimap: whether it is visible, and (optionally) its layout and shape.
 
@@ -47,4 +103,4 @@ One owner (`client/minimap.lua`) runs every bigmap refresh; overlapping requests
 
 Players can move and resize the minimap in `/ui` when `Config.uiEditor.minimap` is on, the layout is enabled and the shape is not `'stock'`. Visibility there is the same choice as `/minimap`.
 
-`exports.kora_hud:applyMinimapLayout()` re-applies the layout; see [Exports](./exports.md).
+`exports.kora_hud:applyMinimapLayout()` re-applies the layout; see [Exports](./index.md).

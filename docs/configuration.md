@@ -1,6 +1,6 @@
 ---
 title: Configuration
-sidebar_position: 3
+sidebar_position: 6
 ---
 
 # Configuration
@@ -30,7 +30,7 @@ All options are in `config.lua`. Options marked **live** are registered with `ko
 | `hideOnPauseMenu` | `true` (live) | Hide the whole HUD while the pause menu or full map is open. |
 | `speedUnit` | `'kmh'` (live) | `'kmh'` or `'mph'`. Any other value behaves as `'kmh'`. |
 
-`Config.hud.minimapLayout` is documented on the [Minimap](./minimap.md) page.
+`Config.hud.minimapLayout` is documented on the [Minimap](./api/minimap.md) page.
 
 ## `Config.layout`
 
@@ -90,4 +90,4 @@ Each value is a ceiling on how often a channel can send, using a leading-edge th
 
 ## `Config.stress`
 
-See [Stress](./stress.md).
+See [Stress](./api/stress.md).
