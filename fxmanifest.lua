@@ -6,7 +6,7 @@ use_experimental_fxv2_oal 'yes'
 name 'kora_hud'
 provide 'qb-hud'
 author 'Jamie'
-version '0.2.0'
+version '0.2.1'
 description 'Configurable HUD built on kora_lib and kora_theme'
 
 dependency 'kora_theme'
