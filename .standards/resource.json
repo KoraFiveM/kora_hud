@@ -1,0 +1,63 @@
+{
+  "resource": "kora_hud",
+  "standardsRevision": "2026-11-12.2",
+  "realms": {
+    "client": [
+      "client/bridge/kora_core.lua",
+      "client/bridge/stub.lua",
+      "client/compat.lua",
+      "client/hud.lua",
+      "client/minimap.lua",
+      "client/seatbelt_sound.lua",
+      "client/stress.lua",
+      "client/uiregistry.lua",
+      "client/vehicle.lua",
+      "client/voice.lua",
+      "fft_hooks.lua"
+    ],
+    "server": [],
+    "shared": [
+      "config.lua",
+      "shared/bridge.lua"
+    ],
+    "manifest": [
+      "fxmanifest.lua"
+    ],
+    "test": [
+      "test/harness.lua",
+      "test/mocks.lua",
+      "test/smoke/bridge.lua",
+      "test/smoke/compat.lua",
+      "test/smoke/kora_core_bridge.lua",
+      "test/smoke/minimap.lua",
+      "test/smoke/nui.lua",
+      "test/smoke/seatbelt_sound.lua",
+      "test/smoke/stress.lua",
+      "test/smoke/vehicle.lua",
+      "test/smoke/voice.lua"
+    ]
+  },
+  "exclude": [
+    ".git/*",
+    ".github/*",
+    ".standards/*",
+    "node_modules/*",
+    "**/node_modules/*",
+    "vendor/*",
+    "**/vendor/*",
+    "web/*",
+    "ui/*",
+    "html/*",
+    "dist/*",
+    "artifacts/*",
+    "runtime/*",
+    "txData/*",
+    "storage/*",
+    "stream/*",
+    "docs/*",
+    "__pycache__/*",
+    "modules/lookup/data/*"
+  ],
+  "project": "Kora Framework",
+  "copyright": "Copyright © 2026 Kora Framework"
+}
