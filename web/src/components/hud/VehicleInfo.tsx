@@ -1,6 +1,6 @@
 import { BatteryCharging, Fuel, Lightbulb, LightbulbOff, LockKeyhole, LockKeyholeOpen, Power, PowerOff, ShieldAlert, ShieldCheck, Sun } from "lucide-react"
 
-import { useHudConfig, useHudVehicle } from "@/lib/hudState"
+import { useHudConfig, useHudVehicle, useLocale } from "@/lib/hudState"
 import { cn } from "@/lib/cn"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
@@ -9,6 +9,7 @@ import { RadialGauge } from "./RadialGauge"
 // bottom instead of popping into existence when client/hud.lua sends a vehicle
 // snapshot. It remains visually and accessibly absent while on foot.
 export function VehicleInfo() {
+    const t = useLocale()
     const config = useHudConfig()
     const vehicle = useHudVehicle()
     if (!config.elements.vehicle) return null
@@ -21,7 +22,7 @@ export function VehicleInfo() {
     return (
         <div className={cn("flex items-center gap-3 transition-[opacity,transform] duration-200 ease-out", active ? "translate-y-0 opacity-100" : "translate-y-[calc(100%+1rem)] opacity-0")} aria-hidden={!active}>
             {fuel !== null && (
-                <RadialGauge icon={electric ? BatteryCharging : Fuel} value={fuel} defaultValue={100} label={electric ? "Charge" : "Fuel"} color={statColor(fuel)} size={36} stroke={3} />
+                <RadialGauge icon={electric ? BatteryCharging : Fuel} value={fuel} defaultValue={100} label={electric ? t("UI.charge") : t("UI.fuel")} color={statColor(fuel)} size={36} stroke={3} />
             )}
             <div className="hud-panel flex items-center gap-4 rounded-2xl px-5 py-3 font-mono overlay-text">
                 {/* No speedometer icon. The unit beside a large number already
@@ -35,28 +36,28 @@ export function VehicleInfo() {
                 <div className="h-8 w-px bg-border" />
                 <div className="flex items-center gap-2.5">
                     {engineOn ? (
-                        <Power className="h-4 w-4 shrink-0 text-success" aria-label="Engine on" />
+                        <Power className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.engineOn")} />
                     ) : (
-                        <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Engine off" />
+                        <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.engineOff")} />
                     )}
                     {headlights === "high" ? (
-                        <Sun className="h-4 w-4 shrink-0 text-info" aria-label="High beams on" />
+                        <Sun className="h-4 w-4 shrink-0 text-info" aria-label={t("UI.highBeamsOn")} />
                     ) : headlights === "low" ? (
-                        <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-label="Headlights on" />
+                        <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-label={t("UI.headlightsOn")} />
                     ) : (
-                        <LightbulbOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="Headlights off" />
+                        <LightbulbOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.headlightsOff")} />
                     )}
                     {seatbelt ? (
-                        <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label="Seatbelt on" />
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.seatbeltOn")} />
                     ) : (
-                        <ShieldAlert className="h-4 w-4 shrink-0 animate-pulse text-warning" aria-label="Seatbelt off" />
+                        <ShieldAlert className="h-4 w-4 shrink-0 animate-pulse text-warning" aria-label={t("UI.seatbeltOff")} />
                     )}
                     {/* Race harness, its own state next to the belt. Absent
                         unless attached or harnessIcon = 'always'. */}
                     {harness === true ? (
-                        <LockKeyhole className="h-4 w-4 shrink-0 text-success" aria-label="Race harness attached" />
+                        <LockKeyhole className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.harnessAttached")} />
                     ) : harness === false ? (
-                        <LockKeyholeOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="No race harness" />
+                        <LockKeyholeOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.noHarness")} />
                     ) : null}
                 </div>
             </div>

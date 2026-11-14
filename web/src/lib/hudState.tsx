@@ -215,6 +215,7 @@ const DEFAULT_LAYOUT: HudLayoutState = {
 //
 // This mirrors client/hud.lua's own split: the wire channels and the contexts
 // are the same four cadences end to end.
+const HudLocaleContext = createContext<Record<string, unknown>>({})
 const HudConfigContext = createContext<HudConfigPayload>(DEFAULT_CONFIG)
 const HudVitalsContext = createContext<HudVitalsPayload>(DEFAULT_VITALS)
 const HudUpdateContext = createContext<HudUpdatePayload>(DEFAULT_UPDATE)
@@ -234,6 +235,7 @@ const HudLayoutContext = createContext<HudLayoutState>(DEFAULT_LAYOUT)
  * "kora_hud:finishLayout"), for the same reason.
  */
 export function HudStateProvider({ children }: { children: ReactNode }) {
+    const [locales, setLocales] = useState<Record<string, unknown>>({})
     const [config, setConfig] = useState<HudConfigPayload>(DEFAULT_CONFIG)
     const [vitals, setVitals] = useState<HudVitalsPayload>(DEFAULT_VITALS)
     const [update, setUpdate] = useState<HudUpdatePayload>(DEFAULT_UPDATE)
@@ -451,6 +453,10 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
             })
     }, [applyOffsets, applyScales, applyJustifications, applyHidden, applySettings, setGaugesBottomAnchored, setMinimapVehicleOnly])
 
+    useNuiEvent<Record<string, unknown>>("kora_hud:locales", (payload) => {
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) setLocales(payload)
+    })
+
     useNuiEvent<HudConfigPayload>("kora_hud:config", (payload) => {
         if (!payload) return
         setConfig(payload)
@@ -586,19 +592,21 @@ export function HudStateProvider({ children }: { children: ReactNode }) {
     // object to build, and nothing that changes identity unless that specific
     // channel's own message arrived.
     return (
-        <HudConfigContext.Provider value={config}>
-            <HudLayoutContext.Provider value={layout}>
-                <HudVisibleContext.Provider value={visible}>
-                    <HudVitalsContext.Provider value={vitals}>
-                        <HudUpdateContext.Provider value={update}>
-                            <HudVehicleContext.Provider value={vehicle}>
-                                <HudPlayerIdContext.Provider value={playerId}>{children}</HudPlayerIdContext.Provider>
-                            </HudVehicleContext.Provider>
-                        </HudUpdateContext.Provider>
-                    </HudVitalsContext.Provider>
-                </HudVisibleContext.Provider>
-            </HudLayoutContext.Provider>
-        </HudConfigContext.Provider>
+        <HudLocaleContext.Provider value={locales}>
+            <HudConfigContext.Provider value={config}>
+                <HudLayoutContext.Provider value={layout}>
+                    <HudVisibleContext.Provider value={visible}>
+                        <HudVitalsContext.Provider value={vitals}>
+                            <HudUpdateContext.Provider value={update}>
+                                <HudVehicleContext.Provider value={vehicle}>
+                                    <HudPlayerIdContext.Provider value={playerId}>{children}</HudPlayerIdContext.Provider>
+                                </HudVehicleContext.Provider>
+                            </HudUpdateContext.Provider>
+                        </HudVitalsContext.Provider>
+                    </HudVisibleContext.Provider>
+                </HudLayoutContext.Provider>
+            </HudConfigContext.Provider>
+        </HudLocaleContext.Provider>
     )
 }
 
@@ -635,4 +643,27 @@ export function useHudVisible() {
 /** Per-player section offsets and layout-editor state. */
 export function useHudLayout() {
     return useContext(HudLayoutContext)
+}
+
+/** Locale table returned by Kora.locale.getResourceLocale(), available to every UI component. */
+export function useLocales() {
+    return useContext(HudLocaleContext)
+}
+
+/** Looks up a dotted locale key and formats positional %s/%d substitutions. */
+export function useLocale() {
+    const locales = useLocales()
+    return useCallback((key: string, ...values: Array<string | number>) => {
+        let value: unknown = locales
+        for (const part of key.split(".")) {
+            if (!value || typeof value !== "object") return key
+            value = (value as Record<string, unknown>)[part]
+        }
+        if (typeof value !== "string") return key
+        let index = 0
+        return value.replace(/%[sd]/g, (token) => {
+            const replacement = values[index++]
+            return replacement === undefined ? token : String(replacement)
+        })
+    }, [locales])
 }

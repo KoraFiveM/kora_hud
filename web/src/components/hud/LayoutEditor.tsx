@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Map as MapIcon, Maximize2, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
+import { useLocale } from "@/lib/hudState"
 import { useHudLayout } from "@/lib/hudState"
 import type { HudLayoutJustification, HudLayoutOffset } from "@/lib/types"
 
@@ -203,6 +204,7 @@ export function MovableSection({
     bottomAnchored,
     children,
 }: MovableSectionProps) {
+    const t = useLocale()
     const layout = useHudLayout()
     const nodeRef = useRef<HTMLDivElement>(null)
     const [dragging, setDragging] = useState(false)
@@ -413,8 +415,8 @@ export function MovableSection({
                     >
                         <button
                             type="button"
-                            aria-label={`Move ${label}`}
-                            title="Drag to move. Hold Ctrl to snap to the grid; hold Shift to snap to 45° angles"
+                            aria-label={t("UI.move", label)}
+                            title={t("UI.dragMove")}
                             onMouseDown={handleMoveMouseDown}
                             className={cn("flex h-7 w-7 items-center justify-center rounded-full text-primary", dragging ? "cursor-grabbing" : "cursor-grab")}
                         >
@@ -423,8 +425,8 @@ export function MovableSection({
                         {bottomAnchored !== undefined && (
                             <button
                                 type="button"
-                                aria-label={bottomAnchored ? "Gauges are anchored to the bottom. Click to use a fixed position." : "Gauges use a fixed position. Click to anchor them to the bottom."}
-                                title={bottomAnchored ? "Bottom anchored: move above the vehicle HUD automatically" : "Fixed position: do not move for the vehicle HUD"}
+                                aria-label={bottomAnchored ? t("UI.gaugesBottomAria") : t("UI.gaugesFixedAria")}
+                                title={bottomAnchored ? t("UI.bottomAnchored") : t("UI.fixedPosition")}
                                 onClick={toggleBottomAnchor}
                                 className={cn("flex h-7 w-7 items-center justify-center rounded-full transition-colors", bottomAnchored ? "bg-primary text-primary-foreground" : "text-primary hover:bg-muted")}
                             >
@@ -433,8 +435,8 @@ export function MovableSection({
                         )}
                         <button
                             type="button"
-                            aria-label={`Resize ${label}; drag left or right`}
-                            title="Drag left or right to resize"
+                            aria-label={t("UI.resize", label)}
+                            title={t("UI.resizeDrag")}
                             onMouseDown={handleResizeMouseDown}
                             className="flex h-7 w-7 cursor-ew-resize items-center justify-center rounded-full text-primary"
                         >
@@ -443,8 +445,8 @@ export function MovableSection({
                         {!editorOnly && (
                             <button
                                 type="button"
-                                aria-label={`Content alignment: ${justification}. Click to cycle alignment.`}
-                                title="Cycle content alignment: Left, Centre, Right"
+                                aria-label={t("UI.alignment", justification)}
+                                title={t("UI.cycleAlignment")}
                                 onClick={cycleJustification}
                                 className="flex h-7 w-7 items-center justify-center rounded-full text-primary"
                             >
@@ -475,6 +477,7 @@ export function MovableSection({
  * pointer-transparent so it cannot swallow a section-control drag.
  */
 export function LayoutEditorOverlay() {
+    const t = useLocale()
     const layout = useHudLayout()
 
     useEffect(() => {
@@ -494,8 +497,8 @@ export function LayoutEditorOverlay() {
                 <div className="hud-panel pointer-events-auto flex w-fit items-center gap-1 rounded-full p-1 overlay-text">
                     <button
                         type="button"
-                        aria-label="Confirm layout changes"
-                        title="Confirm"
+                        aria-label={t("UI.confirmLayout")}
+                        title={t("UI.confirm")}
                         onClick={layout.confirm}
                         className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90"
                     >
@@ -503,8 +506,8 @@ export function LayoutEditorOverlay() {
                     </button>
                     <button
                         type="button"
-                        aria-label="Close without saving layout changes"
-                        title="Close without saving"
+                        aria-label={t("UI.closeLayout")}
+                        title={t("UI.close")}
                         onClick={layout.cancel}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
                     >
@@ -512,8 +515,8 @@ export function LayoutEditorOverlay() {
                     </button>
                     <button
                         type="button"
-                        aria-label="Reset HUD layout to defaults"
-                        title="Reset to defaults"
+                        aria-label={t("UI.resetLayout")}
+                        title={t("UI.resetDefaults")}
                         onClick={layout.resetToDefaults}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
                     >
@@ -527,12 +530,12 @@ export function LayoutEditorOverlay() {
                         type="button"
                         role="switch"
                         aria-checked={layout.minimapVehicleOnly}
-                        title="Show the minimap only while you are in a vehicle"
+                        title={t("UI.minimapVehicleTitle")}
                         onClick={() => layout.setMinimapVehicleOnly(!layout.minimapVehicleOnly)}
                         className="hud-panel pointer-events-auto flex items-center gap-2 rounded-full px-3 py-1.5 text-sm text-foreground overlay-text transition-colors hover:bg-muted"
                     >
                         <MapIcon className="h-4 w-4 text-primary" aria-hidden />
-                        <span>Minimap only in vehicle</span>
+                        <span>{t("UI.minimapVehicle")}</span>
                         <span
                             aria-hidden
                             className={cn(

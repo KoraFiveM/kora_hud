@@ -18,7 +18,8 @@
     "server": [],
     "shared": [
       "config.lua",
-      "shared/bridge.lua"
+      "shared/bridge.lua",
+      "locales/en.lua"
     ],
     "manifest": [
       "fxmanifest.lua"

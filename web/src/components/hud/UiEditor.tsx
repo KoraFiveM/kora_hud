@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, Check, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
-import { useHudLayout } from "@/lib/hudState"
+import { useHudLayout, useLocale } from "@/lib/hudState"
 import type { HudLayoutOffset, UiElementDef, UiSettingDef, UiSettingValue } from "@/lib/types"
 import { HUD_SECTIONS, clampDelta, layoutViewport, snapDragAngle, snapOffsetToGrid } from "./LayoutEditor"
 
@@ -77,6 +77,7 @@ function useViewportSize() {
 
 /** Outline box for one registered element; drag to move, corner to scale. */
 export function ExternalProxy({ def }: { def: UiElementDef }) {
+    const t = useLocale()
     const layout = useHudLayout()
     const nodeRef = useRef<HTMLDivElement>(null)
     useViewportSize()
@@ -184,14 +185,14 @@ export function ExternalProxy({ def }: { def: UiElementDef }) {
         >
             <span className="pointer-events-none absolute left-1.5 top-1.5 flex max-w-[calc(100%-12px)] items-center gap-1 truncate rounded bg-background/90 px-1.5 py-0.5 text-[11px] font-semibold text-foreground">
                 {def.label}
-                {hidden && <span className="font-normal uppercase tracking-wide text-muted-foreground">· hidden</span>}
-                {!def.movable && <span className="font-normal text-muted-foreground">· locked</span>}
+                {hidden && <span className="font-normal uppercase tracking-wide text-muted-foreground">· {t("UI.hiddenLabel")}</span>}
+                {!def.movable && <span className="font-normal text-muted-foreground">· {t("UI.locked")}</span>}
             </span>
             {def.scalable && (
                 <button
                     type="button"
-                    aria-label={`Resize ${def.label}`}
-                    title="Drag to resize"
+                    aria-label={t("UI.resize", def.label)}
+                    title={t("UI.resizeDrag")}
                     onMouseDown={onScaleStart}
                     className={cn("absolute h-4 w-4 min-h-0 rounded-sm border border-primary bg-primary p-0", handleX, handleY, "cursor-nwse-resize")}
                 />
@@ -276,6 +277,7 @@ function SettingControl({ id, setting }: { id: string; setting: UiSettingDef }) 
 
 /** The /ui panel: element picker, per-element controls, Save/Cancel/Reset. */
 export function EditorPanel() {
+    const t = useLocale()
     const layout = useHudLayout()
     const [dock, setDock] = useState<"top" | "bottom">("top")
     const [confirmingReset, setConfirmingReset] = useState(false)
@@ -302,8 +304,16 @@ export function EditorPanel() {
             settings: Array.isArray(element.settings) ? element.settings : [],
         }))
         const chatRegistered = registered.some((element) => element.id === HUD_SECTIONS.chatInput)
-        return [...BUILTIN_ELEMENTS, ...(chatRegistered ? [] : [LEGACY_CHAT]), ...registered]
-    }, [layout.elements])
+        const builtinLabels: Record<string, string> = {
+            [HUD_SECTIONS.gauges]: t("UI.gauge"),
+            [HUD_SECTIONS.vehicle]: t("UI.vehicle"),
+            [HUD_SECTIONS.identity]: t("UI.playerInfoMoney"),
+            [HUD_SECTIONS.status]: t("UI.statusEffects"),
+        }
+        const builtin = BUILTIN_ELEMENTS.map((element) => ({ ...element, label: builtinLabels[element.id], group: t("UI.hudGroup") }))
+        const legacyChat = { ...LEGACY_CHAT, label: t("UI.chatInput"), group: t("UI.chatGroup") }
+        return [...builtin, ...(chatRegistered ? [] : [legacyChat]), ...registered]
+    }, [layout.elements, t])
 
     const groups = useMemo(() => {
         const out = new Map<string, PanelElement[]>()
@@ -340,17 +350,17 @@ export function EditorPanel() {
                     dock === "top" ? "top-3" : "bottom-3",
                 )}
                 role="dialog"
-                aria-label="UI layout editor"
+                aria-label={t("UI.uiLayoutEditor")}
             >
                 <div className="flex items-center justify-between gap-2">
                     <div className="flex flex-col">
-                        <span className="text-sm font-semibold">UI layout</span>
-                        <span className="text-[11px] text-muted-foreground">Drag to move · corner to resize · Ctrl grid · Shift 45° · Esc cancels</span>
+                        <span className="text-sm font-semibold">{t("UI.uiLayout")}</span>
+                        <span className="text-[11px] text-muted-foreground">{t("UI.editorHint")}</span>
                     </div>
                     <button
                         type="button"
-                        aria-label={dock === "top" ? "Move this panel to the bottom" : "Move this panel to the top"}
-                        title={dock === "top" ? "Move panel to the bottom" : "Move panel to the top"}
+                        aria-label={dock === "top" ? t("UI.movePanelBottom") : t("UI.movePanelTop")}
+                        title={dock === "top" ? t("UI.movePanelToBottom") : t("UI.movePanelToTop")}
                         onClick={() => setDock(dock === "top" ? "bottom" : "top")}
                         className="flex h-8 w-8 min-h-8 items-center justify-center rounded-md p-0"
                     >
@@ -359,12 +369,12 @@ export function EditorPanel() {
                 </div>
 
                 <select
-                    aria-label="Element to customise"
+                    aria-label={t("UI.elementToCustomise")}
                     value={current?.id ?? ""}
                     onChange={(event) => layout.select(event.target.value || null)}
                     className="h-9 w-full rounded-md text-sm"
                 >
-                    <option value="">Choose an element…</option>
+                    <option value="">{t("UI.chooseElement")}</option>
                     {groups.map(([group, items]) => (
                         <optgroup key={group} label={group}>
                             {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -377,14 +387,14 @@ export function EditorPanel() {
                         {layout.editor.allowHide && current.hideable && (
                             <Switch
                                 checked={!isHidden}
-                                label={isHidden ? "Hidden" : "Visible"}
+                                label={isHidden ? t("UI.hiddenLabel") : t("UI.visible")}
                                 onChange={(visible) => layout.setHidden(current.id, !visible)}
                             />
                         )}
                         {current.scalable && (
                             <label className="flex flex-col gap-1">
                                 <span className="flex items-center justify-between text-sm">
-                                    <span>Size</span>
+                                    <span>{t("UI.size")}</span>
                                     <span className="font-mono text-xs text-muted-foreground">{Math.round(scale * 100)}%</span>
                                 </span>
                                 <input
@@ -403,7 +413,7 @@ export function EditorPanel() {
                         {current.id === "minimap" && layout.minimapVehicleOnlyAllowed && (
                             <Switch
                                 checked={layout.minimapVehicleOnly}
-                                label="Only in a vehicle"
+                                label={t("UI.onlyInVehicle")}
                                 onChange={(value) => layout.setMinimapVehicleOnly(value)}
                             />
                         )}
@@ -413,12 +423,12 @@ export function EditorPanel() {
                             onClick={() => layout.resetElement(current.id)}
                             className="flex h-8 items-center justify-center gap-1.5 rounded-md text-xs"
                         >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reset {current.label}
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden /> {t("UI.reset", current.label)}
                         </button>
                     </div>
                 ) : (
                     <p className="m-0 text-xs text-muted-foreground">
-                        Pick an element above, or click one on screen, to change its visibility, size and settings.
+                        {t("UI.emptyEditorHint")}
                     </p>
                 )}
 
@@ -428,14 +438,14 @@ export function EditorPanel() {
                         onClick={layout.confirm}
                         className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border-primary bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary"
                     >
-                        <Check className="h-4 w-4" aria-hidden /> Save
+                        <Check className="h-4 w-4" aria-hidden /> {t("UI.save")}
                     </button>
                     <button
                         type="button"
                         onClick={layout.cancel}
                         className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-sm"
                     >
-                        <X className="h-4 w-4" aria-hidden /> Cancel
+                        <X className="h-4 w-4" aria-hidden /> {t("UI.cancel")}
                     </button>
                     <button
                         type="button"
@@ -453,7 +463,7 @@ export function EditorPanel() {
                         )}
                     >
                         {confirmingReset ? <AlertTriangle className="h-4 w-4" aria-hidden /> : <RotateCcw className="h-4 w-4" aria-hidden />}
-                        {confirmingReset ? "Confirm reset" : "Reset all"}
+                        {confirmingReset ? t("UI.confirmReset") : t("UI.resetAll")}
                     </button>
                 </div>
             </div>

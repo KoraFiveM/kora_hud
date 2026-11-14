@@ -58,7 +58,8 @@ ui_page 'web/build/index.html'
 files {
     'web/build/index.html',
     'web/build/assets/**/*',
-    'web/build/sounds/*.wav'
+    'web/build/sounds/*.wav',
+    'locales/*.lua'
 }
 
 -- kora_qa: Gherkin test scenarios (converted legacy tests), see [kora]/kora_qa/README.md

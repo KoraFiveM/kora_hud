@@ -1,10 +1,11 @@
 import { Briefcase, Users } from "lucide-react"
 
 import { cn } from "@/lib/cn"
-import { useHudUpdate } from "@/lib/hudState"
+import { useHudUpdate, useLocale } from "@/lib/hudState"
 
 // Baseline "usual player data" -- always rendered, not config-toggleable.
 export function JobGang() {
+    const t = useLocale()
     const update = useHudUpdate()
 
     return (
@@ -19,8 +20,8 @@ export function JobGang() {
                     doesn't jump on a duty toggle. */}
                 <span
                     role="status"
-                    aria-label={update.job.onDuty ? "on duty" : "off duty"}
-                    title={update.job.onDuty ? "On duty" : "Off duty"}
+                    aria-label={update.job.onDuty ? t("UI.onDuty") : t("UI.offDuty")}
+                    title={update.job.onDuty ? t("UI.onDuty") : t("UI.offDuty")}
                     className={cn(
                         "ml-auto h-2 w-2 shrink-0 rounded-full",
                         update.job.onDuty
