@@ -1,6 +1,6 @@
 import { Heart, Shield } from "lucide-react"
 
-import { useHudVitals } from "@/lib/hudState"
+import { useHudVitals, useLocale } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
 
@@ -12,6 +12,7 @@ const HEALTH_FLOOR = 100
 // Baseline "usual player data" -- not independently toggleable. Dynamic mode
 // can still hide either gauge while it is at its neutral value.
 export function HealthArmour() {
+    const t = useLocale()
     const vitals = useHudVitals()
     // GTA reports a ped's health on a native scale where 100 is the death
     // floor. Freemode male and female peds have different maximums (normally
@@ -21,8 +22,8 @@ export function HealthArmour() {
 
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Heart} value={healthPercent} defaultValue={100} label="Health" color={statColor(healthPercent)} pulse />
-            <RadialGauge icon={Shield} value={vitals.armour} defaultValue={0} label="Armour" color="hsl(var(--armour))" />
+            <RadialGauge icon={Heart} value={healthPercent} defaultValue={100} label={t("UI.health")} color={statColor(healthPercent)} pulse />
+            <RadialGauge icon={Shield} value={vitals.armour} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
         </div>
     )
 }

@@ -1706,6 +1706,7 @@ end)
 -- the forward declaration at the top of the file, silently leaving the
 -- kora_hud:ready callback's upvalue nil.
 sendInitialState = function()
+    send('kora_hud:locales', Kora.locale.getResourceLocale())
     local savedLayout = readLayout()
     if minimapHooks.sync then minimapHooks.sync(savedLayout.hidden.minimap == true) end
     send("kora_hud:config", {

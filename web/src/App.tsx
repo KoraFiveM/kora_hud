@@ -12,7 +12,7 @@ import { Stamina } from "@/components/hud/Stamina"
 import { StatusEffects } from "@/components/hud/StatusEffects"
 import { Stress } from "@/components/hud/Stress"
 import { VehicleInfo } from "@/components/hud/VehicleInfo"
-import { HudStateProvider, useHudLayout, useHudVehicle, useHudVisible } from "@/lib/hudState"
+import { HudStateProvider, useHudLayout, useHudVehicle, useHudVisible, useLocale } from "@/lib/hudState"
 import { memo } from "react"
 
 /**
@@ -42,10 +42,11 @@ import { memo } from "react"
  */
 const GaugesSection = memo(function GaugesSection({ position, bottomAnchored }: { position: string; bottomAnchored: boolean }) {
     const layout = useHudLayout()
+    const t = useLocale()
     return (
         <MovableSection
             id={HUD_SECTIONS.gauges}
-            label="Gauges"
+            label={t("UI.gauge")}
             position={position}
             handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
             flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
@@ -70,10 +71,11 @@ const GaugesSection = memo(function GaugesSection({ position, bottomAnchored }: 
 
 const VehicleSection = memo(function VehicleSection() {
     const layout = useHudLayout()
+    const t = useLocale()
     return (
         <MovableSection
             id={HUD_SECTIONS.vehicle}
-            label="Vehicle"
+            label={t("UI.vehicle")}
             position="bottom-4 left-1/2 max-[520px]:bottom-2"
             handlePosition="bottom-full left-1/2 mb-3 -translate-x-1/2"
             flippedHandlePosition="top-full left-1/2 mt-3 -translate-x-1/2"
@@ -110,6 +112,7 @@ function BottomHud() {
 }
 
 function HudContent() {
+    const t = useLocale()
     const visible = useHudVisible()
     const layout = useHudLayout()
     if (!visible) return null
@@ -127,7 +130,7 @@ function HudContent() {
             <BottomHud />
             <MovableSection
                 id={HUD_SECTIONS.identity}
-                label="Player"
+                label={t("UI.player")}
                 position="bottom-4 right-4 max-[520px]:bottom-2 max-[520px]:right-2"
                 handlePosition="bottom-full right-0 mb-3"
                 flippedHandlePosition="top-full right-0 mt-3"
@@ -143,7 +146,7 @@ function HudContent() {
                 the section crosses the screen, so it always remains usable. */}
             <MovableSection
                 id={HUD_SECTIONS.status}
-                label="Status"
+                label={t("UI.status")}
                 position="right-4 top-4 max-[520px]:right-2 max-[520px]:top-2"
                 handlePosition="top-full right-0 mt-3"
                 flippedHandlePosition="bottom-full right-0 mb-3"
@@ -159,7 +162,7 @@ function HudContent() {
                 proxy instead, so this one is only for an older kora_chat. */}
             {!layout.elements.some((element) => element.id === HUD_SECTIONS.chatInput) && <MovableSection
                 id={HUD_SECTIONS.chatInput}
-                label="Chat input"
+                label={t("UI.chatInput")}
                 position="left-4 top-4 max-[520px]:left-2 max-[520px]:top-2"
                 handlePosition="top-full left-0 mt-3"
                 flippedHandlePosition="bottom-full left-0 mb-3"
@@ -167,7 +170,7 @@ function HudContent() {
                 editorOnly
             >
                 <div className="h-12 w-[min(480px,38vw)] max-[520px]:w-[calc(100vw-1rem)] rounded-[10px] bg-background/95 px-3 text-sm leading-[3rem] text-muted-foreground">
-                    Type a message or /command
+                    {t("UI.chatPlaceholder")}
                 </div>
             </MovableSection>}
         </div>
