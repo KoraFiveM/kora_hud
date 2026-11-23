@@ -12,6 +12,7 @@ Players arrange their HUD with `/ui` (aliases from `Config.uiEditor.aliases`, de
 The editor is an explicit mode: it takes NUI focus and dims the screen. Each section gets Move, Resize and Align controls.
 
 - Move by dragging. Hold Control to snap to a 5% viewport grid; hold Shift to snap to 45 degree angles.
+- The vitals gauges can be dragged down to the bottom edge, including beside the vehicle panel preview.
 - Resize left or right. HUD sections and the chat input scale 75%-150%; registered elements use their own range (50%-200% at most).
 - Align cycles left, centre and right for the contents of a section.
 - The gauge row has an Anchor toggle.

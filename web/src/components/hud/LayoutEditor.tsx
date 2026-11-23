@@ -30,7 +30,8 @@ export const HUD_SECTIONS = {
 // ranges differ too: using one +/- limit strands every corner section on only
 // half of the screen.
 const SECTION_BOUNDS: Record<string, { minX: number; maxX: number; minY: number; maxY: number }> = {
-    [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
+    // Gauges start above the vehicle preview and can move below that anchor.
+    [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 1 },
     [HUD_SECTIONS.vehicle]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.identity]: { minX: -0.95, maxX: 0, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.status]: { minX: -0.95, maxX: 0, minY: 0, maxY: 1 },
@@ -214,6 +215,9 @@ export function MovableSection({
     const selected = layout.editing && layout.selected === id
 
     const offset = layout.offsets[id] ?? ZERO
+    // A downward gauge offset can overrun the bottom when its anchor changes.
+    // Let the keep-on-screen effect measure the final anchor immediately.
+    const animateBottom = id !== HUD_SECTIONS.gauges || offset.y <= 0
     const scale = layout.scales[id] ?? 1
     const justification = layout.justifications[id] ?? DEFAULT_JUSTIFICATIONS[id] ?? "right"
     const AlignmentIcon = justification === "left" ? AlignLeft : justification === "center" ? AlignCenter : AlignRight
@@ -392,7 +396,7 @@ export function MovableSection({
             // click-through overlay over live gameplay the rest of the time
             // (see globals.css) and has to stay that way -- only the explicit
             // control icons take pointer input while editing.
-            className={cn("fixed transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto", hidden && "opacity-40")}
+            className={cn("fixed", animateBottom && "transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto", hidden && "opacity-40")}
             data-ui-section={id}
             style={{
                 transform: scaleTransform(offset, centerX, scale, layout.editing ? ZERO : nudge),

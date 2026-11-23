@@ -238,7 +238,7 @@ end
 -- display. These bounds let every section cross the screen while retaining a
 -- small recovery margin at the far edge.
 local LAYOUT_BOUNDS = {
-    gauges = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
+    gauges = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 1.00 }, -- the editor keeps gauges on screen
     vehicle = { minX = -0.50, maxX = 0.50, minY = -0.95, maxY = 0.00 },
     identity = { minX = -0.95, maxX = 0.00, minY = -0.95, maxY = 0.00 },
     status = { minX = -0.95, maxX = 0.00, minY = 0.00, maxY = 1.00 }, -- reaches the bottom edge (the editor keeps it on screen)

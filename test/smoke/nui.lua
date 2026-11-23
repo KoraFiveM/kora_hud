@@ -1097,7 +1097,7 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     hud.commands.hudlayout()
     hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
-        offsets = { gauges = { x = 0.1, y = -0.2 } },
+        offsets = { gauges = { x = 0.1, y = 0.074 } },
         scales = { gauges = 1.25 },
         justifications = { gauges = 'left' },
     }, function() end)
@@ -1112,7 +1112,7 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     local config = configPayload(reloaded)
     harness.assertTrue(config ~= nil, 'the config push happened')
     harness.assertEqual(config.layout.offsets.gauges.x, 0.1, 'the saved offset is seeded on load')
-    harness.assertEqual(config.layout.offsets.gauges.y, -0.2, 'on both axes')
+    harness.assertEqual(config.layout.offsets.gauges.y, 0.074, 'vitals can be saved below the default editor anchor')
     harness.assertEqual(config.layout.scales.gauges, 1.25, 'and its resized scale is seeded too')
     harness.assertEqual(config.layout.justifications.gauges, 'left', 'and its chosen alignment is seeded too')
 end)
