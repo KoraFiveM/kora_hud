@@ -33,8 +33,8 @@
    * relative order inside Tailwind's utilities layer isn't something this
    * file controls.
    */
-  .hud-panel-accent-success {
-    border-color: hsl(var(--success));
+  .hud-panel-accent-primary {
+    border-color: hsl(var(--primary));
   }
 
   /*

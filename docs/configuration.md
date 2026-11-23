@@ -29,6 +29,7 @@ All options are in `config.lua`. Options marked **live** are registered with `ko
 | `hideMinimapWhenForcedHidden` | `true` (live) | Keep the radar hidden while another resource has called `hide()`. |
 | `hideOnPauseMenu` | `true` (live) | Hide the whole HUD while the pause menu or full map is open. |
 | `speedUnit` | `'kmh'` (live) | `'kmh'` or `'mph'`. Any other value behaves as `'kmh'`. |
+| `gaugeShape` | `'circle'` (live) | Default status gauge shape: `'circle'`, `'square'`, `'hexagon'`, `'triangle'`, `'diamond'` or `'bar'`. Players can choose their own in `/ui` under Gauges, Shape. Any other value behaves as `'circle'`. |
 
 `Config.hud.minimapLayout` is documented on the [Minimap](./api/minimap.md) page.
 

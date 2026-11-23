@@ -18,13 +18,13 @@ export function MicIndicator() {
         <div
             className={cn(
                 "hud-panel flex h-9 w-9 items-center justify-center rounded-full transition-all duration-fast",
-                vitals.talking && "hud-panel-accent-success",
+                vitals.talking && "hud-panel-accent-primary",
             )}
             aria-label={t("UI.voiceRange", voiceLabel)}
             title={t("UI.voiceRange", voiceLabel)}
         >
             <VoiceIcon
-                className={cn("h-4 w-4", vitals.talking ? "animate-pulse text-success" : "text-muted-foreground")}
+                className={cn("h-4 w-4", vitals.talking ? "animate-pulse text-primary" : "text-muted-foreground")}
                 aria-hidden="true"
             />
         </div>

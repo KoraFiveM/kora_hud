@@ -15,6 +15,7 @@ The editor is an explicit mode: it takes NUI focus and dims the screen. Each sec
 - Resize left or right. HUD sections and the chat input scale 75%-150%; registered elements use their own range (50%-200% at most).
 - Align cycles left, centre and right for the contents of a section.
 - The gauge row has an Anchor toggle.
+- With the unified editor, Gauges also has a Shape setting (circle, square, hexagon, triangle, diamond or bar). It is saved with the layout under `settings.gauges.shape` and validated by kora_hud; the default is `Config.hud.gaugeShape`.
 - With the unified editor, pick an element from the dropdown or click it, then use Visible (when hiding is allowed and the element supports it), Size, the element's own settings and Reset for that element. Save, Cancel (Escape) and Reset all apply to the whole layout.
 - A "Minimap only in vehicle" switch is shown when `Config.hud.minimapVehicleOnly.allowPlayerChange` is on.
 

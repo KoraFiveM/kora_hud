@@ -13,10 +13,10 @@ export function GaugesPreview() {
     const t = useLocale()
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Heart} value={68} defaultValue={100} label={t("UI.health")} color="hsl(var(--success))" />
+            <RadialGauge icon={Heart} value={68} defaultValue={100} label={t("UI.health")} color="hsl(var(--primary))" />
             <RadialGauge icon={Shield} value={42} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
             <RadialGauge icon={Zap} value={55} defaultValue={100} label={t("UI.stamina")} color="hsl(var(--warning))" />
-            <RadialGauge icon={Utensils} value={64} defaultValue={100} label={t("UI.hunger")} color="hsl(var(--success))" />
+            <RadialGauge icon={Utensils} value={64} defaultValue={100} label={t("UI.hunger")} color="hsl(var(--primary))" />
             <RadialGauge icon={Droplets} value={48} defaultValue={100} label={t("UI.thirst")} color="hsl(var(--warning))" />
             <RadialGauge icon={Brain} value={35} defaultValue={0} label={t("UI.stress")} color="hsl(var(--warning))" />
         </div>
@@ -38,9 +38,9 @@ export function VehiclePreview() {
                 </div>
                 <div className="h-8 w-px bg-border" />
                 <div className="flex items-center gap-2.5">
-                    <Power className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.engineOn")} />
+                    <Power className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.engineOn")} />
                     <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-label={t("UI.headlightsOn")} />
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.seatbeltOn")} />
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.seatbeltOn")} />
                 </div>
             </div>
         </div>

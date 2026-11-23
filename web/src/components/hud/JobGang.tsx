@@ -25,7 +25,7 @@ export function JobGang() {
                     className={cn(
                         "ml-auto h-2 w-2 shrink-0 rounded-full",
                         update.job.onDuty
-                            ? "bg-success shadow-[0_0_6px_hsl(var(--success)/60%)]"
+                            ? "bg-primary shadow-[0_0_6px_hsl(var(--primary)/60%)]"
                             : "bg-destructive shadow-[0_0_6px_hsl(var(--destructive)/60%)]",
                     )}
                 />

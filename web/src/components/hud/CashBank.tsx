@@ -10,7 +10,7 @@ function formatMoney(amount: number) {
 function CashRow({ amount }: { amount: number }) {
     return (
         <div className="flex items-center gap-2.5 text-foreground">
-            <span className="icon-badge icon-badge-success">
+            <span className="icon-badge icon-badge-primary">
                 <Wallet className="h-3.5 w-3.5" aria-hidden />
             </span>
             <span>{formatMoney(amount)}</span>

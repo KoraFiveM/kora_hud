@@ -198,6 +198,42 @@ end
 local MAX_LAYOUT_ENTRIES = 48
 local MAX_LAYOUT_BYTES = 16384
 local HIDEABLE_SECTIONS = { gauges = true, vehicle = true, identity = true, status = true }
+
+-- Status gauge shapes (Config.hud.gaugeShape, and the player's own choice in
+-- /ui > Gauges). Must match GAUGE_SHAPES in web/src/components/hud/RadialGauge.tsx.
+local GAUGE_SHAPES = { 'circle', 'square', 'hexagon', 'triangle', 'diamond', 'bar' }
+
+---@return string
+local function defaultGaugeShape()
+    local configured = Config.hud.gaugeShape
+    for _, shape in ipairs(GAUGE_SHAPES) do
+        if shape == configured then return shape end
+    end
+    return 'circle'
+end
+
+---Settings schema for kora_hud's own sections, in the same shape as a
+---registered element's `def.settings` so HudUi.cleanSettings validates both.
+---Built on demand: the default follows a live Config.hud change.
+---@param section string
+---@return table|nil
+local function builtinSettingsDef(section)
+    if section ~= 'gauges' then return nil end
+    local options = {}
+    for index, shape in ipairs(GAUGE_SHAPES) do
+        options[index] = { value = shape, label = shape }
+    end
+    return { settings = { { key = 'shape', type = 'select', options = options, default = defaultGaugeShape() } } }
+end
+
+---The settings schema for any section: built-in first, then the registry.
+---@param section string
+---@return table|nil def, boolean builtin
+local function settingsDefFor(section)
+    local builtin = builtinSettingsDef(section)
+    if builtin then return builtin, true end
+    return HudUi and HudUi.get(section) or nil, false
+end
 -- Filled in by the minimap visibility block further down (its locals are
 -- declared after this point): isHidden() / setHidden(bool) / toggleEnabled().
 local minimapHooks = {}
@@ -354,7 +390,7 @@ local function readLayout()
             if justification then justifications[section] = justification end
             if allowHide and entry.hidden == true and section ~= 'minimap' then hidden[section] = true end
             if HudUi and type(entry.settings) == 'table' then
-                local def = HudUi.get(section)
+                local def = settingsDefFor(section)
                 settings[section] = def and HudUi.cleanSettings(def, entry.settings) or (not def and HudUi.preserveSettings(entry.settings)) or nil
             end
         end
@@ -444,10 +480,11 @@ local function writeLayout(payload)
         end
     end
 
-    -- Settings are only accepted for a registered element, against its schema.
+    -- Settings are only accepted for a registered element or a built-in
+    -- section that declares a schema (the gauges' shape), against that schema.
     if HudUi then
         for section, raw in pairs(requestedSettings) do
-            local def = validSection(section) and HudUi.get(section)
+            local def = validSection(section) and settingsDefFor(section)
             if def and not def.internal then
                 local values = HudUi.cleanSettings(def, raw)
                 if values then
@@ -1737,6 +1774,8 @@ sendInitialState = function()
         -- See web/src/components/hud/RadialGauge.tsx.
         vitalsInterval = VITALS_INTERVAL,
         money = Config.hud.money,
+        -- Server default; a player's own /ui choice is in layout.settings.gauges.shape.
+        gaugeShape = defaultGaugeShape(),
         layout = {
             movable = LAYOUT.movable ~= false,
             command = LAYOUT.command or 'hudlayout',
