@@ -15,7 +15,7 @@ The editor is an explicit mode: it takes NUI focus and dims the screen. Each sec
 - Resize left or right. HUD sections and the chat input scale 75%-150%; registered elements use their own range (50%-200% at most).
 - Align cycles left, centre and right for the contents of a section.
 - The gauge row has an Anchor toggle.
-- With the unified editor, pick an element from the dropdown or click it, then use Visible (when hiding is allowed and the element supports it), Size, the element's own settings and Reset for that element. Save, Cancel (Escape) and Reset all apply to the whole layout.
+- With the unified editor, pick an element from the dropdown or click it, then use Visible (when hiding is allowed and the element supports it), Size, the element's own settings and Reset for that element. Save, Cancel (Escape) and Reset all apply to the whole layout. The panel stays above the HUD elements, and the arrow button moves it between the top and bottom of the screen.
 - A "Minimap only in vehicle" switch is shown when `Config.hud.minimapVehicleOnly.allowPlayerChange` is on.
 
 Confirm saves; Cancel restores what was saved when the editor opened. Dragging only previews; nothing is written until Confirm. `/hudlayoutreset` (or `/uireset`) deletes the saved layout without opening the editor, so a player can recover from an unreachable placement.

@@ -343,10 +343,11 @@ export function EditorPanel() {
     }
 
     return (
-        <div className="pointer-events-none fixed inset-0 bg-black/45">
+        <>
+            <div className="pointer-events-none fixed inset-0 bg-black/45" />
             <div
                 className={cn(
-                    "hud-panel pointer-events-auto absolute left-1/2 flex w-[360px] max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-3 rounded-xl p-3 text-foreground",
+                    "hud-panel pointer-events-auto fixed left-1/2 z-10 flex w-[360px] max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-3 rounded-xl p-3 text-foreground",
                     dock === "top" ? "top-3" : "bottom-3",
                 )}
                 role="dialog"
@@ -467,6 +468,6 @@ export function EditorPanel() {
                     </button>
                 </div>
             </div>
-        </div>
+        </>
     )
 }
