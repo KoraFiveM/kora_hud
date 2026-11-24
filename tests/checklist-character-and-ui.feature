@@ -52,6 +52,8 @@ Feature: kora_hud — Character & UI
     When I manually: move a section, resize it between 75% and 150% and use the align button
     And I manually: hold Control or Shift while moving to use snapping
     Then I confirm: sections move, resize, align and snap as expected
+    When I manually: drag the vitals gauges toward the bottom while holding Shift and repeat with Control
+    Then I confirm: the gauges stay fully visible while snapping near the screen edge
     When I manually: click Confirm to save
     Then I confirm: the layout is saved
     When I manually: change a section and then click Cancel or press Esc

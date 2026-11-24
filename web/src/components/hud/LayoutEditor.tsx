@@ -278,6 +278,12 @@ export function MovableSection({
         const startY = event.clientY
         const base = offset
         const startRect = node.getBoundingClientRect()
+        const width = window.innerWidth
+        const height = window.innerHeight
+        const minDeltaX = -startRect.left
+        const maxDeltaX = width - startRect.right
+        const minDeltaY = -startRect.top
+        const maxDeltaY = height - startRect.bottom
         let latest = base
 
         // Arrow consts, not function declarations: a hoisted declaration is
@@ -290,31 +296,26 @@ export function MovableSection({
             // all have different dimensions. It lets a status stack sit at
             // the bottom edge without letting its controls disappear beyond
             // it.
-            let deltaX = clampDelta(
-                moveEvent.clientX - startX,
-                -startRect.left,
-                window.innerWidth - startRect.right,
-            )
-            let deltaY = clampDelta(
-                moveEvent.clientY - startY,
-                -startRect.top,
-                window.innerHeight - startRect.bottom,
-            )
+            let deltaX = clampDelta(moveEvent.clientX - startX, minDeltaX, maxDeltaX)
+            let deltaY = clampDelta(moveEvent.clientY - startY, minDeltaY, maxDeltaY)
             if (moveEvent.shiftKey) {
                 const snappedDelta = snapDragAngle(deltaX, deltaY)
                 deltaX = snappedDelta.x
                 deltaY = snappedDelta.y
             }
             const nextOffset = {
-                x: clamp(id, "x", base.x + deltaX / window.innerWidth),
-                y: clamp(id, "y", base.y + deltaY / window.innerHeight),
+                x: clamp(id, "x", base.x + deltaX / width),
+                y: clamp(id, "y", base.y + deltaY / height),
             }
-            latest = moveEvent.ctrlKey
-                ? {
-                    x: clamp(id, "x", snapOffsetToGrid(nextOffset.x)),
-                    y: clamp(id, "y", snapOffsetToGrid(nextOffset.y)),
-                }
-                : nextOffset
+            if (moveEvent.ctrlKey) {
+                nextOffset.x = clamp(id, "x", snapOffsetToGrid(nextOffset.x))
+                nextOffset.y = clamp(id, "y", snapOffsetToGrid(nextOffset.y))
+            }
+            // Either snap can move the rendered box past a viewport edge.
+            latest = {
+                x: clampDelta(nextOffset.x, base.x + minDeltaX / width, base.x + maxDeltaX / width),
+                y: clampDelta(nextOffset.y, base.y + minDeltaY / height, base.y + maxDeltaY / height),
+            }
             // Written straight to the node instead of through state: a drag
             // fires a mousemove per frame, and routing each one through React
             // would re-render this section (and re-run every gauge inside it)
