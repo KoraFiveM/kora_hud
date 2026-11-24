@@ -1,8 +1,7 @@
-import { Heart, Shield } from "lucide-react"
-
 import { useHudVitals, useLocale } from "@/lib/hudState"
 import { statColor } from "@/lib/statColor"
 import { RadialGauge } from "./RadialGauge"
+import { useGaugeIcon } from "./gaugeIcons"
 
 // GTA's death floor is commonly 100, not 0 (see kora_lib's modules/cache
 // docs.md) -- display health relative to that floor so an empty bar means
@@ -13,6 +12,7 @@ const HEALTH_FLOOR = 100
 // can still hide either gauge while it is at its neutral value.
 export function HealthArmour() {
     const t = useLocale()
+    const icon = useGaugeIcon()
     const vitals = useHudVitals()
     // GTA reports a ped's health on a native scale where 100 is the death
     // floor. Freemode male and female peds have different maximums (normally
@@ -22,8 +22,8 @@ export function HealthArmour() {
 
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Heart} value={healthPercent} defaultValue={100} label={t("UI.health")} color={statColor(healthPercent)} pulse />
-            <RadialGauge icon={Shield} value={vitals.armour} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
+            <RadialGauge icon={icon("health")} value={healthPercent} defaultValue={100} label={t("UI.health")} color={statColor(healthPercent)} pulse />
+            <RadialGauge icon={icon("armour")} value={vitals.armour} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
         </div>
     )
 }

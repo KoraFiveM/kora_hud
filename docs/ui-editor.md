@@ -13,6 +13,7 @@ The editor is an explicit mode: it takes NUI focus and dims the screen. Each sec
 
 - Move by dragging. Hold Control to snap to a 5% viewport grid or Shift to snap to 45 degree angles. Snapped positions stop at the screen edge.
 - The vitals gauges can be dragged down to the bottom edge, including beside the vehicle panel preview.
+- Select **Gauges** in the unified editor to choose icons for Health, Armour, Stamina, Hunger, Thirst and Stress. The gauge row previews your selections. Save keeps them for your player, Cancel restores your saved selections, and Reset Gauges returns to the default icons.
 - Drag a section's square corner handle horizontally to resize from its anchor. The unified editor also has a Size slider. HUD sections and the chat input scale from 75% to 150%. Registered elements use their own range (50%-200% at most).
 - Align cycles left, centre and right for the contents of a section.
 - The gauge row has an Anchor toggle.

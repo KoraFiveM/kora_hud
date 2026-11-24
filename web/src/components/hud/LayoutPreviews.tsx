@@ -1,8 +1,9 @@
 import { useLocale } from "@/lib/hudState"
 
-import { BatteryCharging, Brain, Droplets, Heart, Lightbulb, Power, Shield, ShieldCheck, Utensils, Zap, AlertTriangle } from "lucide-react"
+import { AlertTriangle, BatteryCharging, Lightbulb, Power, ShieldCheck } from "lucide-react"
 
 import { RadialGauge } from "./RadialGauge"
+import { useGaugeIcon } from "./gaugeIcons"
 import { useHudConfig, useHudLayout } from "@/lib/hudState"
 
 // These are shown only while /hudlayout is open. They deliberately use the
@@ -11,14 +12,15 @@ import { useHudConfig, useHudLayout } from "@/lib/hudState"
 // has a truthful, useful footprint while the player positions its section.
 export function GaugesPreview() {
     const t = useLocale()
+    const icon = useGaugeIcon()
     return (
         <div className="flex items-center gap-2">
-            <RadialGauge icon={Heart} value={68} defaultValue={100} label={t("UI.health")} color="hsl(var(--success))" />
-            <RadialGauge icon={Shield} value={42} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
-            <RadialGauge icon={Zap} value={55} defaultValue={100} label={t("UI.stamina")} color="hsl(var(--warning))" />
-            <RadialGauge icon={Utensils} value={64} defaultValue={100} label={t("UI.hunger")} color="hsl(var(--success))" />
-            <RadialGauge icon={Droplets} value={48} defaultValue={100} label={t("UI.thirst")} color="hsl(var(--warning))" />
-            <RadialGauge icon={Brain} value={35} defaultValue={0} label={t("UI.stress")} color="hsl(var(--warning))" />
+            <RadialGauge icon={icon("health")} value={68} defaultValue={100} label={t("UI.health")} color="hsl(var(--success))" />
+            <RadialGauge icon={icon("armour")} value={42} defaultValue={0} label={t("UI.armour")} color="hsl(var(--armour))" />
+            <RadialGauge icon={icon("stamina")} value={55} defaultValue={100} label={t("UI.stamina")} color="hsl(var(--warning))" />
+            <RadialGauge icon={icon("hunger")} value={64} defaultValue={100} label={t("UI.hunger")} color="hsl(var(--success))" />
+            <RadialGauge icon={icon("thirst")} value={48} defaultValue={100} label={t("UI.thirst")} color="hsl(var(--warning))" />
+            <RadialGauge icon={icon("stress")} value={35} defaultValue={0} label={t("UI.stress")} color="hsl(var(--warning))" />
         </div>
     )
 }

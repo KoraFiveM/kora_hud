@@ -311,6 +311,34 @@ local function validSection(section)
     return true
 end
 
+-- The NUI uses this same schema for its dropdowns. Keep its icon renderer
+-- (web/src/components/hud/gaugeIcons.ts) able to render every choice.
+local GAUGE_ICON_SCHEMA = { settings = {} }
+do
+    local function option(value, label)
+        return { value = value, label = label }
+    end
+
+    local gauges = {
+        { 'health', { option('heart', 'Heart'), option('heartPulse', 'Heart pulse'), option('cross', 'Medical cross') } },
+        { 'armour', { option('shield', 'Shield'), option('shieldCheck', 'Shield check'), option('shieldPlus', 'Shield plus') } },
+        { 'stamina', { option('zap', 'Lightning bolt'), option('footprints', 'Footprints'), option('activity', 'Activity') } },
+        { 'hunger', { option('utensils', 'Utensils'), option('sandwich', 'Sandwich'), option('apple', 'Apple') } },
+        { 'thirst', { option('droplets', 'Droplets'), option('droplet', 'Droplet'), option('glassWater', 'Glass of water') } },
+        { 'stress', { option('brain', 'Brain'), option('frown', 'Frown'), option('cloudLightning', 'Thundercloud') } },
+    }
+    for _, gauge in ipairs(gauges) do
+        local vital, options = gauge[1], gauge[2]
+        GAUGE_ICON_SCHEMA.settings[#GAUGE_ICON_SCHEMA.settings + 1] = {
+            key = vital .. 'Icon',
+            label = 'UI.' .. vital,
+            type = 'select',
+            default = options[1].value,
+            options = options,
+        }
+    end
+end
+
 ---The decoded KVP blob, or an empty table. Untrusted: every consumer
 ---re-validates the fields it reads.
 ---@return table
@@ -354,7 +382,7 @@ local function readLayout()
             if justification then justifications[section] = justification end
             if allowHide and entry.hidden == true and section ~= 'minimap' then hidden[section] = true end
             if HudUi and type(entry.settings) == 'table' then
-                local def = HudUi.get(section)
+                local def = section == 'gauges' and GAUGE_ICON_SCHEMA or HudUi.get(section)
                 settings[section] = def and HudUi.cleanSettings(def, entry.settings) or (not def and HudUi.preserveSettings(entry.settings)) or nil
             end
         end
@@ -382,7 +410,12 @@ local function writeLayout(payload)
     local scales = type(payload.scales) == 'table' and payload.scales or {}
     local requestedJustifications = type(payload.justifications) == 'table' and payload.justifications or {}
     local requestedHidden = hideAllowed() and type(payload.hidden) == 'table' and payload.hidden or {}
-    local requestedSettings = uiEnabled() and type(payload.settings) == 'table' and payload.settings or {}
+    local useUi = uiEnabled()
+    local requestedSettings = useUi and type(payload.settings) == 'table' and payload.settings or {}
+    if not useUi then
+        local savedGauges = readRawLayout().gauges
+        if type(savedGauges) == 'table' then requestedSettings.gauges = savedGauges.settings end
+    end
     local gaugesBottomAnchored = payload.gaugesBottomAnchored ~= false
     local clean = {}
     local count = 0
@@ -444,10 +477,10 @@ local function writeLayout(payload)
         end
     end
 
-    -- Settings are only accepted for a registered element, against its schema.
+    -- Only the built-in gauge schema and registered owners can accept settings.
     if HudUi then
         for section, raw in pairs(requestedSettings) do
-            local def = validSection(section) and HudUi.get(section)
+            local def = validSection(section) and (section == 'gauges' and GAUGE_ICON_SCHEMA or HudUi.get(section))
             if def and not def.internal then
                 local values = HudUi.cleanSettings(def, raw)
                 if values then
@@ -1755,6 +1788,7 @@ sendInitialState = function()
             -- /ui editor additions (all optional for the page).
             hidden = savedLayout.hidden,
             settings = savedLayout.settings,
+            gaugeIconSettings = GAUGE_ICON_SCHEMA.settings,
             editor = {
                 enabled = uiEnabled(),
                 allowHide = hideAllowed(),

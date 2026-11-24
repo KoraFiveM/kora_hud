@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, Check, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
-import { useHudLayout, useLocale } from "@/lib/hudState"
+import { useHudConfig, useHudLayout, useLocale } from "@/lib/hudState"
 import type { HudLayoutOffset, UiElementDef, UiSettingDef, UiSettingValue } from "@/lib/types"
 import { HUD_SECTIONS, clampDelta, layoutViewport, originFactors, snapDragAngle, snapOffsetToGrid } from "./LayoutEditor"
 
@@ -271,6 +271,37 @@ function SettingControl({ id, setting }: { id: string; setting: UiSettingDef }) 
 }
 
 /** The /ui panel: element picker, per-element controls, Save/Cancel/Reset. */
+function GaugeIconControls() {
+    const t = useLocale()
+    const layout = useHudLayout()
+    const settings = useHudConfig().layout?.gaugeIconSettings
+    const gauges = HUD_SECTIONS.gauges
+    if (!Array.isArray(settings) || settings.length === 0) return null
+
+    const heading = t("UI.gaugeIcons")
+    return (
+        <fieldset className="m-0 grid min-w-0 grid-cols-2 gap-2 border-0 p-0">
+            <legend className="mb-1.5 text-sm font-medium">{heading === "UI.gaugeIcons" ? "Gauge icons" : heading}</legend>
+            {settings.map((setting) => (
+                <label key={setting.key} className="flex min-w-0 flex-col gap-1">
+                    <span className="text-xs text-foreground">{t(setting.label)}</span>
+                    <select
+                        value={String(layout.settings[gauges]?.[setting.key] ?? setting.default)}
+                        onChange={(event) => layout.setSetting(gauges, setting.key, event.target.value)}
+                        className="h-8 w-full min-w-0 rounded-md text-xs"
+                    >
+                        {setting.options?.map((option) => {
+                            const key = `UI.gaugeIconOptions.${option.value}`
+                            const label = t(key)
+                            return <option key={option.value} value={option.value}>{label === key ? option.label : label}</option>
+                        })}
+                    </select>
+                </label>
+            ))}
+        </fieldset>
+    )
+}
+
 export function EditorPanel() {
     const t = useLocale()
     const layout = useHudLayout()
@@ -342,13 +373,13 @@ export function EditorPanel() {
             <div className="pointer-events-none fixed inset-0 bg-black/45" />
             <div
                 className={cn(
-                    "hud-panel pointer-events-auto fixed left-1/2 z-10 flex w-[360px] max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-3 rounded-xl p-3 text-foreground",
+                    "hud-panel pointer-events-auto fixed left-1/2 z-10 flex max-h-[calc(100%-1.5rem)] w-[360px] max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-3 rounded-xl p-3 text-foreground",
                     dock === "top" ? "top-3" : "bottom-3",
                 )}
                 role="dialog"
                 aria-label={t("UI.uiLayoutEditor")}
             >
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex shrink-0 items-center justify-between gap-2">
                     <div className="flex flex-col">
                         <span className="text-sm font-semibold">{t("UI.uiLayout")}</span>
                         <span className="text-[11px] text-muted-foreground">{t("UI.editorHint")}</span>
@@ -368,7 +399,7 @@ export function EditorPanel() {
                     aria-label={t("UI.elementToCustomise")}
                     value={current?.id ?? ""}
                     onChange={(event) => layout.select(event.target.value || null)}
-                    className="h-9 w-full rounded-md text-sm"
+                    className="h-9 w-full shrink-0 rounded-md text-sm"
                 >
                     <option value="">{t("UI.chooseElement")}</option>
                     {groups.map(([group, items]) => (
@@ -379,7 +410,7 @@ export function EditorPanel() {
                 </select>
 
                 {current ? (
-                    <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-background/40 p-3">
+                    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border/70 bg-background/40 p-3 [&>*]:shrink-0">
                         {layout.editor.allowHide && current.hideable && (
                             <Switch
                                 checked={!isHidden}
@@ -414,6 +445,7 @@ export function EditorPanel() {
                             />
                         )}
                         {current.settings.map((setting) => <SettingControl key={setting.key} id={current.id} setting={setting} />)}
+                        {current.id === HUD_SECTIONS.gauges && <GaugeIconControls />}
                         <button
                             type="button"
                             onClick={() => layout.resetElement(current.id)}
@@ -428,7 +460,7 @@ export function EditorPanel() {
                     </p>
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                     <button
                         type="button"
                         onClick={layout.confirm}

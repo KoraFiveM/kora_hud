@@ -1,6 +1,7 @@
 return {
     UI = {
         gauge = 'Gauges',
+        gaugeIcons = 'Gauge icons',
         vehicle = 'Vehicle',
         player = 'Player',
         status = 'Status',

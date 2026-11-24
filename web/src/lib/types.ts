@@ -111,8 +111,10 @@ export interface HudLayoutConfig {
     minimapVehicleOnlyAllowed?: boolean
     /** /ui editor: elements this player hid (HUD sections, minimap, registered elements). */
     hidden?: Record<string, boolean>
-    /** /ui editor: per-element settings, validated by Lua against each owner's schema. */
+    /** /ui editor: per-element settings, validated by Lua against the element's schema. */
     settings?: Record<string, Record<string, UiSettingValue>>
+    /** Icon options for the built-in gauges, supplied by the Lua save schema. */
+    gaugeIconSettings?: UiSettingDef[]
     /** /ui editor switches. Missing = an older client/hud.lua: the classic editor. */
     editor?: HudEditorConfig
 }
