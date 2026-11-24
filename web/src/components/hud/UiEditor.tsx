@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, Check, RotateCcw, X } fr
 import { cn } from "@/lib/cn"
 import { useHudLayout, useLocale } from "@/lib/hudState"
 import type { HudLayoutOffset, UiElementDef, UiSettingDef, UiSettingValue } from "@/lib/types"
-import { HUD_SECTIONS, clampDelta, layoutViewport, snapDragAngle, snapOffsetToGrid } from "./LayoutEditor"
+import { HUD_SECTIONS, clampDelta, layoutViewport, originFactors, snapDragAngle, snapOffsetToGrid } from "./LayoutEditor"
 
 /**
  * The unified /ui editor: a panel to pick an element and change its
@@ -38,11 +38,6 @@ const BUILTIN_ELEMENTS: PanelElement[] = [
 ]
 /** Shown only while an older kora_chat (one that does not register) runs. */
 const LEGACY_CHAT: PanelElement = { id: HUD_SECTIONS.chatInput, label: "Chat input", group: "Chat", hideable: false, scalable: true, scaleMin: 0.75, scaleMax: 1.5, settings: [] }
-
-function originFactors(origin: string): [number, number] {
-    const [ox, oy] = origin.split(" ")
-    return [ox === "right" ? 1 : ox === "center" ? 0.5 : 0, oy === "bottom" ? 1 : oy === "center" ? 0.5 : 0]
-}
 
 /** Keeps the scaled box of `def` inside the viewport (all in fractions). */
 export function clampProxyOffset(def: UiElementDef, offset: HudLayoutOffset, scale: number): HudLayoutOffset {
