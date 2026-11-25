@@ -198,6 +198,72 @@ end
 local MAX_LAYOUT_ENTRIES = 48
 local MAX_LAYOUT_BYTES = 16384
 local HIDEABLE_SECTIONS = { gauges = true, vehicle = true, identity = true, status = true }
+
+-- Status gauge shapes (Config.hud.gaugeShape, and the player's own choice in
+-- /ui > Gauges). Must match GAUGE_SHAPES in web/src/components/hud/RadialGauge.tsx.
+local GAUGE_SHAPES = { 'circle', 'square', 'hexagon', 'triangle', 'diamond', 'bar' }
+
+---@return string
+local function defaultGaugeShape()
+    local configured = Config.hud.gaugeShape
+    for _, shape in ipairs(GAUGE_SHAPES) do
+        if shape == configured then return shape end
+    end
+    return 'circle'
+end
+
+-- The NUI uses this same schema for its dropdowns. Keep its icon renderer
+-- (web/src/components/hud/gaugeIcons.ts) able to render every choice.
+local GAUGE_ICON_SCHEMA = { settings = {} }
+do
+    local function option(value, label)
+        return { value = value, label = label }
+    end
+
+    local gauges = {
+        { 'health', { option('heart', 'Heart'), option('heartPulse', 'Heart pulse'), option('cross', 'Medical cross') } },
+        { 'armour', { option('shield', 'Shield'), option('shieldCheck', 'Shield check'), option('shieldPlus', 'Shield plus') } },
+        { 'stamina', { option('zap', 'Lightning bolt'), option('footprints', 'Footprints'), option('activity', 'Activity') } },
+        { 'hunger', { option('utensils', 'Utensils'), option('sandwich', 'Sandwich'), option('apple', 'Apple') } },
+        { 'thirst', { option('droplets', 'Droplets'), option('droplet', 'Droplet'), option('glassWater', 'Glass of water') } },
+        { 'stress', { option('brain', 'Brain'), option('frown', 'Frown'), option('cloudLightning', 'Thundercloud') } },
+    }
+    for _, gauge in ipairs(gauges) do
+        local vital, options = gauge[1], gauge[2]
+        GAUGE_ICON_SCHEMA.settings[#GAUGE_ICON_SCHEMA.settings + 1] = {
+            key = vital .. 'Icon',
+            label = 'UI.' .. vital,
+            type = 'select',
+            default = options[1].value,
+            options = options,
+        }
+    end
+end
+
+---Settings schema for kora_hud's own sections, in the same shape as a
+---registered element's `def.settings` so HudUi.cleanSettings validates both.
+---Built on demand: the default follows a live Config.hud change.
+---@param section string
+---@return table|nil
+local function builtinSettingsDef(section)
+    if section ~= 'gauges' then return nil end
+    local options = {}
+    for index, shape in ipairs(GAUGE_SHAPES) do
+        options[index] = { value = shape, label = shape }
+    end
+    local settings = { { key = 'shape', type = 'select', options = options, default = defaultGaugeShape() } }
+    for _, setting in ipairs(GAUGE_ICON_SCHEMA.settings) do settings[#settings + 1] = setting end
+    return { settings = settings }
+end
+
+---The settings schema for any section: built-in first, then the registry.
+---@param section string
+---@return table|nil def, boolean builtin
+local function settingsDefFor(section)
+    local builtin = builtinSettingsDef(section)
+    if builtin then return builtin, true end
+    return HudUi and HudUi.get(section) or nil, false
+end
 -- Filled in by the minimap visibility block further down (its locals are
 -- declared after this point): isHidden() / setHidden(bool) / toggleEnabled().
 local minimapHooks = {}
@@ -311,34 +377,6 @@ local function validSection(section)
     return true
 end
 
--- The NUI uses this same schema for its dropdowns. Keep its icon renderer
--- (web/src/components/hud/gaugeIcons.ts) able to render every choice.
-local GAUGE_ICON_SCHEMA = { settings = {} }
-do
-    local function option(value, label)
-        return { value = value, label = label }
-    end
-
-    local gauges = {
-        { 'health', { option('heart', 'Heart'), option('heartPulse', 'Heart pulse'), option('cross', 'Medical cross') } },
-        { 'armour', { option('shield', 'Shield'), option('shieldCheck', 'Shield check'), option('shieldPlus', 'Shield plus') } },
-        { 'stamina', { option('zap', 'Lightning bolt'), option('footprints', 'Footprints'), option('activity', 'Activity') } },
-        { 'hunger', { option('utensils', 'Utensils'), option('sandwich', 'Sandwich'), option('apple', 'Apple') } },
-        { 'thirst', { option('droplets', 'Droplets'), option('droplet', 'Droplet'), option('glassWater', 'Glass of water') } },
-        { 'stress', { option('brain', 'Brain'), option('frown', 'Frown'), option('cloudLightning', 'Thundercloud') } },
-    }
-    for _, gauge in ipairs(gauges) do
-        local vital, options = gauge[1], gauge[2]
-        GAUGE_ICON_SCHEMA.settings[#GAUGE_ICON_SCHEMA.settings + 1] = {
-            key = vital .. 'Icon',
-            label = 'UI.' .. vital,
-            type = 'select',
-            default = options[1].value,
-            options = options,
-        }
-    end
-end
-
 ---The decoded KVP blob, or an empty table. Untrusted: every consumer
 ---re-validates the fields it reads.
 ---@return table
@@ -382,7 +420,7 @@ local function readLayout()
             if justification then justifications[section] = justification end
             if allowHide and entry.hidden == true and section ~= 'minimap' then hidden[section] = true end
             if HudUi and type(entry.settings) == 'table' then
-                local def = section == 'gauges' and GAUGE_ICON_SCHEMA or HudUi.get(section)
+                local def = settingsDefFor(section)
                 settings[section] = def and HudUi.cleanSettings(def, entry.settings) or (not def and HudUi.preserveSettings(entry.settings)) or nil
             end
         end
@@ -477,10 +515,11 @@ local function writeLayout(payload)
         end
     end
 
-    -- Only the built-in gauge schema and registered owners can accept settings.
+    -- Settings are only accepted for a registered element or a built-in
+    -- section that declares a schema (the gauges' shape), against that schema.
     if HudUi then
         for section, raw in pairs(requestedSettings) do
-            local def = validSection(section) and (section == 'gauges' and GAUGE_ICON_SCHEMA or HudUi.get(section))
+            local def = validSection(section) and settingsDefFor(section)
             if def and not def.internal then
                 local values = HudUi.cleanSettings(def, raw)
                 if values then
@@ -1770,6 +1809,8 @@ sendInitialState = function()
         -- See web/src/components/hud/RadialGauge.tsx.
         vitalsInterval = VITALS_INTERVAL,
         money = Config.hud.money,
+        -- Server default; a player's own /ui choice is in layout.settings.gauges.shape.
+        gaugeShape = defaultGaugeShape(),
         layout = {
             movable = LAYOUT.movable ~= false,
             command = LAYOUT.command or 'hudlayout',

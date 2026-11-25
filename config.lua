@@ -326,6 +326,17 @@ Config.hud = {
         options = { 'kmh', 'mph' },
         live = true,
     }) or 'kmh',
+
+    -- Default shape of the status gauges (health, armour, stamina, hunger,
+    -- thirst, stress and the vehicle fuel gauge). Players can pick their own
+    -- in /ui > Gauges > Shape; this is what they get until they do.
+    --   'circle' | 'square' | 'hexagon' | 'triangle' | 'diamond' | 'bar'
+    gaugeShape = configEnum and configEnum('circle', {
+        label = 'Default gauge shape',
+        description = 'Sets the shape of the status gauges for players who have not chosen their own in the /ui editor. Bar shows a horizontal fill bar beside the icon instead of an outline.',
+        options = { 'circle', 'square', 'hexagon', 'triangle', 'diamond', 'bar' },
+        live = true,
+    }) or 'circle',
 }
 
 -- Per-player HUD layout. Each section can be dragged to a new position and the

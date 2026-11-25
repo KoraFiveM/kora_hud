@@ -40,9 +40,9 @@ export function VehiclePreview() {
                 </div>
                 <div className="h-8 w-px bg-border" />
                 <div className="flex items-center gap-2.5">
-                    <Power className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.engineOn")} />
+                    <Power className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.engineOn")} />
                     <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-label={t("UI.headlightsOn")} />
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.seatbeltOn")} />
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.seatbeltOn")} />
                 </div>
             </div>
         </div>

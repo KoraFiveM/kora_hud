@@ -49,11 +49,18 @@ export interface HudConfigPayload {
      * through undefined.
      */
     money?: HudMoneyConfig
+    /**
+     * Config.hud.gaugeShape: the server-default gauge shape. A player's own
+     * /ui choice (layout.settings.gauges.shape) wins. Optional like `money`.
+     */
+    gaugeShape?: HudGaugeShape
     /** Config.layout plus this player's own saved section offsets. */
     layout?: HudLayoutConfig
 }
 
 export type HudSpeedUnit = "kmh" | "mph"
+
+export type HudGaugeShape = "circle" | "square" | "hexagon" | "triangle" | "diamond" | "bar"
 
 export interface HudMoneyConfig {
     /**

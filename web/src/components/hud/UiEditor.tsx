@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn"
 import { useHudConfig, useHudLayout, useLocale } from "@/lib/hudState"
 import type { HudLayoutOffset, UiElementDef, UiSettingDef, UiSettingValue } from "@/lib/types"
 import { HUD_SECTIONS, clampDelta, layoutViewport, originFactors, snapDragAngle, snapOffsetToGrid } from "./LayoutEditor"
+import { GAUGE_SHAPES } from "./RadialGauge"
 
 /**
  * The unified /ui editor: a panel to pick an element and change its
@@ -305,6 +306,7 @@ function GaugeIconControls() {
 export function EditorPanel() {
     const t = useLocale()
     const layout = useHudLayout()
+    const config = useHudConfig()
     const [dock, setDock] = useState<"top" | "bottom">("top")
     const [confirmingReset, setConfirmingReset] = useState(false)
 
@@ -336,10 +338,24 @@ export function EditorPanel() {
             [HUD_SECTIONS.identity]: t("UI.playerInfoMoney"),
             [HUD_SECTIONS.status]: t("UI.statusEffects"),
         }
-        const builtin = BUILTIN_ELEMENTS.map((element) => ({ ...element, label: builtinLabels[element.id], group: t("UI.hudGroup") }))
+        // The gauges' shape is validated by client/hud.lua (builtinSettingsDef)
+        // against the same list; the default is Config.hud.gaugeShape.
+        const gaugeSettings: UiSettingDef[] = [{
+            key: "shape",
+            label: t("UI.gaugeShape"),
+            type: "select",
+            default: config.gaugeShape ?? "circle",
+            options: GAUGE_SHAPES.map((shape) => ({ value: shape, label: t(`UI.shapes.${shape}`) })),
+        }]
+        const builtin = BUILTIN_ELEMENTS.map((element) => ({
+            ...element,
+            label: builtinLabels[element.id],
+            group: t("UI.hudGroup"),
+            settings: element.id === HUD_SECTIONS.gauges ? gaugeSettings : element.settings,
+        }))
         const legacyChat = { ...LEGACY_CHAT, label: t("UI.chatInput"), group: t("UI.chatGroup") }
         return [...builtin, ...(chatRegistered ? [] : [legacyChat]), ...registered]
-    }, [layout.elements, t])
+    }, [layout.elements, config.gaugeShape, t])
 
     const groups = useMemo(() => {
         const out = new Map<string, PanelElement[]>()

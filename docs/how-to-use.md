@@ -20,6 +20,7 @@ Splitting by how often a value changes — not by what it means — is deliberat
   speedUnit: "kmh",        // "kmh" | "mph"
   vitalsInterval: 150,     // ms — gauge CSS animation is timed to match this
   money: { scrollAccounts: true, scrollAccountsTime: 5000 },
+  gaugeShape: "circle",    // Config.hud.gaugeShape; layout.settings.gauges.shape overrides it per player
   layout: {
     movable: true, command: "hudlayout",
     minimapVehicleOnly: false, minimapVehicleOnlyDefault: false, minimapVehicleOnlyAllowed: true,
@@ -84,6 +85,7 @@ Splitting by how often a value changes — not by what it means — is deliberat
 - `Config.hud.hideMinimapWhenForcedHidden` (default `true`, live) — while another resource force-hides the whole HUD (`exports.kora_hud:hide()`, as kora_clothing does for its menu), also keep the radar hidden, and let `minimap` take back over on `:show()`. `false` restores the old behaviour of handing the radar back as visible (which shows it on foot under `minimap = 'vehicle'`).
 - `Config.hud.hideOnPauseMenu` (default `true`, live) — hides every element (gauges, job/cash, status effects, vehicle bar) while the pause menu or full map (Esc/P) is open.
 - `Config.hud.minimapLayout` — positions the minimap/mask/border together and, for `shape = 'square'` (default), swaps the stock round mask for a streamed square texture (`stream/kora_hud_squaremap.ytd`, built by `tools/gen_minimap_ytd.py`). `shape = 'circle'` keeps the stock round mask with the same clip type; `shape = 'stock'` (or `enabled = false`) touches nothing and undoes any earlier change. Sub-keys: `textureDict`/`maskTexture` (the streamed names), `dictTimeoutMs`/`retryMs`/`maxRetries` (streaming grace + retries), `bigmapWaitMs`/`readySettleMs`/`readyTimeoutMs`/`pollMs` (the bigmap-toggle refresh this all rides on), `guardBigmap` (forces an unexpectedly-stuck bigmap back off, live), `aspectOffset` (ultrawide x correction), `shapes` (the raw per-shape rects), and the live-tunable `x`/`y`/`scale`/`safezoneCompensation`/`offsets` nudges on top of them.
+- `Config.hud.gaugeShape` (default `'circle'`, live) — server-default gauge shape: `'circle'`, `'square'`, `'hexagon'`, `'triangle'`, `'diamond'` or `'bar'`. A player's own choice from `/ui` (stored as `settings.gauges.shape`) wins.
 - `Config.hud.speedUnit` — `'kmh'` or `'mph'` for the vehicle speedometer (live; converts and relabels atomically so a value and its unit can never desync across a dropped message).
 
 ## Other Config tables

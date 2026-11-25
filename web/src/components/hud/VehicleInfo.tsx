@@ -36,7 +36,7 @@ export function VehicleInfo() {
                 <div className="h-8 w-px bg-border" />
                 <div className="flex items-center gap-2.5">
                     {engineOn ? (
-                        <Power className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.engineOn")} />
+                        <Power className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.engineOn")} />
                     ) : (
                         <PowerOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.engineOff")} />
                     )}
@@ -48,14 +48,14 @@ export function VehicleInfo() {
                         <LightbulbOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.headlightsOff")} />
                     )}
                     {seatbelt ? (
-                        <ShieldCheck className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.seatbeltOn")} />
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.seatbeltOn")} />
                     ) : (
                         <ShieldAlert className="h-4 w-4 shrink-0 animate-pulse text-warning" aria-label={t("UI.seatbeltOff")} />
                     )}
                     {/* Race harness, its own state next to the belt. Absent
                         unless attached or harnessIcon = 'always'. */}
                     {harness === true ? (
-                        <LockKeyhole className="h-4 w-4 shrink-0 text-success" aria-label={t("UI.harnessAttached")} />
+                        <LockKeyhole className="h-4 w-4 shrink-0 text-primary" aria-label={t("UI.harnessAttached")} />
                     ) : harness === false ? (
                         <LockKeyholeOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t("UI.noHarness")} />
                     ) : null}

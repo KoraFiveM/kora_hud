@@ -160,6 +160,7 @@ local function loadHud(opts)
             },
             money = opts.money or { scrollAccounts = false, scrollAccountsTime = 5000 },
             speedUnit = opts.speedUnit,
+            gaugeShape = opts.gaugeShape,
             -- 'always' means client/hud.lua never touches DisplayRadar at all,
             -- which is the shipped default and the only mode where no radar
             -- native is called; the modes that DO take control are covered by
@@ -1978,7 +1979,7 @@ harness.test('save persists hidden and settings; cancel reverts owners to the sa
     local blob = reloaded.kvp['kora_hud:layout']
     harness.assertEqual(json.decode(blob).v, 2, 'the blob is versioned')
     harness.assertEqual(json.decode(blob).chatInput.settings.bogus, nil, 'unknown settings are not stored')
-    harness.assertEqual(json.decode(blob).gauges.settings, nil, 'settings for unregistered ids are not stored')
+    harness.assertEqual(json.decode(blob).gauges.settings, nil, 'unknown gauge settings are not stored')
     harness.assertEqual(lastApply(reloaded, 'chatInput').args[3].settings.fadeSeconds, 20,
         'a re-registering owner gets its saved settings back')
 
@@ -1986,6 +1987,28 @@ harness.test('save persists hidden and settings; cancel reverts owners to the sa
     reloaded.callbacks['kora_hud:uiPreview']({ elements = { chatInput = { x = 0.5, y = 0.5 } } }, function() end)
     reloaded.callbacks['kora_hud:finishLayout']({ confirmed = false }, function() end)
     harness.assertEqual(lastApply(reloaded, 'chatInput').args[3].x, 0.1, 'cancel puts the owner back on its saved layout')
+end)
+
+harness.test('the gauge shape is a validated built-in setting with a configurable default', function()
+    local hud = loadHud({ bridgePush = true, gaugeShape = 'hexagon' })
+    harness.assertEqual(configPayload(hud).gaugeShape, 'hexagon', 'Config.hud.gaugeShape reaches the page')
+
+    hud.commands.ui()
+    hud.callbacks['kora_hud:finishLayout']({ confirmed = true, settings = { gauges = { shape = 'triangle', extra = 1 } } },
+        function() end)
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
+    local settings = configPayload(reloaded).layout.settings
+    harness.assertEqual(settings.gauges.shape, 'triangle', 'a chosen shape survives a reconnect')
+    harness.assertEqual(settings.gauges.extra, nil, 'unknown gauge settings are dropped')
+
+    reloaded.commands.ui()
+    reloaded.callbacks['kora_hud:finishLayout']({ confirmed = true, settings = { gauges = { shape = 'star' } } },
+        function() end)
+    harness.assertEqual(json.decode(reloaded.kvp['kora_hud:layout']).gauges, nil, 'an unknown shape is not stored')
+
+    harness.assertEqual(configPayload(loadHud({ bridgePush = true, gaugeShape = 'nonsense' })).gaugeShape, 'circle',
+        'an invalid configured default falls back to circle')
+    harness.assertEqual(configPayload(loadHud({ bridgePush = true })).gaugeShape, 'circle', 'circle when unset')
 end)
 
 harness.test('a saved element whose owner is not running is kept on save', function()

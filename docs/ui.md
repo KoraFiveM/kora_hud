@@ -33,6 +33,8 @@ While hidden the resource owns no running thread and does no sampling.
 ## Gauges and money
 
 - With `Config.hud.dynamic` gauges are hidden while at their neutral value.
+- Gauges use the kora_theme primary colour while healthy, then the warning and destructive colours as they fall (or, for stress, rise). Armour keeps its own colour. The talking mic, engine, seatbelt and harness icons, the on-duty dot and the cash badge also use the primary colour.
+- Gauges can be a ring (circle), a square, hexagon, triangle or diamond outline, or a horizontal bar beside the icon. The default is `Config.hud.gaugeShape`; each player can pick their own in `/ui`. The vehicle fuel gauge follows the same shape.
 - Cash and bank can alternate one at a time (`Config.hud.money`).
 - `/id` shows your server ID in the player HUD until toggled off or the session ends.
 - Stress, hunger and thirst come from `kora_core` metadata (`stress`, `hunger`, `thirst`).
