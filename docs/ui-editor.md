@@ -11,12 +11,14 @@ Players arrange their HUD with `/ui` (aliases from `Config.uiEditor.aliases`, de
 
 The editor is an explicit mode: it takes NUI focus and dims the screen. Each section gets Move, Resize and Align controls.
 
-- Move by dragging. Hold Control to snap to a 5% viewport grid; hold Shift to snap to 45 degree angles.
-- Resize left or right. HUD sections and the chat input scale 75%-150%; registered elements use their own range (50%-200% at most).
+- Move by dragging. Hold Control to snap to a 5% viewport grid or Shift to snap to 45 degree angles. Snapped positions stop at the screen edge.
+- The vitals gauges can be dragged down to the bottom edge, including beside the vehicle panel preview.
+- Select **Gauges** in the unified editor to choose icons for Health, Armour, Stamina, Hunger, Thirst and Stress. The gauge row previews your selections. Save keeps them for your player, Cancel restores your saved selections, and Reset Gauges returns to the default icons.
+- Drag a section's square corner handle horizontally to resize from its anchor. The unified editor also has a Size slider. HUD sections and the chat input scale from 75% to 150%. Registered elements use their own range (50%-200% at most).
 - Align cycles left, centre and right for the contents of a section.
 - The gauge row has an Anchor toggle.
 - With the unified editor, Gauges also has a Shape setting (circle, square, hexagon, triangle, diamond or bar). It is saved with the layout under `settings.gauges.shape` and validated by kora_hud; the default is `Config.hud.gaugeShape`.
-- With the unified editor, pick an element from the dropdown or click it, then use Visible (when hiding is allowed and the element supports it), Size, the element's own settings and Reset for that element. Save, Cancel (Escape) and Reset all apply to the whole layout.
+- With the unified editor, pick an element from the dropdown or click it, then use Visible (when hiding is allowed and the element supports it), Size, the element's own settings and Reset for that element. Save, Cancel (Escape) and Reset all apply to the whole layout. The panel stays above the HUD elements, and the arrow button moves it between the top and bottom of the screen.
 - A "Minimap only in vehicle" switch is shown when `Config.hud.minimapVehicleOnly.allowPlayerChange` is on.
 
 Confirm saves; Cancel restores what was saved when the editor opened. Dragging only previews; nothing is written until Confirm. `/hudlayoutreset` (or `/uireset`) deletes the saved layout without opening the editor, so a player can recover from an unreachable placement.

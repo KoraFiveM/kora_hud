@@ -1098,7 +1098,7 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     hud.commands.hudlayout()
     hud.callbacks['kora_hud:finishLayout']({
         confirmed = true,
-        offsets = { gauges = { x = 0.1, y = -0.2 } },
+        offsets = { gauges = { x = 0.1, y = 0.074 } },
         scales = { gauges = 1.25 },
         justifications = { gauges = 'left' },
     }, function() end)
@@ -1113,7 +1113,7 @@ harness.test('a submitted layout is persisted as viewport fractions', function()
     local config = configPayload(reloaded)
     harness.assertTrue(config ~= nil, 'the config push happened')
     harness.assertEqual(config.layout.offsets.gauges.x, 0.1, 'the saved offset is seeded on load')
-    harness.assertEqual(config.layout.offsets.gauges.y, -0.2, 'on both axes')
+    harness.assertEqual(config.layout.offsets.gauges.y, 0.074, 'vitals can be saved below the default editor anchor')
     harness.assertEqual(config.layout.scales.gauges, 1.25, 'and its resized scale is seeded too')
     harness.assertEqual(config.layout.justifications.gauges, 'left', 'and its chosen alignment is seeded too')
 end)
@@ -1133,6 +1133,54 @@ harness.test('gauge bottom anchoring defaults on and can be disabled per player'
     local config = configPayload(loadHud({ bridgePush = true, kvp = hud.kvp }))
     harness.assertFalse(config.layout.gaugesBottomAnchored,
         'turning off the anchor survives a reconnect')
+end)
+
+harness.test('gauge icon choices persist and are validated per vital', function()
+    local hud = loadHud({ bridgePush = true })
+    local choices = configPayload(hud).layout.gaugeIconSettings
+    harness.assertEqual(#choices, 6, 'the editor receives one icon dropdown per vital')
+    harness.assertEqual(choices[1].key, 'healthIcon', 'the layout setting is keyed by vital')
+    harness.assertEqual(choices[1].default, 'heart', 'existing players keep their original icons')
+
+    hud.commands.hudlayout()
+    hud.callbacks['kora_hud:finishLayout']({
+        confirmed = true,
+        settings = {
+            gauges = {
+                healthIcon = 'heartPulse',
+                armourIcon = 'shieldPlus',
+                staminaIcon = 'footprints',
+                hungerIcon = 'apple',
+                thirstIcon = 'glassWater',
+                stressIcon = 'cloudLightning',
+                unknownIcon = 'heart',
+            },
+        },
+    }, function() end)
+    local reloaded = loadHud({ bridgePush = true, kvp = hud.kvp })
+    local saved = configPayload(reloaded).layout.settings.gauges
+    harness.assertEqual(saved.healthIcon, 'heartPulse', 'the saved icon is sent to the next NUI session')
+    harness.assertEqual(saved.armourIcon, 'shieldPlus')
+    harness.assertEqual(saved.staminaIcon, 'footprints')
+    harness.assertEqual(saved.hungerIcon, 'apple')
+    harness.assertEqual(saved.thirstIcon, 'glassWater')
+    harness.assertEqual(saved.stressIcon, 'cloudLightning')
+    harness.assertEqual(saved.unknownIcon, nil, 'unknown keys are discarded')
+
+    local classic = loadHud({ bridgePush = true, kvp = hud.kvp, uiEditor = { enabled = false } })
+    classic.commands.hudlayout()
+    classic.callbacks['kora_hud:finishLayout']({ confirmed = true }, function() end)
+    local preserved = loadHud({ bridgePush = true, kvp = classic.kvp })
+    harness.assertEqual(configPayload(preserved).layout.settings.gauges.healthIcon, 'heartPulse',
+        'saving in the classic editor preserves preferences it cannot edit')
+
+    reloaded.commands.hudlayout()
+    reloaded.callbacks['kora_hud:finishLayout']({
+        confirmed = true,
+        settings = { gauges = { healthIcon = 'shield', armourIcon = true, thirstIcon = 'missing' } },
+    }, function() end)
+    local reset = loadHud({ bridgePush = true, kvp = reloaded.kvp })
+    harness.assertEqual(configPayload(reset).layout.settings.gauges, nil, 'invalid icon choices fall back to defaults')
 end)
 
 harness.test('layout alignment is validated without changing component placement', function()

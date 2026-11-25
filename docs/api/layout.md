@@ -35,6 +35,7 @@ Read-only snapshot of this player's saved HUD layout, already validated. kora_ch
 **Returns**
 
 - **layout** — `{ offsets, scales, justifications, hidden, settings, gaugesBottomAnchored, minimapVehicleOnly }`. `offsets`/`scales`/`justifications`/`hidden`/`settings` are each keyed by section/element id; `gaugesBottomAnchored` and `minimapVehicleOnly` are booleans. An empty table for anything unsaved — never `nil`.
+- **Gauge icons** — `settings.gauges` stores player choices such as `healthIcon = 'heartPulse'`. A gauge uses its default icon when no choice is saved. Each choice is validated against the options for that gauge.
 
 **Example**
 

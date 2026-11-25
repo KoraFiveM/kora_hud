@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
-import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Map as MapIcon, Maximize2, Move, RotateCcw, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Anchor, Check, Map as MapIcon, Move, RotateCcw, X } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useLocale } from "@/lib/hudState"
@@ -30,7 +30,8 @@ export const HUD_SECTIONS = {
 // ranges differ too: using one +/- limit strands every corner section on only
 // half of the screen.
 const SECTION_BOUNDS: Record<string, { minX: number; maxX: number; minY: number; maxY: number }> = {
-    [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
+    // Gauges start above the vehicle preview and can move below that anchor.
+    [HUD_SECTIONS.gauges]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 1 },
     [HUD_SECTIONS.vehicle]: { minX: -0.5, maxX: 0.5, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.identity]: { minX: -0.95, maxX: 0, minY: -0.95, maxY: 0 },
     [HUD_SECTIONS.status]: { minX: -0.95, maxX: 0, minY: 0, maxY: 1 },
@@ -126,6 +127,16 @@ function scaleTransform(offset: HudLayoutOffset, centered: boolean, scale: numbe
     return `${sectionTransform(offset, centered, nudge)} scale(${scale})`
 }
 
+export function originFactors(origin: string): [number, number] {
+    const [x, y] = origin.split(" ")
+    return [x === "right" ? 1 : x === "center" ? 0.5 : 0, y === "bottom" ? 1 : y === "center" ? 0.5 : 0]
+}
+
+function viewportCorrection(start: number, end: number, limit: number): number {
+    if (end - start >= limit || start < 0) return -start
+    return Math.min(0, limit - end)
+}
+
 /**
  * How far (in the HUD's root pixels) a rendered box must move to sit fully
  * inside the viewport. Measured from the real box, so it covers a resolution
@@ -139,12 +150,10 @@ function offscreenNudge(node: HTMLElement, current: HudLayoutOffset): HudLayoutO
     const top = rect.top - current.y * scale
     const right = left + rect.width
     const bottom = top + rect.height
-    const fix = (start: number, end: number, limit: number) => {
-        if (end - start >= limit || start < 0) return -start
-        if (end > limit) return limit - end
-        return 0
+    return {
+        x: viewportCorrection(left, right, window.innerWidth) / scale,
+        y: viewportCorrection(top, bottom, window.innerHeight) / scale,
     }
-    return { x: fix(left, right, window.innerWidth) / scale, y: fix(top, bottom, window.innerHeight) / scale }
 }
 
 /** Viewport-size state that follows window resizes (for re-measuring). */
@@ -199,7 +208,7 @@ export function MovableSection({
     flippedHandlePosition,
     inner,
     centerX = false,
-    scaleOrigin = "center",
+    scaleOrigin = "center center",
     editorOnly = false,
     bottomAnchored,
     children,
@@ -214,7 +223,11 @@ export function MovableSection({
     const selected = layout.editing && layout.selected === id
 
     const offset = layout.offsets[id] ?? ZERO
+    // A downward gauge offset can overrun the bottom when its anchor changes.
+    // Let the keep-on-screen effect measure the final anchor immediately.
+    const animateBottom = id !== HUD_SECTIONS.gauges || offset.y <= 0
     const scale = layout.scales[id] ?? 1
+    const [originX, originY] = originFactors(scaleOrigin)
     const justification = layout.justifications[id] ?? DEFAULT_JUSTIFICATIONS[id] ?? "right"
     const AlignmentIcon = justification === "left" ? AlignLeft : justification === "center" ? AlignCenter : AlignRight
     const draggable = layout.editing && layout.movable
@@ -246,8 +259,8 @@ export function MovableSection({
         observer.observe(node)
         return () => observer.disconnect()
     }, [hidden, layout.editing])
-    useEffect(() => {
-        if (!layout.editing || !layout.movable || editorOnly || hidden) return
+    useLayoutEffect(() => {
+        if (!layout.editing || !layout.movable) return
         const node = nodeRef.current
         if (!node) return
         const fix = offscreenNudge(node, ZERO)
@@ -257,9 +270,9 @@ export function MovableSection({
             x: clamp(id, "x", offset.x + fix.x / viewport.width),
             y: clamp(id, "y", offset.y + fix.y / viewport.height),
         })
-        // Only on entering the editor or a resize while it is open.
+        // Entering the editor, changing resolution or resizing the section.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [layout.editing, viewportKey])
+    }, [layout.editing, viewportKey, scale])
 
     function handleMoveMouseDown(event: React.MouseEvent<HTMLElement>) {
         if (!draggable) return
@@ -274,6 +287,12 @@ export function MovableSection({
         const startY = event.clientY
         const base = offset
         const startRect = node.getBoundingClientRect()
+        const width = window.innerWidth
+        const height = window.innerHeight
+        const minDeltaX = -startRect.left
+        const maxDeltaX = width - startRect.right
+        const minDeltaY = -startRect.top
+        const maxDeltaY = height - startRect.bottom
         let latest = base
 
         // Arrow consts, not function declarations: a hoisted declaration is
@@ -286,31 +305,26 @@ export function MovableSection({
             // all have different dimensions. It lets a status stack sit at
             // the bottom edge without letting its controls disappear beyond
             // it.
-            let deltaX = clampDelta(
-                moveEvent.clientX - startX,
-                -startRect.left,
-                window.innerWidth - startRect.right,
-            )
-            let deltaY = clampDelta(
-                moveEvent.clientY - startY,
-                -startRect.top,
-                window.innerHeight - startRect.bottom,
-            )
+            let deltaX = clampDelta(moveEvent.clientX - startX, minDeltaX, maxDeltaX)
+            let deltaY = clampDelta(moveEvent.clientY - startY, minDeltaY, maxDeltaY)
             if (moveEvent.shiftKey) {
                 const snappedDelta = snapDragAngle(deltaX, deltaY)
                 deltaX = snappedDelta.x
                 deltaY = snappedDelta.y
             }
             const nextOffset = {
-                x: clamp(id, "x", base.x + deltaX / window.innerWidth),
-                y: clamp(id, "y", base.y + deltaY / window.innerHeight),
+                x: clamp(id, "x", base.x + deltaX / width),
+                y: clamp(id, "y", base.y + deltaY / height),
             }
-            latest = moveEvent.ctrlKey
-                ? {
-                    x: clamp(id, "x", snapOffsetToGrid(nextOffset.x)),
-                    y: clamp(id, "y", snapOffsetToGrid(nextOffset.y)),
-                }
-                : nextOffset
+            if (moveEvent.ctrlKey) {
+                nextOffset.x = clamp(id, "x", snapOffsetToGrid(nextOffset.x))
+                nextOffset.y = clamp(id, "y", snapOffsetToGrid(nextOffset.y))
+            }
+            // Either snap can move the rendered box past a viewport edge.
+            latest = {
+                x: clampDelta(nextOffset.x, base.x + minDeltaX / width, base.x + maxDeltaX / width),
+                y: clampDelta(nextOffset.y, base.y + minDeltaY / height, base.y + maxDeltaY / height),
+            }
             // Written straight to the node instead of through state: a drag
             // fires a mousemove per frame, and routing each one through React
             // would re-render this section (and re-run every gauge inside it)
@@ -345,25 +359,40 @@ export function MovableSection({
         // not reliably report its position inside FiveM's embedded browser.
         event.preventDefault()
         event.stopPropagation()
+        const node = nodeRef.current
+        if (!node) return
+        layout.select(id)
 
         const startX = event.clientX
-        const base = scale
-        let latest = base
+        const rect = node.getBoundingClientRect()
+        const width = window.innerWidth
+        const height = window.innerHeight
+        const boxWidth = Math.max(1, rect.width / scale)
+        const direction = originX === 1 ? -1 : 1
+        let latestScale = scale
+        let latestOffset = offset
 
         const onMove = (moveEvent: MouseEvent) => {
-            // Horizontal movement is intentional: it makes every section
-            // resize consistently regardless of which fixed corner it grows
-            // from. A full viewport-width drag spans the complete 75–150%
-            // range, while smaller adjustments remain easy to control.
-            latest = clampDelta(base + (moveEvent.clientX - startX) / window.innerWidth, SCALE_MIN, SCALE_MAX)
-            const node = nodeRef.current
-            if (node) node.style.transform = scaleTransform(offset, centerX, latest)
+            latestScale = clampDelta(scale + direction * (moveEvent.clientX - startX) / boxWidth, SCALE_MIN, SCALE_MAX)
+            // Predict the scaled box around its fixed origin so the preview can
+            // stay in view without forcing browser layout on every mousemove.
+            const growthX = rect.width * (latestScale / scale - 1)
+            const growthY = rect.height * (latestScale / scale - 1)
+            const nudgeX = viewportCorrection(rect.left - growthX * originX, rect.right + growthX * (1 - originX), width)
+            const nudgeY = viewportCorrection(rect.top - growthY * originY, rect.bottom + growthY * (1 - originY), height)
+            latestOffset = {
+                x: clamp(id, "x", offset.x + nudgeX / width),
+                y: clamp(id, "y", offset.y + nudgeY / height),
+            }
+            node.style.transform = scaleTransform(latestOffset, centerX, latestScale)
         }
 
         const onUp = () => {
             window.removeEventListener("mousemove", onMove)
             window.removeEventListener("mouseup", onUp)
-            if (latest !== base) layout.commitScale(id, latest)
+            if (latestScale === scale) return
+            layout.commitScale(id, latestScale)
+            if (latestOffset.x !== offset.x || latestOffset.y !== offset.y) layout.commitOffset(id, latestOffset)
         }
 
         window.addEventListener("mousemove", onMove)
@@ -392,7 +421,7 @@ export function MovableSection({
             // click-through overlay over live gameplay the rest of the time
             // (see globals.css) and has to stay that way -- only the explicit
             // control icons take pointer input while editing.
-            className={cn("fixed transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto", hidden && "opacity-40")}
+            className={cn("fixed", animateBottom && "transition-[bottom] duration-200 ease-out", position, draggable && "pointer-events-auto", hidden && "opacity-40")}
             data-ui-section={id}
             style={{
                 transform: scaleTransform(offset, centerX, scale, layout.editing ? ZERO : nudge),
@@ -433,15 +462,6 @@ export function MovableSection({
                                 <Anchor className="h-3.5 w-3.5" aria-hidden />
                             </button>
                         )}
-                        <button
-                            type="button"
-                            aria-label={t("UI.resize", label)}
-                            title={t("UI.resizeDrag")}
-                            onMouseDown={handleResizeMouseDown}
-                            className="flex h-7 w-7 cursor-ew-resize items-center justify-center rounded-full text-primary"
-                        >
-                            <Maximize2 className="h-3.5 w-3.5" aria-hidden />
-                        </button>
                         {!editorOnly && (
                             <button
                                 type="button"
@@ -458,6 +478,18 @@ export function MovableSection({
                         "pointer-events-none absolute -inset-2 rounded-2xl border",
                         selected ? "border-2 border-solid border-[hsl(var(--primary))]" : "border-dashed border-[hsl(var(--primary)/55%)]",
                     )} />
+                    <button
+                        type="button"
+                        aria-label={t("UI.resize", label)}
+                        title={t("UI.resizeDrag")}
+                        onMouseDown={handleResizeMouseDown}
+                        className={cn(
+                            "absolute z-10 h-4 w-4 min-h-0 rounded-sm border border-primary bg-primary p-0",
+                            originX === 1 ? "left-0" : "right-0",
+                            originY === 1 ? "top-0" : "bottom-0",
+                            (originX === 1) === (originY === 1) ? "cursor-nwse-resize" : "cursor-nesw-resize",
+                        )}
+                    />
                     {hidden && (
                         <span className="pointer-events-none absolute -top-2 left-2 -translate-y-full rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Hidden
