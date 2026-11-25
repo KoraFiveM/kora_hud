@@ -15,7 +15,9 @@
       "client/voice.lua",
       "fft_hooks.lua"
     ],
-    "server": [],
+    "server": [
+      "kora_versioncheck.lua"
+    ],
     "shared": [
       "config.lua",
       "shared/bridge.lua",
