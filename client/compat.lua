@@ -97,7 +97,7 @@ end)
 -- not the GTA thefeed. pcall: kora_lib may be mid-restart.
 HudCompat.notify = function(label, amount)
     pcall(function()
-        Kora.notify.send({ title = label, message = ('$%d'):format(amount), type = 'info' })
+        Kora.bridge.sendNotify({ title = label, message = ('$%d'):format(amount), type = 'info' })
     end)
 end
 

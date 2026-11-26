@@ -586,7 +586,7 @@ end
 -- game needs. The NUI takes focus only while this mode is open.
 local function openLayoutEditor()
     if LAYOUT.movable == false then
-        Kora.notify.send({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
+        Kora.bridge.sendNotify({ title = 'HUD', message = 'Moving HUD sections is disabled on this server.', type = 'error' })
         return
     end
 
@@ -659,7 +659,7 @@ RegisterNUICallback('kora_hud:finishLayout', function(payload, cb)
     if type(payload) == 'table' and payload.confirmed == true then
         local ok, saved = pcall(writeLayout, payload)
         if ok and saved == false and LAYOUT.movable ~= false and type(payload) == 'table' then
-            Kora.notify.send({ title = 'UI', message = 'That layout is too large to save. Reset a few elements and try again.', type = 'error' })
+            Kora.bridge.sendNotify({ title = 'UI', message = 'That layout is too large to save. Reset a few elements and try again.', type = 'error' })
         end
         if hideAllowed() and type(payload.hidden) == 'table' and minimapHooks.setHidden then
             local requested = payload.hidden.minimap
@@ -687,7 +687,7 @@ local function resetLayout()
     applyToOwners('reset', {})
     if minimapHooks.sync then minimapHooks.sync(false) end -- the page clears its hidden switches
     if minimapChoiceChanged then minimapChoiceChanged() end
-    Kora.notify.send({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
+    Kora.bridge.sendNotify({ title = 'HUD', message = 'HUD layout reset to defaults.', type = 'success' })
 end
 RegisterCommand('hudlayoutreset', resetLayout, false)
 if uiEnabled() and validCommandName(UI.resetCommand or 'uireset') and (UI.resetCommand or 'uireset') ~= 'hudlayoutreset' then
@@ -1289,7 +1289,7 @@ local minimapChoiceSet = false
 
 local function toggleMinimap()
     if not minimapToggleEnabled() then
-        Kora.notify.send({ title = 'Minimap', message = 'The minimap toggle is disabled on this server.', type = 'error' })
+        Kora.bridge.sendNotify({ title = 'Minimap', message = 'The minimap toggle is disabled on this server.', type = 'error' })
         return
     end
 
@@ -1315,11 +1315,11 @@ local function toggleMinimap()
     minimapChoiceChanged()
 
     if minimapHiddenChoice then
-        Kora.notify.send({ title = 'Minimap', message = 'Minimap hidden.', type = 'success' })
+        Kora.bridge.sendNotify({ title = 'Minimap', message = 'Minimap hidden.', type = 'success' })
     elseif MINIMAP_MODE == 'never' then
-        Kora.notify.send({ title = 'Minimap', message = 'Minimap enabled, but this server keeps it hidden.', type = 'success' })
+        Kora.bridge.sendNotify({ title = 'Minimap', message = 'Minimap enabled, but this server keeps it hidden.', type = 'success' })
     else
-        Kora.notify.send({ title = 'Minimap', message = 'Minimap shown.', type = 'success' })
+        Kora.bridge.sendNotify({ title = 'Minimap', message = 'Minimap shown.', type = 'success' })
     end
 end
 

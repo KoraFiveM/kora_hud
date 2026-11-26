@@ -180,7 +180,7 @@ TriggerEvent('seatbelt:client:ToggleCruise')
 
 ### `RegisterNetEvent('hud:client:ShowAccounts', function(account) end)`
 
-Shows a one-off notification of the player's own current balance (through `Kora.notify.send`) for `'cash'` or `'bank'` — reads the **live** bridge snapshot, ignoring any amount a caller might try to pass. Also registered directly as the commands `/cash` and `/bank`.
+Shows a one-off notification of the player's own current balance (through `Kora.bridge.sendNotify`) for `'cash'` or `'bank'` — reads the **live** bridge snapshot, ignoring any amount a caller might try to pass. Also registered directly as the commands `/cash` and `/bank`.
 
 **Parameters**
 
