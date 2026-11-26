@@ -36,7 +36,7 @@ function Vehicle.getSnapshot(vehicle)
     -- Its export is pcall'd so a transient resource restart only makes this
     -- one HUD sample fall back to Fuel; the entire vehicle panel keeps working.
     local electricOk, electric = pcall(function()
-        return exports.kora_fuel:isElectricVehicle(vehicle)
+        return Kora.bridge.isElectricVehicle(vehicle)
     end)
 
     -- The native's BOOL* outputs reach Lua as integers (0/1), not booleans.
