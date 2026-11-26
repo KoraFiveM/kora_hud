@@ -43,7 +43,7 @@ Local client event fired by client/stress.lua whenever it just raised the player
 
 ```lua
 AddEventHandler('kora_hud:client:stressGained', function(newStress)
-    Kora.notify.send({ title = 'Stress', message = ('Stress is now %d%%'):format(newStress), type = 'info' })
+    Kora.bridge.sendNotify({ title = 'Stress', message = ('Stress is now %d%%'):format(newStress), type = 'info' })
 end)
 ```
 
